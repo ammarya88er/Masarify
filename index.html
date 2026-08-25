@@ -27,13 +27,13 @@
 html,body{background:var(--bg);margin:0;padding:0;}
 body{font-family:var(--f-body);color:var(--text);-webkit-font-smoothing:antialiased;}
 #app{background:var(--bg);min-height:100vh;min-height:100dvh;
-     padding-bottom:calc(100px + env(safe-area-inset-bottom));overflow-x:hidden;}
+     padding-bottom:calc(104px + (env(safe-area-inset-bottom) * 0.3));overflow-x:hidden;}
 h1,h2,h3,.disp{font-family:var(--f-disp);font-weight:600;letter-spacing:0;}
 .n{font-family:var(--f-num);font-variant-numeric:tabular-nums;direction:ltr;display:inline-block;}
 button{font-family:inherit;}
 
 /* ---------- الهيدر ---------- */
-header{padding:calc(20px + env(safe-area-inset-top)) 18px 0;
+header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
        display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .lbl{font-size:12px;color:var(--muted);font-weight:500;}
 .hero{font-family:var(--f-disp);font-size:42px;font-weight:700;line-height:1.05;margin-top:6px;}
@@ -163,7 +163,7 @@ input[type=date].f::-webkit-date-and-time-value{text-align:center;margin:0;}
 .steps{font-size:13px;color:#C6CDD6;line-height:2;padding-inline-start:18px;margin:10px 0 0;}
 
 /* ---------- النافبار ---------- */
-nav{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom));inset-inline:15px;
+nav{position:fixed;bottom:calc(14px + (env(safe-area-inset-bottom) * 0.3));inset-inline:15px;
   background:rgba(25,29,35,.94);backdrop-filter:blur(16px);border:1px solid var(--line);
   border-radius:24px;display:grid;grid-template-columns:repeat(5,1fr);padding:8px 6px;
   box-shadow:0 14px 36px rgba(0,0,0,.55);z-index:40;}
@@ -199,7 +199,7 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
 body.office{--accent:#6FD3B5;--on:#0B241D;}
 body.office .bookseg{border-color:#2E5147;}
 #printarea{display:none;}
-#toast{position:fixed;inset-inline:0;bottom:calc(86px + env(safe-area-inset-bottom));z-index:60;
+#toast{position:fixed;inset-inline:0;bottom:calc(90px + (env(safe-area-inset-bottom) * 0.3));z-index:60;
   display:flex;justify-content:center;pointer-events:none;opacity:0;transition:opacity .2s;}
 #toast.on{opacity:1;}
 #toast span{background:var(--accent);color:var(--on);font-size:13px;font-weight:600;
