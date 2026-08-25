@@ -360,7 +360,7 @@ let D=JSON.parse(JSON.stringify(DEFAULT));
 let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='';
 let openTxn=null, editAcct=null, payFor=null, payDate=today(), fixFor=null, convFor=null;
 let showIns=false, showCert=false, showSub=false;
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedPeople:[{name:'',amount:''}],vc:'pay',fee:'',to2:'cash'};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
@@ -374,13 +374,14 @@ let accCfg=null;
 function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''});}
 let certDraft={amount:'10000',rate:'19.5',start:today(),end:'',account:'bank'};
-let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,myShare:''};
+let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
 let catDraft='';
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
+let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
 let owedFor=null, owedAcct='', owedGot='';
 let ghPushTimer=null;
 
@@ -461,6 +462,7 @@ function normalizeData(){
       g.sort((a,b)=>a.ci-b.ci).forEach((x,i)=>{x.t._q=qs[i];});
     });
     D._qfix=1;
+    D._needSort=1;
   }
 }
 function save(){
@@ -621,7 +623,12 @@ function catchUp(){
 /* --- اشتراكات --- */
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
 const subCost=s=>s.cur==='USD'?Number(s.amount)*D.rate:Number(s.amount);
-const subMine=s=>(s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
+const subPeople=s=>(s.people&&s.people.length)?s.people:[];
+const subOthers=s=>subPeople(s).reduce((a,p)=>a+(Number(p.amount)||0),0);
+const subMine=s=>{
+  if(subPeople(s).length)return Math.max(0,Number(s.amount)-subOthers(s));
+  return (s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
+};
 const subMineCost=s=>s.cur==='USD'?subMine(s)*D.rate:subMine(s);
 const subShared=s=>subMine(s)<Number(s.amount)-0.001;
 const subLastPay=s=>(s.payments&&s.payments.length)?s.payments[s.payments.length-1]:null;
@@ -978,8 +985,8 @@ function alertsPanel(){
   if(book==='me')(D.subs||[]).forEach(s=>openDues(s).forEach(d=>rows.push(`
     <div class="alert">
       <span class="rail" style="background:var(--mint)"></span>
-      <span class="g"><span class="t">فلوس ليك · ${esc(s.name)}</span>
-        <span class="s" style="display:block">حصة الناس من دفعة ${dLabel(d.date)}</span></span>
+      <span class="g"><span class="t">فلوس ليك${d.who?' عند '+esc(d.who):''} · ${esc(s.name)}</span>
+        <span class="s" style="display:block">حصة دفعة ${dLabel(d.date)}</span></span>
       <span class="vl" style="color:var(--mint);white-space:nowrap">${money(d.amount,'EGP')}</span>
       <button class="chip sm" onclick="app.goSubs()">شوفها</button>
     </div>`)));
@@ -1186,10 +1193,15 @@ function vAdd(){
         <button class="chip sm${draft.owed?'':' on'}" onclick="app.setOwed(false)">لأ</button>
         <button class="chip sm${draft.owed?' on':''}" onclick="app.setOwed(true)">أيوه</button>
       </div>
-      ${draft.owed?`<label class="f">هيرجعلك كام؟</label>
-        <input class="f" type="text" inputmode="decimal" value="${esc(draft.owedAmt)}" oninput="app.dset('owedAmt',numFix(this,1))">
-        <label class="f">عند مين؟</label>
-        <input class="f" value="${esc(draft.owedWho)}" oninput="app.dset('owedWho',this.value)">`:''}
+      ${draft.owed?`
+        <label class="f">مين وكل واحد هيرجعلك كام؟</label>
+        ${(draft.owedPeople||[]).map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
+          <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.owedPerson(${i},'name',this.value)">
+          <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.owedPerson(${i},'amount',numFix(this,1))">
+          <button class="chip sm" style="padding:0" onclick="app.owedPersonDel(${i})">×</button>
+        </div>`).join('')}
+        <button class="btn ghost" style="margin-top:0" onclick="app.owedPersonAdd()">زوّد شخص</button>
+        <div class="hint">اللي عليك أنت هيطلع <span class="n">${fmt(Math.max(0,(Number(onlyNum(draft.amount))||0)-(draft.owedPeople||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> جنيه.</div>`:''}
     `:''}
 
     <label class="f">ملاحظة (اختياري)</label>
@@ -1565,7 +1577,7 @@ function wSubs(){
           <span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>
         </div>
         ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
-        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">نصيبك ${money(subMine(s),s.cur)} · الباقي على الناس</div>`:''}
+        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
         ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">آخر دفعة: ${dLabel(subLastPay(s).d)}</div>`:''}
         ${trial?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بعد التجربة: ${s.willRenew
           ?((s.afterCycle==='yearly'?'سنوي':'شهري')+' · '+money(s.amount,s.cur))
@@ -1575,11 +1587,50 @@ function wSubs(){
             <button class="chip sm" onclick="app.startConv('${s.id}')">${convFor===s.id?'إخفاء':'عدّل الخطة'}</button>`
             :subEnded(s)?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
             :`<button class="chip sm${subSoon(s)?' on':''}" onclick="app.paySub('${s.id}')">سجّل الدفع</button>
+              <button class="chip sm" onclick="app.startSubEdit('${s.id}')">${editSub===s.id?'إخفاء':'عدّل'}</button>
               <button class="chip sm" onclick="app.skipSub('${s.id}')">أجّل دورة</button>
               ${s.cancelAtEnd?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
                              :`<button class="chip sm" onclick="app.cancelEnd('${s.id}')">وقف التجديد</button>`}`}
           ${delBtn('sub'+s.id,`app.delSub('${s.id}')`)}
         </div>
+        ${editSub===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+          <label class="f">اسم الاشتراك</label>
+          <input class="f" value="${esc(sDraft.name)}" oninput="app.sdSet('name',this.value)">
+
+          <label class="f">القيمة</label>
+          <input class="f" type="text" inputmode="decimal" value="${esc(sDraft.amount)}" oninput="app.sdSet('amount',numFix(this,1))">
+          <div class="chips" style="margin-top:10px">
+            <button class="chip sm${sDraft.cur==='EGP'?' on':''}" onclick="app.sdPick('cur','EGP')">بالجنيه</button>
+            <button class="chip sm${sDraft.cur==='USD'?' on':''}" onclick="app.sdPick('cur','USD')">بالدولار</button>
+          </div>
+
+          <label class="f">الدورة</label>
+          <div class="chips">
+            <button class="chip sm${sDraft.cycle==='monthly'?' on':''}" onclick="app.sdPick('cycle','monthly')">شهري</button>
+            <button class="chip sm${sDraft.cycle==='yearly'?' on':''}" onclick="app.sdPick('cycle','yearly')">سنوي</button>
+          </div>
+
+          <label class="f">الخصم الجاي</label>
+          <input class="f" type="date" value="${sDraft.next}" onchange="app.sdPick('next',this.value)">
+
+          <label class="f">متقسم مع ناس؟</label>
+          <div class="chips">
+            <button class="chip sm${sDraft.split?'':' on'}" onclick="app.sdPick('split',false)">لأ، كله عليا</button>
+            <button class="chip sm${sDraft.split?' on':''}" onclick="app.sdPick('split',true)">أيوه</button>
+          </div>
+          ${sDraft.split?`
+            <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
+            ${sDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
+              <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.sdPerson(${i},'name',this.value)">
+              <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.sdPerson(${i},'amount',numFix(this,1))">
+              <button class="chip sm" style="padding:0" onclick="app.sdPersonDel(${i})">×</button>
+            </div>`).join('')}
+            <button class="btn ghost" style="margin-top:0" onclick="app.sdPersonAdd()">زوّد شخص</button>
+            <div class="hint">نصيبك هيطلع <span class="n">${fmt(Math.max(0,(Number(onlyNum(sDraft.amount))||0)-sDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> ${sDraft.cur==='USD'?'دولار':'جنيه'}.</div>`:''}
+
+          <button class="btn" onclick="app.saveSubEdit('${s.id}')">احفظ التعديل</button>
+          <button class="btn ghost" onclick="app.cancelSubEdit()">إلغاء</button>
+        </div>`:''}
         ${paySubFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
           <label class="f">دفعته إمتى؟</label>
           ${dateField(paySubDate,'app.setPaySubDate')}
@@ -1588,7 +1639,7 @@ function wSubs(){
         </div>`:''}
         ${openDues(s).map(d=>`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px">
-            <span>فلوس ليك عند الناس · دفعة ${dLabel(d.date)}</span>
+            <span>فلوس ليك${d.who?' عند '+esc(d.who):' عند الناس'} · دفعة ${dLabel(d.date)}</span>
             <span class="n" style="color:var(--mint);font-weight:600">${fmt(d.amount)}</span>
           </div>
           ${dueFor===d.id?`
@@ -1652,9 +1703,15 @@ function wSubs(){
         <button class="chip sm${subDraft.split?'':' on'}" onclick="app.subPick('split',false)">لأ، كله عليا</button>
         <button class="chip sm${subDraft.split?' on':''}" onclick="app.subPick('split',true)">أيوه</button>
       </div>
-      ${subDraft.split?`<label class="f">نصيبي أنا</label>
-        <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.myShare)}" oninput="app.subSet('myShare',numFix(this,1))">
-        <div class="hint">هيتخصم المبلغ كله من الكارت، والفرق هيتسجل كفلوس ليك عند الناس.</div>`:''}
+      ${subDraft.split?`
+        <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
+        ${subDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
+          <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.personSet(${i},'name',this.value)">
+          <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.personSet(${i},'amount',numFix(this,1))">
+          <button class="chip sm" style="padding:0" onclick="app.personDel(${i})">×</button>
+        </div>`).join('')}
+        <button class="btn ghost" style="margin-top:0" onclick="app.personAdd()">زوّد شخص</button>
+        <div class="hint">نصيبك أنت هيطلع <span class="n">${fmt(Math.max(0,(Number(onlyNum(subDraft.amount))||0)-subDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> ${subDraft.cur==='USD'?'دولار':'جنيه'} — المبلغ كله هيتخصم من الكارت وكل واحد هيتسجل عليه نصيبه.</div>`:''}
       `:''}
 
       <label class="f">${subDraft.cycle==='trial'?'التجربة بتنتهي إمتى؟':'الخصم الجاي إمتى؟'}</label>
@@ -2134,7 +2191,10 @@ const app={
   setTo(id){draft.to=id;render();},
   setCat(id){draft.cat=id;render();},
   setSalary(v){draft.salary=v;render();},
-  setOwed(v){draft.owed=v;if(!v){draft.owedAmt='';draft.owedWho='';}render();},
+  setOwed(v){draft.owed=v;if(!v||!draft.owedPeople)draft.owedPeople=[{name:'',amount:''}];render();},
+  owedPerson(i,k,v){if(!draft.owedPeople)draft.owedPeople=[{name:'',amount:''}];if(draft.owedPeople[i])draft.owedPeople[i][k]=v;},
+  owedPersonAdd(){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.push({name:'',amount:''});render();},
+  owedPersonDel(i){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.splice(i,1);if(!draft.owedPeople.length)draft.owedPeople.push({name:'',amount:''});render();},
   setVc(m){draft.vc=m;render();},
   setTo2(id){draft.to2=id;render();},
   startOwedGet(id){owedFor=id;const o=(D.owed||[]).find(x=>x.id===id);owedAcct='';owedGot=o?String(o.amount):'';render();},
@@ -2162,7 +2222,7 @@ const app={
       if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
         account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
       sortTxns();save();
-      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedPeople:[{name:'',amount:''}],vc:'pay',fee:'',to2:'cash'};
       render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
     }
     const usd=draft.cur==='USD'?amt:0;
@@ -2174,13 +2234,15 @@ const app={
       pending:usd?true:undefined,voucher:vch||undefined,
       salary:(draft.kind==='income'&&draft.salary)?true:undefined});
     if(draft.kind==='expense'&&draft.owed){
-      const ow=Number(onlyNum(draft.owedAmt))||0;
-      if(ow>0){if(!D.owed)D.owed=[];
-        D.owed.push({id:uid(),amount:ow,who:draft.owedWho.trim(),date:draft.date,
-          note:draft.note||catOf(draft.cat).label,got:false});}
+      if(!D.owed)D.owed=[];
+      (draft.owedPeople||[]).forEach(p=>{
+        const ow=Number(onlyNum(p.amount))||0;
+        if(ow>0)D.owed.push({id:uid(),amount:ow,who:String(p.name||'').trim(),date:draft.date,
+          note:draft.note||catOf(draft.cat).label,got:false});
+      });
     }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedPeople:[{name:'',amount:''}],vc:'pay',fee:'',to2:'cash'};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   startFix(id){fixFor=id;render();},
@@ -2408,6 +2470,9 @@ const app={
   goSubs(){tab='wallet';wtab='subs';render();window.scrollTo(0,0);},
   toggleSub(){showSub=!showSub;render();},
   subSet(k,v){subDraft[k]=v;setDisabled('subsave',subOk());},
+  personSet(i,k,v){if(subDraft.people[i])subDraft.people[i][k]=v;},
+  personAdd(){subDraft.people.push({name:'',amount:''});render();},
+  personDel(i){subDraft.people.splice(i,1);if(!subDraft.people.length)subDraft.people.push({name:'',amount:''});render();},
   subPick(k,v){subDraft[k]=v;render();},
   subAccount(id){subDraft.account=id;if(id!=='card')subDraft.cur='EGP';render();},
   addSub(){
@@ -2415,10 +2480,13 @@ const app={
       amount:(subDraft.cycle==='trial'&&!subDraft.willRenew)?0:Number(onlyNum(subDraft.amount))||0,
       cur:subDraft.cur,cycle:subDraft.cycle,next:subDraft.next,
       account:'card',cat:'subs',cancelAtEnd:false,payments:[],dues:[],
-      myShare:(subDraft.cycle!=='trial'&&subDraft.split&&Number(onlyNum(subDraft.myShare))>0)?Number(onlyNum(subDraft.myShare)):null,
+      people:(subDraft.cycle!=='trial'&&subDraft.split)
+        ?subDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:p.name.trim()||'حد',amount:Number(onlyNum(p.amount))}))
+        :[],
+      myShare:null,
       willRenew:subDraft.cycle==='trial'?!!subDraft.willRenew:undefined,
       afterCycle:subDraft.cycle==='trial'?subDraft.afterCycle:undefined});
-    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,myShare:''};
+    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,people:[{name:'',amount:''}]};
     showSub=false;save();render();
   },
   paySub(id){
@@ -2426,6 +2494,33 @@ const app={
     paySubFor=id;paySubDate=s.next<=today()?s.next:today();
     tab='wallet';wtab='subs';render();
     setTimeout(()=>{const el=document.getElementById('sub-'+id);if(el)el.scrollIntoView({block:'center'});},60);
+  },
+  startSubEdit(id){
+    if(editSub===id){editSub=null;render();return;}
+    const s=D.subs.find(x=>x.id===id);if(!s)return;
+    const ppl=(s.people&&s.people.length)?s.people.map(p=>({name:p.name,amount:String(p.amount)})):[{name:'',amount:''}];
+    sDraft={name:s.name,amount:String(s.amount||''),cur:s.cur||'EGP',cycle:s.cycle==='yearly'?'yearly':'monthly',
+      next:s.next,split:!!(s.people&&s.people.length),people:ppl};
+    editSub=id;paySubFor=null;render();
+  },
+  cancelSubEdit(){editSub=null;render();},
+  sdSet(k,v){sDraft[k]=v;},
+  sdPick(k,v){sDraft[k]=v;render();},
+  sdPerson(i,k,v){if(sDraft.people[i])sDraft.people[i][k]=v;},
+  sdPersonAdd(){sDraft.people.push({name:'',amount:''});render();},
+  sdPersonDel(i){sDraft.people.splice(i,1);if(!sDraft.people.length)sDraft.people.push({name:'',amount:''});render();},
+  saveSubEdit(id){
+    const s=D.subs.find(x=>x.id===id);if(!s)return;
+    const nm=String(sDraft.name||'').trim();
+    if(nm)s.name=nm;
+    const amt=Number(onlyNum(sDraft.amount))||0;
+    if(amt>0)s.amount=amt;
+    s.cur=sDraft.cur;s.cycle=sDraft.cycle;s.next=sDraft.next||s.next;
+    s.people=sDraft.split
+      ?sDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:String(p.name||'').trim()||'حد',amount:Number(onlyNum(p.amount))}))
+      :[];
+    s.myShare=null;
+    editSub=null;save();render();app.toast('اتعدل');
   },
   setPaySubDate(v){paySubDate=v;render();},
   cancelPaySub(){paySubFor=null;render();},
@@ -2440,9 +2535,18 @@ const app={
     if(!s.payments)s.payments=[];
     s.payments.push({d:paySubDate,t:t.id});
     if(subShared(s)){
-      const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
-      const owed=Math.round((full-mineEgp)*100)/100;
-      if(owed>0.01){if(!s.dues)s.dues=[];s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false});}
+      if(!s.dues)s.dues=[];
+      const ppl=subPeople(s);
+      if(ppl.length){
+        ppl.forEach(p=>{
+          const amt=usd?Math.round(Number(p.amount)*D.rate*100)/100:Number(p.amount);
+          if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:paySubDate,got:false});
+        });
+      }else{
+        const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
+        const owed=Math.round((full-mineEgp)*100)/100;
+        if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false});
+      }
     }
     s.next=dAdd(s.next,s.cycle==='yearly'?12:1);
     paySubFor=null;sortTxns();save();render();app.toast('اتسجلت');
@@ -2454,7 +2558,7 @@ const app={
     const s=D.subs.find(x=>x.id===subId);if(!s)return;
     const d=(s.dues||[]).find(x=>x.id===dueId);if(!d||!dueAcct)return;
     const t={id:uid(),book:'me',kind:'income',amount:d.amount,account:dueAcct,
-      date:today(),note:'حصة الناس في '+s.name};
+      date:today(),note:(d.who?'حصة '+d.who:'حصة الناس')+' في '+s.name};
     D.txns.unshift(t);
     d.got=true;d.gotOn=today();d.txn=t.id;
     dueFor=null;dueAcct='';sortTxns();save();render();app.toast('اتسجلت');
@@ -2669,6 +2773,8 @@ if('serviceWorker' in navigator){
   window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});
 }
 load();
+sortTxns();
+if(D._needSort){delete D._needSort;save();}
 if(ghToken&&ghGist){ghLastPull=Date.now();ghReconcile();}
 if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden)ghMaybePull();});
 (function(){
