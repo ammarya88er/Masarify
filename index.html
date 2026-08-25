@@ -27,7 +27,7 @@
 html,body{background:var(--bg);margin:0;padding:0;}
 body{font-family:var(--f-body);color:var(--text);-webkit-font-smoothing:antialiased;}
 #app{background:var(--bg);min-height:100vh;min-height:100dvh;
-     padding-bottom:calc(104px + env(safe-area-inset-bottom));overflow-x:hidden;}
+     padding-bottom:calc(100px + env(safe-area-inset-bottom));overflow-x:hidden;}
 h1,h2,h3,.disp{font-family:var(--f-disp);font-weight:600;letter-spacing:0;}
 .n{font-family:var(--f-num);font-variant-numeric:tabular-nums;direction:ltr;display:inline-block;}
 button{font-family:inherit;}
@@ -163,7 +163,7 @@ input[type=date].f::-webkit-date-and-time-value{text-align:center;margin:0;}
 .steps{font-size:13px;color:#C6CDD6;line-height:2;padding-inline-start:18px;margin:10px 0 0;}
 
 /* ---------- النافبار ---------- */
-nav{position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));inset-inline:16px;
+nav{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom));inset-inline:15px;
   background:rgba(25,29,35,.94);backdrop-filter:blur(16px);border:1px solid var(--line);
   border-radius:24px;display:grid;grid-template-columns:repeat(5,1fr);padding:8px 6px;
   box-shadow:0 14px 36px rgba(0,0,0,.55);z-index:40;}
@@ -199,7 +199,7 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
 body.office{--accent:#6FD3B5;--on:#0B241D;}
 body.office .bookseg{border-color:#2E5147;}
 #printarea{display:none;}
-#toast{position:fixed;inset-inline:0;bottom:calc(92px + env(safe-area-inset-bottom));z-index:60;
+#toast{position:fixed;inset-inline:0;bottom:calc(86px + env(safe-area-inset-bottom));z-index:60;
   display:flex;justify-content:center;pointer-events:none;opacity:0;transition:opacity .2s;}
 #toast.on{opacity:1;}
 #toast span{background:var(--accent);color:var(--on);font-size:13px;font-weight:600;
@@ -281,6 +281,7 @@ const DEF_CATS=[
  {id:'eatout',label:'أكل من بره',color:'#F58F52'},
  {id:'health',label:'صحة ودوا',color:'#5BD0C4'},
  {id:'bills',label:'فواتير',color:'#B7A88F'},
+ {id:'fees',label:'عمولات ورسوم',color:'#C4A484'},
  {id:'devices',label:'أجهزة وأثاث',color:'#7FD1E8'},
  {id:'repair',label:'صيانة وإصلاح',color:'#D9A0F0'},
  {id:'installment',label:'قسط',color:'#5C86C4'},
@@ -331,6 +332,10 @@ const yesterday=()=>{const d=new Date();d.setDate(d.getDate()-1);return d.toISOS
 const monthOf=d=>(d||'').slice(0,7);
 const mLabel=m=>{const p=m.split('-');return MONTHS[Number(p[1])-1]+' '+p[0];};
 const dayLabel=d=>{const p=d.split('-');return Number(p[2])+' '+MONTHS[Number(p[1])-1]+' '+p[0];};
+const localDay=iso=>{const d=new Date(iso);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
+const localTime=iso=>{const d=new Date(iso);let hh=d.getHours();const ap=hh<12?'ص':'م';
+  hh=hh%12; if(hh===0)hh=12;
+  return hh+':'+pad(d.getMinutes())+' '+ap;};
 const dLabel=d=>{if(d===today())return 'النهارده';if(d===yesterday())return 'إمبارح';
   const p=d.split('-');return Number(p[2])+' '+MONTHS[Number(p[1])-1];};
 const mAdd=(m,n)=>{const p=m.split('-');const d=new Date(Number(p[0]),Number(p[1])-1+n,1);
@@ -355,12 +360,13 @@ let D=JSON.parse(JSON.stringify(DEFAULT));
 let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='';
 let openTxn=null, editAcct=null, payFor=null, payDate=today(), fixFor=null, convFor=null;
 let showIns=false, showCert=false, showSub=false;
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:''};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',monthly:'',months:'',paid:'0',day:'1',account:''};
-let accDraft={name:'',credit:false,limit:''};
+let accDraft={name:'',credit:false,limit:'',sec:false,secured:[],
+  secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
 let payCard={id:null,mode:'full',amount:'',from:'bank',date:today()};
 let eTxn=null;
 let fMonth='', fCat='', fAcct='';
@@ -368,12 +374,14 @@ let accCfg=null;
 function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''});}
 let certDraft={amount:'10000',rate:'19.5',start:today(),end:'',account:'bank'};
-let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly'};
+let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,myShare:''};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
 let catDraft='';
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
-let ghState={busy:false,msg:''}, showGhHelp=false;
+let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
+let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
+let owedFor=null, owedAcct='', owedGot='';
 let ghPushTimer=null;
 
 function load(){
@@ -387,6 +395,11 @@ function normalizeData(){
   if(!D.accounts.some(a=>a.id==='vcash'))D.accounts.push({id:'vcash',name:'فودافون كاش',opening:0});
   if(!D.installments)D.installments=[];
   if(!D.subs)D.subs=[];
+  D.subs.forEach(s=>{
+    if(!s.payments)s.payments=[];
+    if(!s.dues)s.dues=[];
+    if(s.myShare===undefined)s.myShare=null;
+  });
   if(!D.vouchers)D.vouchers=[];
   if(!D.cardDigits)D.cardDigits='402977';
   if(!D.phone)D.phone='01015606989';
@@ -402,6 +415,10 @@ function normalizeData(){
   if(!D.cats.some(c=>c.id==='devices')){
     const i=D.cats.findIndex(c=>c.id==='bills');
     D.cats.splice(i>-1?i+1:D.cats.length,0,{id:'devices',label:'أجهزة وأثاث',color:'#7FD1E8'});
+  }
+  if(!D.cats.some(c=>c.id==='fees')){
+    const i=D.cats.findIndex(c=>c.id==='bills');
+    D.cats.splice(i>-1?i+1:D.cats.length,0,{id:'fees',label:'عمولات ورسوم',color:'#C4A484'});
   }
   if(!D.cats.some(c=>c.id==='repair')){
     const i=D.cats.findIndex(c=>c.id==='devices');
@@ -420,19 +437,31 @@ function normalizeData(){
   if(!D.accounts.some(a=>a.id==='ocash'))D.accounts.push({id:'ocash',name:'كاش المكتب',opening:0,scope:'office'});
   D.accounts.forEach(a=>{if(!a.scope)a.scope=(a.id==='bank'?'both':a.id==='ocash'?'office':'me');});
   D.txns.forEach(t=>{if(!t.book)t.book='me';});
-  if(!D.certs){
-    D.certs=[['2026-07-13','2029-07-15'],['2026-07-13','2029-07-15'],['2026-07-15','2029-07-15'],
-             ['2026-08-10','2029-08-12'],['2026-08-10','2029-08-12']]
-      .map((s,i)=>mkCert('شهادة '+(i+1),10000,19.5,s[0],'bank',s[1]));
-  }
-  D.certs.forEach(c=>{if(!c.end)c.end=(monthOf(c.start)==='2026-07')?'2029-07-15':'2029-08-12';});
-  const card=D.accounts.find(a=>a.id==='card');
-  if(card){if(!Number(card.opening))card.opening=42000;
-           if(card.limit===undefined)card.limit=Number(card.opening)||42000;
-           if(card.credit===undefined)card.credit=true;}
-  D.accounts.forEach(a=>{if(Number(a.limit)>0&&a.credit===undefined)a.credit=true;
-    if(!a.credit)a.limit=0;});
+  if(!D.certs)D.certs=[];
+  D.accounts.forEach(a=>{
+    if(a.credit===undefined)a.credit=Number(a.limit)>0;
+    if(!a.credit)a.limit=0;
+    if(!a.secured)a.secured=[];
+  });
+  if(!D.owed)D.owed=[];
   if(D.ghLastSync===undefined)D.ghLastSync='';
+  if(!D._qfix){
+    stampQ();
+    const byDate={};
+    D.txns.forEach(t=>{
+      if(t.kind!=='income'||!t.note||t.note.indexOf(' — فايدة')<0)return;
+      const ci=(D.certs||[]).findIndex(c=>t.note===c.name+' — فايدة');
+      if(ci<0)return;
+      (byDate[t.date]=byDate[t.date]||[]).push({t:t,ci:ci});
+    });
+    Object.keys(byDate).forEach(d=>{
+      const g=byDate[d];
+      if(g.length<2)return;
+      const qs=g.map(x=>x.t._q).sort((a,b)=>a-b);
+      g.sort((a,b)=>a.ci-b.ci).forEach((x,i)=>{x.t._q=qs[i];});
+    });
+    D._qfix=1;
+  }
 }
 function save(){
   D._sv=Date.now();
@@ -449,11 +478,44 @@ const catOf=id=>(D.cats||DEF_CATS).find(c=>c.id===id)||{id:'other',label:'حاج
 const aColor=id=>{if(BRAND[id])return BRAND[id];
   const i=D.accounts.findIndex(a=>a.id===id);return ACOLORS[(i<0?0:i)%ACOLORS.length];};
 const accName=id=>{const a=D.accounts.find(x=>x.id===id);return a?a.name:'—';};
-const sortTxns=()=>D.txns.sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0);
+const shortDay=d=>{const p=d.split('-');return Number(p[2])+' '+MONTHS[Number(p[1])-1];};
+function salaryPeriods(){
+  const s=[...new Set(D.txns.filter(t=>(t.book||'me')==='me'&&t.kind==='income'&&t.salary).map(t=>t.date))].sort();
+  if(!s.length)return null;
+  const out=[];
+  for(let i=s.length-1;i>=0;i--){
+    const from=s[i];
+    const to=(i+1<s.length)?dayShift(s[i+1],-1):'9999-12-31';
+    out.push({key:from,from:from,to:to,label:'من '+shortDay(from)});
+  }
+  return out;
+}
+const securedCerts=a=>(D.certs||[]).filter(c=>(a.secured||[]).indexOf(c.id)>-1);
+const securedTotal=a=>securedCerts(a).reduce((x,c)=>x+(Number(c.amount)||0),0);
+const certAccounts=cid=>D.accounts.filter(a=>(a.secured||[]).indexOf(cid)>-1);
+const certHeldBy=(cid,exceptId)=>{
+  const a=D.accounts.find(x=>x.id!==exceptId&&(x.secured||[]).indexOf(cid)>-1);
+  return a?a.name:'';
+};
+const openOwed=()=>(D.owed||[]).filter(o=>!o.got);
+function stampQ(){
+  if(!D._qmax)D._qmax=0;
+  for(let i=D.txns.length-1;i>=0;i--){
+    if(D.txns[i]._q===undefined)D.txns[i]._q=++D._qmax;
+    else if(D.txns[i]._q>D._qmax)D._qmax=D.txns[i]._q;
+  }
+}
+function sortTxns(){
+  stampQ();
+  return D.txns.sort((a,b)=>{
+    if(a.date!==b.date)return a.date<b.date?1:-1;
+    return (b._q||0)-(a._q||0);
+  });
+}
 
 function balances(bk){
   bk=bk||book;
-  const m={};D.accounts.forEach(a=>m[a.id]=(bk==='me'?(Number(a.opening)||0):0));
+  const m={};D.accounts.forEach(a=>m[a.id]=(bk==='me'?(Number(a.opening)||0):(Number(a.openingOffice)||0)));
   D.txns.filter(t=>(t.book||'me')===bk).forEach(t=>{const v=Number(t.amount)||0;
     if(t.kind==='expense')m[t.account]=(m[t.account]||0)-v;
     else if(t.kind==='income'||t.kind==='float')m[t.account]=(m[t.account]||0)+v;
@@ -472,7 +534,8 @@ function officeReport(from,to){
   const off=D.txns.filter(t=>t.book==='office');
   const sign=t=>{const v=Number(t.amount)||0;
     return t.kind==='expense'?-v:(t.kind==='income'||t.kind==='float')?v:t.kind==='settle'?(t.dir==='in'?v:-v):0;};
-  const opening=off.filter(t=>t.date<from).reduce((a,t)=>a+sign(t),0);
+  const base=D.accounts.reduce((x,a)=>x+(Number(a.openingOffice)||0),0);
+  const opening=base+off.filter(t=>t.date<from).reduce((a,t)=>a+sign(t),0);
   const floats=off.filter(t=>t.kind==='float'&&t.date>=from&&t.date<=to)
                   .sort((a,b)=>a.date<b.date?-1:1);
   const exp=off.filter(t=>t.kind==='expense'&&t.date>=from&&t.date<=to);
@@ -543,8 +606,8 @@ function catchUp(){
       const d=certNext(c);
       if(d>today())break;
       if(c.end&&d>c.end)break;
-      const t={id:uid(),kind:'income',amount:Number(c.monthly),account:c.account,date:d,note:c.name+' — فايدة'};
-      D.txns.push(t);
+      const t={id:uid(),book:'me',kind:'income',amount:Number(c.monthly),account:c.account,date:d,note:c.name+' — فايدة'};
+      D.txns.unshift(t);
       c.covered=monthOf(d);
       if(!c.payments)c.payments=[];
       c.payments.push({d:d,t:t.id});
@@ -558,9 +621,14 @@ function catchUp(){
 /* --- اشتراكات --- */
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
 const subCost=s=>s.cur==='USD'?Number(s.amount)*D.rate:Number(s.amount);
+const subMine=s=>(s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
+const subMineCost=s=>s.cur==='USD'?subMine(s)*D.rate:subMine(s);
+const subShared=s=>subMine(s)<Number(s.amount)-0.001;
+const subLastPay=s=>(s.payments&&s.payments.length)?s.payments[s.payments.length-1]:null;
+const openDues=s=>(s.dues||[]).filter(d=>!d.got);
 const subEnded=s=>!!s.cancelAtEnd&&daysTo(s.next)<=0;
 const subSoon=s=>subEnded(s)?false:(s.cycle==='trial'?daysTo(s.next)<=14:(!s.cancelAtEnd&&daysTo(s.next)<=5));
-const yearly=s=>(s.cycle==='trial'||subEnded(s))?0:(s.cycle==='yearly'?subCost(s):subCost(s)*12);
+const yearly=s=>(s.cycle==='trial'||subEnded(s))?0:(s.cycle==='yearly'?subMineCost(s):subMineCost(s)*12);
 
 /* ==========================================================================
    4ب) المزامنة عبر GitHub Gist
@@ -601,6 +669,14 @@ function ghErrMsg(err){
   if(err&&err.status===403)return 'حصل تجاوز لحد الطلبات، جرب تاني بعد شوية.';
   if(err&&err.status)return 'حصل خطأ من GitHub (كود '+err.status+').';
   return 'مقدرتش أوصل لـ GitHub. اتأكد إن عندك إنترنت.';
+}
+let ghLastPull=0;
+function ghMaybePull(){
+  if(!ghToken||!ghGist)return;
+  const now=Date.now();
+  if(now-ghLastPull<60000)return;
+  ghLastPull=now;
+  ghReconcile();
 }
 function scheduleGhPush(){
   if(!ghToken||!ghGist)return;
@@ -766,8 +842,19 @@ function vHome(){
   if(book==='office')return vHomeOffice();
   const b=balances();
   const mine=D.txns.filter(t=>(t.book||'me')==='me');
-  const ms=[...new Set(mine.map(t=>monthOf(t.date)).concat([monthOf(today())]))].filter(Boolean).sort().reverse();
-  const mt=mine.filter(t=>monthOf(t.date)===month);
+  const pers=salaryPeriods();
+  let mt,pills,periodNote='';
+  if(pers){
+    let cur=pers.find(p=>p.key===month)||pers[0];
+    mt=mine.filter(t=>t.date>=cur.from&&t.date<=cur.to);
+    pills=pers.slice(0,12).map(p=>`<button class="mpill${p.key===cur.key?' on':''}" onclick="app.setMonth('${p.key}')">${p.label}</button>`).join('');
+    periodNote=cur.to==='9999-12-31'?('من '+shortDay(cur.from)+' لحد دلوقتي'):('من '+shortDay(cur.from)+' لـ '+shortDay(cur.to));
+  }else{
+    const ms=[...new Set(mine.map(t=>monthOf(t.date)).concat([monthOf(today())]))].filter(Boolean).sort().reverse();
+    mt=mine.filter(t=>monthOf(t.date)===month);
+    pills=ms.map(x=>`<button class="mpill${x===month?' on':''}" onclick="app.setMonth('${x}')">${mLabel(x)}</button>`).join('');
+    periodNote='سجّل مرتبك عشان الشهر يبدأ من يوم القبض';
+  }
   const spent=mt.filter(t=>t.kind==='expense').reduce((a,t)=>a+Number(t.amount),0);
   const earned=mt.filter(t=>t.kind==='income').reduce((a,t)=>a+Number(t.amount),0);
   const m={};
@@ -785,8 +872,8 @@ function vHome(){
   </div>
 
   <div class="sec">
-    <div class="sec-h"><h3>حركة الشهر</h3></div>
-    <div class="mpills">${ms.map(x=>`<button class="mpill${x===month?' on':''}" onclick="app.setMonth('${x}')">${mLabel(x)}</button>`).join('')}</div>
+    <div class="sec-h"><h3>حركة الشهر</h3><span>${esc(periodNote)}</span></div>
+    <div class="mpills">${pills}</div>
     <div class="stats" style="margin-top:14px">
       <div class="stat"><b style="color:var(--clay)">${fmt(spent)}</b><span>صرفت</span></div>
       <div class="stat"><b style="color:var(--mint)">${fmt(earned)}</b><span>دخل</span></div>
@@ -869,6 +956,34 @@ function alertsPanel(){
         <button class="chip sm" onclick="app.goAccounts()">شوفه</button>
       </div>`);});})();
 
+  if(book==='me')openOwed().forEach(o=>rows.push(`
+    <div class="alert">
+      <span class="rail" style="background:var(--mint)"></span>
+      <span class="g"><span class="t">فلوس ليك${o.who?' عند '+esc(o.who):''}</span>
+        <span class="s" style="display:block">${esc(o.note||'')} · ${dLabel(o.date)}</span></span>
+      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(o.amount,'EGP')}</span>
+      <button class="chip sm" onclick="app.startOwedGet('${o.id}')">استلمت</button>
+    </div>
+    ${owedFor===o.id?`<div class="inline">
+      <label class="f">دخلت على أنهي حساب؟ <b>*</b></label>
+      ${payChips(owedAcct,'app.setOwedAcct','','me')}
+      <label class="f">وصلك كام بالظبط؟</label>
+      <input class="f" type="text" inputmode="decimal" value="${o.amount}" oninput="app.setOwedGot(numFix(this,1))">
+      <div class="hint">لو قرّب الرقم أو نقّص، اكتب اللي وصل فعلًا.</div>
+      <button class="btn" ${owedAcct?'':'disabled'} onclick="app.confirmOwedGet('${o.id}')">أكد الاستلام</button>
+      <button class="btn ghost" onclick="app.dropOwed('${o.id}')">شيلها خالص</button>
+      <button class="btn ghost" onclick="app.cancelOwedGet()">إلغاء</button>
+    </div>`:''}`));
+
+  if(book==='me')(D.subs||[]).forEach(s=>openDues(s).forEach(d=>rows.push(`
+    <div class="alert">
+      <span class="rail" style="background:var(--mint)"></span>
+      <span class="g"><span class="t">فلوس ليك · ${esc(s.name)}</span>
+        <span class="s" style="display:block">حصة الناس من دفعة ${dLabel(d.date)}</span></span>
+      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(d.amount,'EGP')}</span>
+      <button class="chip sm" onclick="app.goSubs()">شوفها</button>
+    </div>`)));
+
   if(book==='me'&&(!D.lastBackup||daysTo(D.lastBackup)<-30))rows.push(`
     <div class="alert">
       <span class="rail" style="background:#8FA0C4"></span>
@@ -911,6 +1026,8 @@ function txnRow(t){
 }
 
 function entryOk(){const k=draft.kind;
+  if(k==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw')
+    return !!(Number(onlyNum(draft.amount))>0&&draft.to2&&draft.to2!=='vcash');
   return !!(Number(onlyNum(draft.amount))>0&&draft.account&&(k!=='expense'||draft.cat)&&(k!=='transfer'||(draft.to&&draft.to!==draft.account)));}
 function subOk(){
   if(!subDraft.name.trim()||!subDraft.next)return false;
@@ -1027,6 +1144,19 @@ function vAdd(){
     <label class="f">${k==='income'?'يتضاف على أنهي حساب؟':k==='transfer'?'من أنهي حساب؟':'دافع من إيه؟'} <b>*</b></label>
     ${payChips(draft.account,'app.setAccount')}
 
+    ${draft.account==='vcash'&&k==='expense'?`<label class="f">العملية دي إيه؟</label>
+      <div class="chips">
+        <button class="chip sm${draft.vc==='pay'?' on':''}" onclick="app.setVc('pay')">دفعت حاجة</button>
+        <button class="chip sm${draft.vc==='withdraw'?' on':''}" onclick="app.setVc('withdraw')">سحبت من المكنة</button>
+      </div>
+      ${draft.vc==='withdraw'?`
+        <label class="f">الكاش راح فين؟</label>
+        ${payChips(draft.to2,'app.setTo2','vcash','me')}
+        <label class="f">عمولة السحب</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(draft.fee)}" oninput="app.dset('fee',numFix(this,1))">
+        <div class="hint">المبلغ هيتحول من فودافون كاش للحساب اللي اخترته، والعمولة هتتسجل مصروف في «عمولات ورسوم».</div>`:''}
+    `:''}
+
     ${draft.account==='card'&&k!=='transfer'?`<label class="f">العملة</label>
       <div class="chips">
         <button class="chip sm${draft.cur==='EGP'?' on':''}" onclick="app.setCur('EGP')">بالجنيه</button>
@@ -1035,13 +1165,32 @@ function vAdd(){
 
     ${k==='transfer'?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account)}`:''}
 
-    <div id="vchbox">${k==='expense'&&draft.cur==='EGP'?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
+    ${k==='income'?`<label class="f">نوع الدخل</label>
+      <div class="chips">
+        <button class="chip sm${draft.salary?' on':''}" onclick="app.setSalary(true)">مرتب</button>
+        <button class="chip sm${draft.salary?'':' on'}" onclick="app.setSalary(false)">دخل تاني</button>
+      </div>
+      ${draft.salary?'<div class="hint">شهرك المالي بيبدأ من يوم المرتب ده لحد المرتب اللي بعده.</div>':''}`:''}
 
-    ${k==='expense'?`<label class="f">التصنيف <b>*</b></label>
+    <div id="vchbox">${(k==='expense'&&draft.cur==='EGP'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
+
+    ${(k==='expense'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`<label class="f">التصنيف <b>*</b></label>
       <div class="chips">${D.cats.map(c=>`<button class="chip${draft.cat===c.id?' on':''}" onclick="app.setCat('${c.id}')">${c.label}</button>`).join('')}</div>`:''}
 
     <label class="f">التاريخ</label>
     ${dateField(draft.date,'app.setDate')}
+
+    ${(k==='expense'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
+      <label class="f">دي ليك عند حد؟</label>
+      <div class="chips">
+        <button class="chip sm${draft.owed?'':' on'}" onclick="app.setOwed(false)">لأ</button>
+        <button class="chip sm${draft.owed?' on':''}" onclick="app.setOwed(true)">أيوه</button>
+      </div>
+      ${draft.owed?`<label class="f">هيرجعلك كام؟</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(draft.owedAmt)}" oninput="app.dset('owedAmt',numFix(this,1))">
+        <label class="f">عند مين؟</label>
+        <input class="f" value="${esc(draft.owedWho)}" oninput="app.dset('owedWho',this.value)">`:''}
+    `:''}
 
     <label class="f">ملاحظة (اختياري)</label>
     <input class="f" value="${esc(draft.note)}" oninput="app.dset('note',this.value)">
@@ -1127,9 +1276,18 @@ function vWallet(){
 function wOAccounts(){
   const b=balances('office');
   return `<div style="margin-top:18px">
-    <div class="panel">${accountsFor('office').map(a=>acctRow(a,b)).join('')}
+    <div class="panel">${accountsFor('office').map(a=>`
+      ${acctRow(a,b,`<span style="color:var(--muted);font-size:12px">${editAcct===a.id?'▲':'▼'}</span>`,
+        `onclick="app.editAccount('${a.id}')" style="cursor:pointer"`)}
+      ${editAcct===a.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+        <label class="f" style="margin-top:12px">رصيد العهدة الحالي في الحساب ده</label>
+        <input class="f" id="obalin" type="text" inputmode="decimal" value="${b[a.id]||0}" oninput="numFix(this,1)">
+        <div class="hint">لو معاك باقي من تقفيل قديم مش مسجل هنا، اكتب الرقم الصح وهيتسجل كرصيد فتح للعهدة.</div>
+        <button class="btn" style="margin-top:14px" onclick="app.setOfficeBalance('${a.id}',${b[a.id]||0})">ظبّط الرصيد</button>
+      </div>`:''}`).join('')}
     </div>
-    <div class="hint" style="margin-top:14px">أرصدة المكتب بتتحسب من العهد اللي استلمتها ناقص اللي صرفته.</div>
+    <div class="hint" style="margin-top:14px">أرصدة المكتب بتتحسب من رصيد الفتح والعهد اللي استلمتها، ناقص اللي صرفته.
+      الباقي من تقفيل قديم ممكن تسجله على أي حساب — في CIB أو في كاش المكتب أو تقسمه على الاتنين.</div>
   </div>`;
 }
 
@@ -1232,6 +1390,7 @@ function wAccounts(){
       ${acctRow(a,b,`<span style="color:var(--muted);font-size:12px">${editAcct===a.id?'▲':'▼'}</span>`,
         `onclick="app.editAccount('${a.id}')" style="cursor:pointer"`)}
       ${editAcct===a.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+        ${a.credit&&(a.secured||[]).length?`<div class="hint" style="margin-top:12px">مضمون بـ <span class="n">${securedCerts(a).length}</span> شهادة · <span class="n">${fmt(securedTotal(a))}</span> جنيه${securedTotal(a)?` · ٨٤٪ = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span>`:''}</div>`:''}
         ${a.credit&&due>0.01?`<button class="btn" style="margin-top:14px" onclick="app.startPayCard('${a.id}')">سدد الكارت — عليك <span class="n">${fmt(due)}</span></button>`:''}
         <label class="f" style="margin-top:12px">الرصيد الحالي</label>
         <input class="f" id="balin" type="text" inputmode="decimal" value="${b[a.id]}" oninput="numFix(this,1)">
@@ -1262,7 +1421,23 @@ function wAccounts(){
         <button class="chip sm${accDraft.credit?'':' on'}" onclick="app.accPick(false)">لأ، فلوسي</button>
         <button class="chip sm${accDraft.credit?' on':''}" onclick="app.accPick(true)">أيوه</button>
       </div>
-      ${accDraft.credit?`<label class="f">الحد الائتماني</label>
+      ${accDraft.credit?`
+        <label class="f">في ضمان؟</label>
+        <div class="chips">
+          <button class="chip sm${accDraft.sec?'':' on'}" onclick="app.accPickSec(false)">لأ</button>
+          <button class="chip sm${accDraft.sec?' on':''}" onclick="app.accPickSec(true)">أيوه</button>
+        </div>
+        ${accDraft.sec?((D.certs||[]).length?`
+          <label class="f">مضمون بأنهي شهادات؟</label>
+          <div class="chips">${D.certs.map(c=>{const held=certHeldBy(c.id,null);
+            return held
+              ?`<button class="chip sm" disabled style="opacity:.45">${esc(c.name)} · مرهونة لـ${esc(held)}</button>`
+              :`<button class="chip sm${accDraft.secured.indexOf(c.id)>-1?' on':''}" onclick="app.accToggleCert('${c.id}')">${esc(c.name)} · <span class="n">${fmt(c.amount)}</span></button>`;}).join('')}</div>
+          ${D.certs.every(c=>certHeldBy(c.id,null))?'<div class="hint">كل شهاداتك مرهونة لحسابات تانية.</div>':''}
+          ${accDraft.secured.length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(accDraft.secTotal())}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(accDraft.secTotal()*0.84))}</span>
+            <button class="chip sm" style="margin-inline-start:8px" onclick="app.accUse84()">استخدمه كحد</button></div>`:''}
+        `:'<div class="hint">مفيش شهادات مسجلة. سجّلها الأول من تبويب الشهادات.</div>'):''}
+        <label class="f">الحد الائتماني</label>
         <input class="f" type="text" inputmode="decimal" value="${esc(accDraft.limit)}" oninput="app.accSet('limit',numFix(this,1))">
         <div class="hint">هيبدأ برصيده كامل وينقص وأنت بتصرف، ومش هيتحسب في الإجمالي.</div>`:''}
       <button class="btn" onclick="app.addAccount()">ضيف الحساب</button>
@@ -1363,7 +1538,11 @@ function vchPicker(selId,total,fnPick){
 }
 
 function wSubs(){
-  const list=D.subs||[];
+  const list=(D.subs||[]).slice().sort((a,b)=>{
+    const ae=subEnded(a)?1:0, be=subEnded(b)?1:0;
+    if(ae!==be)return ae-be;
+    return a.next<b.next?-1:a.next>b.next?1:0;
+  });
   const active=list.filter(s=>s.cycle!=='trial');
   const mo=active.reduce((a,s)=>a+yearly(s)/12,0);
   const ok=subOk();
@@ -1376,7 +1555,7 @@ function wSubs(){
 
     ${list.length?list.map(s=>{
       const trial=s.cycle==='trial';
-      return `<div class="panel" style="padding:15px 16px;margin-bottom:10px">
+      return `<div class="panel" id="sub-${s.id}" style="padding:15px 16px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
           <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(s.name)}</span>
           ${trial?'<span class="tag">تجربة مجانية</span>':`<span style="font-size:15px;font-weight:600;white-space:nowrap">${money(s.amount,s.cur)}</span>`}
@@ -1386,6 +1565,8 @@ function wSubs(){
           <span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>
         </div>
         ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
+        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">نصيبك ${money(subMine(s),s.cur)} · الباقي على الناس</div>`:''}
+        ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">آخر دفعة: ${dLabel(subLastPay(s).d)}</div>`:''}
         ${trial?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بعد التجربة: ${s.willRenew
           ?((s.afterCycle==='yearly'?'سنوي':'شهري')+' · '+money(s.amount,s.cur))
           :'هلغيها'}</div>`:''}
@@ -1399,6 +1580,27 @@ function wSubs(){
                              :`<button class="chip sm" onclick="app.cancelEnd('${s.id}')">وقف التجديد</button>`}`}
           ${delBtn('sub'+s.id,`app.delSub('${s.id}')`)}
         </div>
+        ${paySubFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+          <label class="f">دفعته إمتى؟</label>
+          ${dateField(paySubDate,'app.setPaySubDate')}
+          <button class="btn" onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(s.amount,s.cur)}</button>
+          <button class="btn ghost" onclick="app.cancelPaySub()">إلغاء</button>
+        </div>`:''}
+        ${openDues(s).map(d=>`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px">
+            <span>فلوس ليك عند الناس · دفعة ${dLabel(d.date)}</span>
+            <span class="n" style="color:var(--mint);font-weight:600">${fmt(d.amount)}</span>
+          </div>
+          ${dueFor===d.id?`
+            <label class="f">دخلت على إيه؟ <b>*</b></label>
+            ${payChips(dueAcct,'app.setDueAcct','','me')}
+            <button class="btn" ${dueAcct?'':'disabled'} onclick="app.confirmDue('${s.id}','${d.id}')">أكد الاستلام</button>
+            <button class="btn ghost" onclick="app.cancelDue()">إلغاء</button>
+          `:`<div class="chips" style="margin-top:10px">
+            <button class="chip sm" onclick="app.startDue('${d.id}')">استلمتها</button>
+            <button class="chip sm" onclick="app.dropDue('${s.id}','${d.id}')">شيلها</button>
+          </div>`}
+        </div>`).join('')}
         ${convFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
           <label class="f" style="margin-top:8px">هتجدد بعد التجربة؟</label>
           <div class="chips">
@@ -1445,6 +1647,14 @@ function wSubs(){
         <button class="chip sm${subDraft.cur==='USD'?' on':''}" onclick="app.subPick('cur','USD')">بالدولار</button>
       </div>
       <div class="hint">بيتخصم من كارت المشتريات وتصنيفه اشتراكات.</div>
+      <label class="f">الاشتراك ده متقسم مع ناس؟</label>
+      <div class="chips">
+        <button class="chip sm${subDraft.split?'':' on'}" onclick="app.subPick('split',false)">لأ، كله عليا</button>
+        <button class="chip sm${subDraft.split?' on':''}" onclick="app.subPick('split',true)">أيوه</button>
+      </div>
+      ${subDraft.split?`<label class="f">نصيبي أنا</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.myShare)}" oninput="app.subSet('myShare',numFix(this,1))">
+        <div class="hint">هيتخصم المبلغ كله من الكارت، والفرق هيتسجل كفلوس ليك عند الناس.</div>`:''}
       `:''}
 
       <label class="f">${subDraft.cycle==='trial'?'التجربة بتنتهي إمتى؟':'الخصم الجاي إمتى؟'}</label>
@@ -1574,7 +1784,7 @@ function vLog(){
       <button class="mpill${fMonth?'':' on'}" onclick="app.setF('month','')">كل الشهور</button>
       ${ms.map(m=>`<button class="mpill${fMonth===m?' on':''}" onclick="app.setF('month','${m}')">${mLabel(m)}</button>`).join('')}
     </div>`:''}
-    <div class="row" style="margin-top:10px;gap:8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
       <select class="f" style="padding:10px;font-size:13px" onchange="app.setF('cat',this.value)">
         <option value="">كل التصنيفات</option>
         ${cats.map(c=>`<option value="${c.id}"${fCat===c.id?' selected':''}>${esc(c.label)}</option>`).join('')}
@@ -1609,7 +1819,7 @@ function vSettings(){
     <div class="sec-h" style="margin-top:16px"><h3>المزامنة التلقائية</h3></div>
     <p class="hint" style="margin-top:-4px">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
     ${ghGist?`
-      <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(D.ghLastSync.slice(0,10))+' '+D.ghLastSync.slice(11,16):''}</div>
+      <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
       ${ghState.msg?`<div class="note err">${esc(ghState.msg)}</div>`:''}
       <button class="btn ghost" ${ghState.busy?'disabled':''} onclick="app.ghSyncNow()">${ghState.busy?'بيزامن…':'زامن دلوقتي'}</button>
       ${confirmKey==='ghdisc'
@@ -1628,6 +1838,29 @@ function vSettings(){
         <li>الصقه في الخانة فوق واضغط اربط.</li>
       </ol>`:''}
     `}
+
+    <div class="sec"><div class="sec-h"><h3>مفتاح قراءة الفواتير</h3></div>
+      <p class="hint" style="margin-top:-4px">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
+      ${(getKey()&&!showKeyEdit)?`
+        <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
+        <button class="btn ghost" onclick="app.editKey()">غيّر المفتاح</button>
+        ${confirmKey==='apikey'
+          ?`<button class="btn danger" onclick="app.clearKey()">أكد المسح</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
+          :`<button class="btn danger" onclick="app.askDel('apikey')">امسح المفتاح</button>`}
+      `:`
+        <input class="f" id="keyin" type="password" placeholder="sk-ant-..." style="margin-top:12px">
+        <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
+        ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
+      `}
+    </div>
+
+    <div class="sec"><div class="sec-h"><h3>نسخة احتياطية</h3></div>
+      <p class="hint" style="margin-top:-4px">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
+      <button class="btn ghost" onclick="app.exportData()">شارك أو نزّل نسخة من بياناتي</button>
+      ${D.lastBackup?`<div class="hint">آخر نسخة: ${dayLabel(D.lastBackup)}</div>`:''}
+      <button class="btn ghost" onclick="document.getElementById('imp').click()">ارفع نسخة محفوظة</button>
+      <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
+    </div>
 
     <div class="sec-h" style="margin-top:26px"><h3>التصنيفات</h3><span>${D.cats.length}</span></div>
     <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
@@ -1659,7 +1892,13 @@ function vSettings(){
         </div>
         ${c.credit?`<label class="f">الحد الائتماني</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(c.limit)}" oninput="app.accCfgSet('${a.id}','limit',numFix(this,1))">
-          <div class="hint">مش هيتحسب في «إجمالي اللي معاك».</div>`:''}
+          <div class="hint">مش هيتحسب في «إجمالي اللي معاك».</div>
+          ${(D.certs||[]).length?`<label class="f" style="margin:14px 0 8px">مضمون بأنهي شهادات؟</label>
+            <div class="chips">${D.certs.map(ct=>{const held=certHeldBy(ct.id,a.id);
+              return held
+                ?`<button class="chip sm" disabled style="opacity:.45">${esc(ct.name)} · مرهونة لـ${esc(held)}</button>`
+                :`<button class="chip sm${(a.secured||[]).indexOf(ct.id)>-1?' on':''}" onclick="app.toggleSecured('${a.id}','${ct.id}')">${esc(ct.name)} · <span class="n">${fmt(ct.amount)}</span></button>`;}).join('')}</div>
+            ${(a.secured||[]).length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(securedTotal(a))}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span></div>`:''}`:''}`:''}
         ${D.accounts.length>1?`<div class="chips" style="margin-top:14px">
           ${delBtn('acc'+a.id,`app.delAccount('${a.id}')`,'امسح الحساب وحركاته')}
         </div>`:''}
@@ -1680,20 +1919,6 @@ function vSettings(){
       <p class="hint" style="margin-top:-4px">بيتستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
       <input class="f" id="ratein" type="text" inputmode="decimal" value="${D.rate}" style="margin-top:12px" oninput="numFix(this,1)">
       <button class="btn" onclick="app.saveRate()">احفظ السعر</button>
-    </div>
-
-    <div class="sec"><div class="sec-h"><h3>مفتاح قراءة الفواتير</h3></div>
-      <p class="hint" style="margin-top:-4px">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
-      <input class="f" id="keyin" type="password" placeholder="sk-ant-..." value="${esc(getKey())}" style="margin-top:12px">
-      <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
-    </div>
-
-    <div class="sec"><div class="sec-h"><h3>نسخة احتياطية</h3></div>
-      <p class="hint" style="margin-top:-4px">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
-      <button class="btn ghost" onclick="app.exportData()">شارك أو نزّل نسخة من بياناتي</button>
-      ${D.lastBackup?`<div class="hint">آخر نسخة: ${dayLabel(D.lastBackup)}</div>`:''}
-      <button class="btn ghost" onclick="document.getElementById('imp').click()">ارفع نسخة محفوظة</button>
-      <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
     </div>
 
     <div class="sec"><div class="sec-h"><h3>التركيب على الآيفون</h3></div>
@@ -1840,7 +2065,7 @@ const app={
   },
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
-  go(t){tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';}if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
+  go(t){tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';}if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
   setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();},
@@ -1905,20 +2130,57 @@ const app={
   setCur(c){draft.cur=c;render();},
   setDate(v){draft.date=v;render();},
   setKind(k){draft.kind=k;if(k==='transfer')draft.cur='EGP';render();},
-  setAccount(id){draft.account=id;if(draft.to===id)draft.to='';if(id!=='card')draft.cur='EGP';render();},
+  setAccount(id){draft.account=id;if(draft.to===id)draft.to='';if(id!=='card')draft.cur='EGP';if(id!=='vcash')draft.vc='pay';render();},
   setTo(id){draft.to=id;render();},
   setCat(id){draft.cat=id;render();},
+  setSalary(v){draft.salary=v;render();},
+  setOwed(v){draft.owed=v;if(!v){draft.owedAmt='';draft.owedWho='';}render();},
+  setVc(m){draft.vc=m;render();},
+  setTo2(id){draft.to2=id;render();},
+  startOwedGet(id){owedFor=id;const o=(D.owed||[]).find(x=>x.id===id);owedAcct='';owedGot=o?String(o.amount):'';render();},
+  cancelOwedGet(){owedFor=null;render();},
+  setOwedAcct(id){owedAcct=id;render();},
+  setOwedGot(v){owedGot=v;},
+  confirmOwedGet(id){
+    const o=(D.owed||[]).find(x=>x.id===id);if(!o||!owedAcct)return;
+    const got=Number(onlyNum(owedGot))||o.amount;
+    const t={id:uid(),book:'me',kind:'income',amount:got,account:owedAcct,date:today(),
+      note:'تحصيل'+(o.who?' من '+o.who:'')};
+    D.txns.unshift(t);
+    o.got=true;o.gotOn=today();o.gotAmount=got;o.gotTxn=t.id;
+    owedFor=null;owedAcct='';owedGot='';sortTxns();save();render();app.toast('اتسجلت');
+  },
+  dropOwed(id){D.owed=(D.owed||[]).filter(x=>x.id!==id);owedFor=null;save();render();},
   saveEntry(){
     const amt=Number(onlyNum(draft.amount))||0;
+    if(draft.kind==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw'){
+      if(amt<=0)return;
+      const dest=draft.to2||'cash';
+      D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:'vcash',to:dest,
+        date:draft.date,note:'سحب من مكنة فودافون كاش'});
+      const fee=Number(onlyNum(draft.fee))||0;
+      if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
+        account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
+      sortTxns();save();
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
+      render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
+    }
     const usd=draft.cur==='USD'?amt:0;
     const gross=usd?Math.round(usd*D.rate*100)/100:amt;
     const vch=useVoucher(draft.kind==='expense'&&!usd?draft.voucherId:'',gross,draft.date);
     D.txns.unshift({id:uid(),book:'me',kind:draft.kind,amount:Math.round((gross-(vch?vch.amount:0))*100)/100,
       cat:draft.cat,account:draft.account,to:draft.kind==='transfer'?draft.to:null,
       note:draft.note,date:draft.date,usd:usd||undefined,rate:usd?D.rate:undefined,
-      pending:usd?true:undefined,voucher:vch||undefined});
+      pending:usd?true:undefined,voucher:vch||undefined,
+      salary:(draft.kind==='income'&&draft.salary)?true:undefined});
+    if(draft.kind==='expense'&&draft.owed){
+      const ow=Number(onlyNum(draft.owedAmt))||0;
+      if(ow>0){if(!D.owed)D.owed=[];
+        D.owed.push({id:uid(),amount:ow,who:draft.owedWho.trim(),date:draft.date,
+          note:draft.note||catOf(draft.cat).label,got:false});}
+    }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:''};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedAmt:'',owedWho:'',vc:'pay',fee:'',to2:'cash'};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   startFix(id){fixFor=id;render();},
@@ -2001,6 +2263,12 @@ const app={
     payCard={id:null,mode:'full',amount:'',from:'',date:today()};
     save();render();app.toast('اتسجل السداد');
   },
+  setOfficeBalance(id,cur){
+    const v=numVal('obalin');
+    const a=D.accounts.find(x=>x.id===id);if(!a)return;
+    a.openingOffice=(Number(a.openingOffice)||0)+(v-cur);
+    editAcct=null;save();render();app.toast('اتظبط');
+  },
   setBalance(id,cur){
     const v=numVal('balin');
     const a=D.accounts.find(x=>x.id===id);
@@ -2030,13 +2298,25 @@ const app={
   },
   accSet(k,v){accDraft[k]=v;},
   accPick(c){accDraft.credit=c;render();},
+  accPickSec(v){accDraft.sec=v;if(!v)accDraft.secured=[];render();},
+  accToggleCert(id){
+    if(certHeldBy(id,null))return;
+    const i=accDraft.secured.indexOf(id);
+    if(i>-1)accDraft.secured.splice(i,1);else accDraft.secured.push(id);
+    render();
+  },
+  accUse84(){accDraft.limit=String(Math.round(accDraft.secTotal()*0.84));render();},
   addAccount(){
     const el=document.getElementById('newacc');
-    const n=(el?el.value:accDraft.name).trim();
+    const typed=el?String(el.value||'').trim():'';
+    const n=typed||String(accDraft.name||'').trim();
     if(!n)return;
     const lim=accDraft.credit?(Number(onlyNum(accDraft.limit))||0):0;
-    D.accounts.push({id:uid(),name:n,opening:lim,limit:lim,credit:!!accDraft.credit});
-    accDraft={name:'',credit:false,limit:''};accCfg=null;
+    D.accounts.push({id:uid(),name:n,opening:lim,limit:lim,credit:!!accDraft.credit,
+      secured:accDraft.credit&&accDraft.sec?accDraft.secured.slice():[]});
+    accDraft={name:'',credit:false,limit:'',sec:false,secured:[],
+      secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
+    accCfg=null;
     save();render();
   },
 
@@ -2134,21 +2414,55 @@ const app={
     D.subs.push({id:uid(),name:subDraft.name.trim(),
       amount:(subDraft.cycle==='trial'&&!subDraft.willRenew)?0:Number(onlyNum(subDraft.amount))||0,
       cur:subDraft.cur,cycle:subDraft.cycle,next:subDraft.next,
-      account:'card',cat:'subs',cancelAtEnd:false,
+      account:'card',cat:'subs',cancelAtEnd:false,payments:[],dues:[],
+      myShare:(subDraft.cycle!=='trial'&&subDraft.split&&Number(onlyNum(subDraft.myShare))>0)?Number(onlyNum(subDraft.myShare)):null,
       willRenew:subDraft.cycle==='trial'?!!subDraft.willRenew:undefined,
       afterCycle:subDraft.cycle==='trial'?subDraft.afterCycle:undefined});
-    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly'};
+    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,myShare:''};
     showSub=false;save();render();
   },
   paySub(id){
     const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial')return;
+    paySubFor=id;paySubDate=s.next<=today()?s.next:today();
+    tab='wallet';wtab='subs';render();
+    setTimeout(()=>{const el=document.getElementById('sub-'+id);if(el)el.scrollIntoView({block:'center'});},60);
+  },
+  setPaySubDate(v){paySubDate=v;render();},
+  cancelPaySub(){paySubFor=null;render();},
+  confirmPaySub(id){
+    const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial'){paySubFor=null;render();return;}
     const usd=s.cur==='USD'?Number(s.amount):0;
-    const date=s.next<=today()?s.next:today();
-    D.txns.unshift({id:uid(),kind:'expense',amount:usd?Math.round(usd*D.rate*100)/100:Number(s.amount),
-      cat:s.cat||'subs',account:s.account,date:date,note:s.name,
-      usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined});
+    const full=usd?Math.round(usd*D.rate*100)/100:Number(s.amount);
+    const t={id:uid(),book:'me',kind:'expense',amount:full,
+      cat:s.cat||'subs',account:s.account||'card',date:paySubDate,note:s.name,
+      usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+    D.txns.unshift(t);
+    if(!s.payments)s.payments=[];
+    s.payments.push({d:paySubDate,t:t.id});
+    if(subShared(s)){
+      const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
+      const owed=Math.round((full-mineEgp)*100)/100;
+      if(owed>0.01){if(!s.dues)s.dues=[];s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false});}
+    }
     s.next=dAdd(s.next,s.cycle==='yearly'?12:1);
-    sortTxns();save();render();
+    paySubFor=null;sortTxns();save();render();app.toast('اتسجلت');
+  },
+  startDue(id){dueFor=id;dueAcct='';render();},
+  cancelDue(){dueFor=null;render();},
+  setDueAcct(id){dueAcct=id;render();},
+  confirmDue(subId,dueId){
+    const s=D.subs.find(x=>x.id===subId);if(!s)return;
+    const d=(s.dues||[]).find(x=>x.id===dueId);if(!d||!dueAcct)return;
+    const t={id:uid(),book:'me',kind:'income',amount:d.amount,account:dueAcct,
+      date:today(),note:'حصة الناس في '+s.name};
+    D.txns.unshift(t);
+    d.got=true;d.gotOn=today();d.txn=t.id;
+    dueFor=null;dueAcct='';sortTxns();save();render();app.toast('اتسجلت');
+  },
+  dropDue(subId,dueId){
+    const s=D.subs.find(x=>x.id===subId);if(!s)return;
+    s.dues=(s.dues||[]).filter(x=>x.id!==dueId);
+    dueFor=null;save();render();
   },
   cancelEnd(id){const s=D.subs.find(x=>x.id===id);if(!s)return;s.cancelAtEnd=true;save();render();},
   resume(id){const s=D.subs.find(x=>x.id===id);if(!s)return;s.cancelAtEnd=false;
@@ -2244,6 +2558,12 @@ const app={
     render();
   },
   delCert(id){
+    const linked=certAccounts(id);
+    if(linked.length){
+      confirmKey='';
+      alert('الشهادة دي ضمان لـ'+linked.map(a=>a.name).join(' و')+'. شيلها من الضمان الأول من الإعدادات.');
+      render();return;
+    }
     D.certs=D.certs.filter(c=>c.id!==id);confirmKey='';save();render();
   },
 
@@ -2265,6 +2585,14 @@ const app={
   accCfgSet(id,k,v){if(!accCfg)accCfgInit();accCfg[id][k]=v;},
   accCfgCredit(id,c){if(!accCfg)accCfgInit();accCfg[id].credit=c;render();},
   setScope(id,s){const a=D.accounts.find(x=>x.id===id);if(a){a.scope=s;save();render();}},
+  toggleSecured(accId,certId){
+    const a=D.accounts.find(x=>x.id===accId);if(!a)return;
+    if(certHeldBy(certId,accId))return;
+    if(!a.secured)a.secured=[];
+    const i=a.secured.indexOf(certId);
+    if(i>-1)a.secured.splice(i,1);else a.secured.push(certId);
+    save();render();
+  },
   saveAccounts(){
     if(!accCfg)accCfgInit();
     D.accounts.forEach(a=>{const c=accCfg[a.id];if(!c)return;
@@ -2287,10 +2615,19 @@ const app={
     try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);}catch(e){}
     confirmKey='';ghState={busy:false,msg:''};render();
   },
+  editKey(){showKeyEdit=true;confirmKey='';render();},
+  cancelKeyEdit(){showKeyEdit=false;render();},
+  clearKey(){
+    try{localStorage.removeItem(AKEY);}catch(e){}
+    confirmKey='';showKeyEdit=false;render();
+  },
   saveKey(){
-    try{localStorage.setItem(AKEY,document.getElementById('keyin').value.trim());msg='اتحفظ.';}
+    const el=document.getElementById('keyin');
+    const v=el?el.value.trim():'';
+    if(!v){msg='';render();return;}
+    try{localStorage.setItem(AKEY,v);msg='اتحفظ.';}
     catch(e){msg='مقدرتش أحفظ المفتاح.';}
-    render();
+    showKeyEdit=false;render();
   },
   async exportData(){
     const txt=JSON.stringify(D,null,2);
@@ -2332,7 +2669,8 @@ if('serviceWorker' in navigator){
   window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});
 }
 load();
-if(ghToken&&ghGist)ghReconcile();
+if(ghToken&&ghGist){ghLastPull=Date.now();ghReconcile();}
+if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden)ghMaybePull();});
 (function(){
   const cu=catchUp();
   const parts=[];
