@@ -49,7 +49,7 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
 .wrap{padding:0 18px;}
 
 /* ---------- عناصر عامة ---------- */
-.sec{margin-top:30px;}
+.sec{margin-top:28px;}
 .sec-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
 .sec-h h3{margin:0;font-size:16px;}
 .sec-h span{font-size:12px;color:var(--muted);}
@@ -73,7 +73,7 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
   border-radius:99px;padding:8px 14px;font-size:12.5px;font-family:var(--f-num);cursor:pointer;}
 .mpill.on{background:var(--accent);border-color:var(--accent);color:var(--on);font-weight:600;}
 
-.cat{margin-bottom:16px;}
+.cat{margin-bottom:14px;}
 .cat-t{display:flex;justify-content:space-between;align-items:baseline;font-size:13.5px;margin-bottom:7px;gap:10px;}
 .cat-t .r{display:flex;gap:8px;align-items:baseline;flex:none;}
 .cat-t .pc{font-size:11px;color:var(--muted);font-family:var(--f-num);}
@@ -95,7 +95,7 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
 .detail .d:last-of-type{border-bottom:0;}
 
 /* ---------- فورم ---------- */
-label.f{display:block;font-size:12.5px;color:var(--muted);margin:22px 0 9px;font-weight:500;}
+label.f{display:block;font-size:12.5px;color:var(--muted);margin:20px 0 10px;font-weight:500;}
 label.f b{color:var(--accent);}
 input.f,select.f{width:100%;max-width:100%;min-width:0;background:var(--surf);border:1px solid var(--line);
   border-radius:14px;padding:14px;color:var(--text);font:inherit;font-size:15px;
@@ -121,11 +121,11 @@ input[type=date].f::-webkit-date-and-time-value{text-align:center;margin:0;}
   padding:11px 4px;border-radius:12px;cursor:pointer;}
 .seg button.on{background:var(--accent);color:var(--on);font-weight:600;}
 .btn{width:100%;border:0;border-radius:16px;padding:16px;font:inherit;font-size:15px;font-weight:600;
-  cursor:pointer;background:var(--accent);color:var(--on);margin-top:24px;}
-.btn.ghost{background:transparent;border:1px solid var(--line);color:#D2D8E0;margin-top:10px;font-weight:500;}
-.btn.danger{background:transparent;border:1px solid #4A2E2B;color:#FF9C90;margin-top:10px;font-weight:500;}
+  cursor:pointer;background:var(--accent);color:var(--on);margin-top:22px;}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:#D2D8E0;margin-top:12px;font-weight:500;}
+.btn.danger{background:transparent;border:1px solid #4A2E2B;color:#FF9C90;margin-top:12px;font-weight:500;}
 .btn:disabled{opacity:.4;}
-.hint{font-size:11.5px;color:var(--muted);margin-top:9px;line-height:1.7;}
+.hint{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.7;}
 
 /* ---------- الفاتورة الورقية ---------- */
 .receipt{background:var(--paper);color:var(--paper-ink);border-radius:8px 8px 0 0;
@@ -180,7 +180,7 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
 .alert:last-child{border-bottom:0;}
 .alert .g{flex:1;min-width:0;}
 .alert .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.alert .s{font-size:11px;color:var(--muted);margin-top:4px;}
+.alert .s{font-size:11px;color:var(--muted);margin-top:6px;}
 .inline{padding:0 16px 16px;border-bottom:1px solid var(--line);}
 .tag{font-size:10.5px;padding:3px 8px;border-radius:8px;background:var(--surf2);color:var(--muted);}
 .catchip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--surf);
@@ -225,7 +225,7 @@ body.office .bookseg{border-color:#2E5147;}
     <div>
       <div class="lbl">إجمالي اللي معاك</div>
       <div class="hero"><span class="n" id="total">0</span><em>جنيه</em></div>
-      <div class="lbl" id="creditnote" style="margin-top:8px;line-height:1.7;max-width:250px"></div>
+      <div class="lbl" id="creditnote" style="margin-top:10px;line-height:1.7;max-width:250px"></div>
     </div>
     <button class="gear" onclick="app.go('settings')" aria-label="الإعدادات">
       <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
@@ -526,7 +526,7 @@ const certHeldBy=(cid,exceptId)=>{
   return a?a.name:'';
 };
 const openOwed=()=>(D.owed||[]).filter(o=>!o.got);
-const loanBalance=()=>(D.floatLoans||[]).reduce((a,l)=>a+(l.dir==='take'?Number(l.amount):-Number(l.amount)),0);
+const loanBalance=()=>Math.round((D.floatLoans||[]).reduce((a,l)=>a+(l.dir==='take'?Number(l.amount):-Number(l.amount)),0)*100)/100;
 function stampQ(){
   if(!D._qmax)D._qmax=0;
   for(let i=D.txns.length-1;i>=0;i--){
@@ -550,6 +550,7 @@ function balances(bk){
     else if(t.kind==='income'||t.kind==='float')m[t.account]=(m[t.account]||0)+v;
     else if(t.kind==='settle')m[t.account]=(m[t.account]||0)+(t.dir==='in'?v:-v);
     else if(t.kind==='transfer'){m[t.account]=(m[t.account]||0)-v;m[t.to]=(m[t.to]||0)+v;}});
+  Object.keys(m).forEach(k=>{m[k]=Math.round((m[k]+Number.EPSILON)*100)/100;});
   return m;
 }
 const accountsFor=bk=>D.accounts.filter(a=>a.scope==='both'||a.scope===(bk||book));
@@ -577,21 +578,24 @@ function officeReport(from,to){
   items.forEach(i=>byCat[i.ocat]=(byCat[i.ocat]||0)+i.sum);
   const floatsTotal=floats.reduce((a,t)=>a+Number(t.amount),0);
   const spent=items.reduce((a,i)=>a+i.sum,0);
-  return {from:from,to:to,opening:opening,floats:floats,floatsTotal:floatsTotal,
-          items:items,byCat:byCat,spent:spent,result:opening+floatsTotal-spent};
+  const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
+  return {from:from,to:to,opening:r2(opening),floats:floats,floatsTotal:r2(floatsTotal),
+          items:items.map(i=>({item:i.item,ocat:i.ocat,n:i.n,sum:r2(i.sum)})),
+          byCat:Object.keys(byCat).reduce((o,k)=>{o[k]=r2(byCat[k]);return o;},{}),
+          spent:r2(spent),result:r2(opening+floatsTotal-spent)};
 }
 const periodFrom=()=>D.lastClose?dayShift(D.lastClose,1):'2000-01-01';
 const vchLive=v=>!v.used&&!v.given&&(!v.expiry||v.expiry>=today());
 const vchOpen=v=>!v.used&&(!v.expiry||v.expiry>=today());
 const vchUsed=t=>(t.voucher&&Number(t.voucher.amount))||0;
 const grossOf=t=>(Number(t.amount)||0)+vchUsed(t);
-const mySpend=t=>grossOf(t);
+const mySpend=t=>Math.round((grossOf(t)+Number.EPSILON)*100)/100;
 const breakdown=t=>(t.items&&t.items.length)
   ?t.items.map(i=>({cat:i.cat,amount:Number(i.amount)||0}))
   :[{cat:t.cat||'other',amount:grossOf(t)}];
 
 /* --- أقساط --- */
-const insLeft=i=>Math.max(0,(Number(i.months)||0)-(Number(i.paid)||0))*(Number(i.monthly)||0);
+const insLeft=i=>Math.round(Math.max(0,(Number(i.months)||0)-(Number(i.paid)||0))*(Number(i.monthly)||0)*100)/100;
 const insFirst=i=>i.firstMonth||monthOf(today());
 const insTail=i=>Number(i.tail)||0;
 const insNextMonth=i=>i.covered?mAdd(i.covered,1):insFirst(i);
@@ -854,13 +858,13 @@ function acctRow(a,b,extra,attrs){
   let split='';
   if(a.scope==='both'){
     const bm=balances('me')[a.id]||0, bo=balances('office')[a.id]||0;
-    split=`<span style="display:block;font-size:11px;color:var(--muted);margin-top:5px;line-height:1.7">
+    split=`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
       ${book==='me'?'عهدة مكتب':'فلوسك'} <span class="n">${fmt(book==='me'?bo:bm)}</span> · إجمالي الحساب <span class="n">${fmt(bm+bo)}</span></span>`;
   }
   return `<div class="arow" ${attrs||''}>
     <span class="rail" style="background:${aColor(a.id)}"></span>
     <span class="nm">${esc(a.name)}${split}
-      ${lim?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:5px">فاضل <span class="n">${fmt(v)}</span> من <span class="n">${fmt(lim)}</span>${(lim-v)>0.01?` · عليك <span class="n">${fmt(lim-v)}</span>`:''}</span>
+      ${lim?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">فاضل <span class="n">${fmt(v)}</span> من <span class="n">${fmt(lim)}</span>${(lim-v)>0.01?` · عليك <span class="n">${fmt(lim-v)}</span>`:''}</span>
       <span class="track" style="display:block;margin-top:6px;height:4px"><span class="fill" style="display:block;width:${lim?left/lim*100:0}%;background:${aColor(a.id)}"></span></span>`:''}
     </span>
     <span class="vl" style="color:${v<0?'var(--clay)':'var(--text)'}">${fmt(v)}</span>
@@ -1106,7 +1110,7 @@ function alertsPanel(){
     </div>`);
 
   if(!rows.length)return '';
-  return `<div class="sec" style="margin-top:22px">
+  return `<div class="sec" style="margin-top:24px">
     <div class="sec-h"><h3>محتاج انتباهك</h3><span>${rows.length}</span></div>
     <div class="panel">${rows.join('')}</div>
   </div>`;
@@ -1130,7 +1134,7 @@ function txnRow(t){
     ${(t.items||[]).map(i=>`<div class="d"><span>${esc(i.name)} <span style="color:${catOf(i.cat).color}">· ${catOf(i.cat).label}</span></span><span class="n">${fmt(i.amount)}</span></div>`).join('')}
     ${(function(){
       const locked=(t.book==='office')&&(t.kind==='settle'||(D.lastClose&&t.date<=D.lastClose));
-      if(locked)return `<div class="hint" style="margin-top:8px">${t.kind==='settle'?'دي حركة تسوية تقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
+      if(locked)return `<div class="hint">${t.kind==='settle'?'دي حركة تسوية تقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
       return eTxn&&eTxn.id===t.id?txnEditForm(t):`<div class="chips" style="margin-top:10px">
         <button class="chip sm" onclick="app.startTxnEdit(event,'${t.id}')">عدّل</button>
         ${delBtn('txn'+t.id,`app.delTxn(event,'${t.id}')`,'امسح')}
@@ -1166,7 +1170,7 @@ function vAddOffice(){
     </div>
     <div class="hint">رصيد العهدة مش هيتغير — ده بس تسجيل إن معاك فلوس منها عشان ترجّعها.</div>`:''}
 
-    <div class="money" style="margin-top:16px">
+    <div class="money" style="margin-top:14px">
       <input type="text" inputmode="decimal" placeholder="0" value="${esc(draftO.amount)}" oninput="app.oSet('amount',numFix(this,1))">
       <span>جنيه</span>
     </div>
@@ -1225,7 +1229,7 @@ function itemNames(){
 function itemSuggestions(fn){
   const n=itemNames();
   if(!n.length)return '';
-  return `<div class="chips" style="margin-top:9px">${n.map(x=>`<button class="chip sm" onclick="${fn}('${esc(x).replace(/'/g,"&#39;")}')">${esc(x)}</button>`).join('')}</div>`;
+  return `<div class="chips" style="margin-top:10px">${n.map(x=>`<button class="chip sm" onclick="${fn}('${esc(x).replace(/'/g,"&#39;")}')">${esc(x)}</button>`).join('')}</div>`;
 }
 function oOk(){const k=draftO.kind;
   if(k==='loan')return Number(onlyNum(draftO.amount))>0;
@@ -1273,7 +1277,7 @@ function vAdd(){
       <button class="${k==='transfer'?'on':''}" onclick="app.setKind('transfer')">تحويل</button>
     </div>
 
-    <div class="money" style="margin-top:16px">
+    <div class="money" style="margin-top:14px">
       <input type="text" inputmode="decimal" placeholder="0" value="${esc(draft.amount)}" oninput="app.dset('amount',numFix(this,1))">
       <span>${draft.cur==='USD'?'دولار':'جنيه'}</span>
     </div>
@@ -1380,7 +1384,7 @@ function vScan(){
         <div class="rt"><span>الإجمالي</span><span id="rtot">${fmt(total)}</span></div>
       </div>
 
-      <button class="btn ghost" style="margin-top:26px" onclick="app.addItem()">زوّد صنف ناقص</button>
+      <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">زوّد صنف ناقص</button>
 
       <label class="f">الفاتورة دي اتدفعت من إيه؟ <b>*</b></label>
       ${payChips(scan.account,'app.scanAccount')}
@@ -1402,7 +1406,7 @@ function vScan(){
   }
 
   return `
-  <div style="padding-top:24px">
+  <div style="padding-top:20px">
     <div class="drop" onclick="document.getElementById('picker').click()">
       <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 3.5h12v16.5l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8h6M9 11.5h6M9 15h3"/></svg>
@@ -1474,7 +1478,7 @@ function repLines(r){
   <div class="rep" style="border-color:${r.result<0?'#5E332B':'#2F5A47'}">
     <div class="tot" style="border:0;padding:0;margin:0;font-size:15px">
       <span>${r.result<0?'مطلوب ليك':'باقي معاك'}</span><span class="n">${fmt(Math.abs(r.result))}</span></div>
-    <div class="hint" style="margin-top:8px">${r.result<0?'صرفت من جيبك أكتر من العهدة، فالمبلغ ده ليك عند المكتب.':'ده اللي لسه معاك من عهدة المكتب.'}</div>
+    <div class="hint">${r.result<0?'صرفت من جيبك أكتر من العهدة، فالمبلغ ده ليك عند المكتب.':'ده اللي لسه معاك من عهدة المكتب.'}</div>
   </div>`;
 }
 
@@ -1548,7 +1552,7 @@ function wAccounts(){
       return `
       ${acctRow(a,b,`<span style="color:var(--muted);font-size:12px">${editAcct===a.id?'▲':'▼'}</span>`,
         `onclick="app.editAccount('${a.id}')" style="cursor:pointer"`)}
-      ${(a.credit&&due>0.01&&payCard.id!==a.id&&editAcct!==a.id)?`<div style="padding:0 16px 14px">
+      ${(a.credit&&due>0.01&&payCard.id!==a.id&&editAcct!==a.id)?`<div style="padding:14px 16px;border-bottom:1px solid var(--line)">
         <button class="chip sm on" onclick="app.startPayCard('${a.id}')">سدد الكارت — عليك <span class="n">${fmt(due)}</span></button>
       </div>`:''}
       ${editAcct===a.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
@@ -1612,7 +1616,7 @@ function wVouchers(){
   const tot=live.reduce((a,v)=>a+(Number(v.amount)||0),0);
   const ok=vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&vchDraft.expiry;
   return `<div style="margin-top:18px">
-    <button class="btn ghost" onclick="app.toggleVch()">${showVch?'إلغاء':'زوّد فاوتشر'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleVch()">${showVch?'إلغاء':'زوّد فاوتشر'}</button>
     ${showVch?`
       <label class="f">رقم الفاوتشر <b>*</b></label>
       <input class="f n" id="vchcode" type="text" inputmode="numeric" style="text-align:center;letter-spacing:1px"
@@ -1647,7 +1651,7 @@ function wVouchers(){
           <span class="n" style="font-size:16px;font-weight:600;letter-spacing:1px">${esc(v.code)}</span>
           <span class="n" style="font-size:15px;font-weight:600;color:${dead?'var(--muted)':'var(--mint)'}">${fmt(v.amount)}</span>
         </div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.8">
+        <div style="font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.8">
           بنك CIB · بطاقة <span class="n">${esc(v.card)}</span><br>
           ${v.used?((v.usedBy?'استخدمه '+esc(v.usedBy):'اتستخدم')+(v.usedOn?' في '+dLabel(v.usedOn):''))
             :v.given?('مبعوت'+(v.givenTo?' لـ'+esc(v.givenTo):'')+' · بينتهي '+dayLabel(v.expiry))
@@ -1663,7 +1667,7 @@ function wVouchers(){
           <button class="chip sm" onclick="app.startEdit('${v.id}')">${editVch===v.id?'إخفاء التعديل':'عدّل'}</button>
           ${delBtn('vch'+v.id,`app.delVch('${v.id}')`)}
         </div>`}
-        ${editVch===v.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+        ${editVch===v.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">رقم الفاوتشر</label>
           <input class="f n" id="evcode" type="text" inputmode="numeric" style="text-align:center;letter-spacing:1px"
             value="${esc(eDraft.code)}" oninput="app.eSet('code',this.value,this)">
@@ -1674,7 +1678,7 @@ function wVouchers(){
           <button class="btn" onclick="app.saveEdit('${v.id}')">احفظ التعديل</button>
           <button class="btn ghost" onclick="app.cancelEdit()">إلغاء</button>
         </div>`:''}
-        ${giveFor===v.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+        ${giveFor===v.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">بعته لمين؟ (اختياري)</label>
           <input class="f" id="giveto" placeholder="اسم صاحبك">
           <button class="btn" onclick="app.confirmGive('${v.id}')">علّمه إنه اتبعت</button>
@@ -1708,7 +1712,7 @@ function wSubs(){
   const mo=active.reduce((a,s)=>a+yearly(s)/12,0);
   const ok=subOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" onclick="app.toggleSub()">${showSub?'إلغاء':'زوّد اشتراك'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleSub()">${showSub?'إلغاء':'زوّد اشتراك'}</button>
 
     ${showSub?`
       <label class="f">اسم الاشتراك</label>
@@ -1783,18 +1787,18 @@ function wSubs(){
           <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(s.name)}</span>
           ${trial?'<span class="tag">تجربة مجانية</span>':`<span style="font-size:15px;font-weight:600;white-space:nowrap">${money(s.amount,s.cur)}</span>`}
         </div>
-        <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted);margin-top:9px">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted);margin-top:10px">
           <span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف يوم'):cycleLabel(s)+' · الجاي')} ${dayLabel(s.next)}</span>
           <span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>
         </div>
-        ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
-        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
-        ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:5px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
+        ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
+        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
+        ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
           subLastPay(s).fee?` · <span class="n">${fmt(subLastPay(s).paid||s.amount)}</span> + <span class="n">${fmt(subLastPay(s).fee)}</span> تدبير = <span class="n">${fmt((subLastPay(s).paid||Number(s.amount))+Number(subLastPay(s).fee))}</span>`:''}</div>`:''}
-        ${!trial&&subLastPay(s)&&subLastPay(s).fee===undefined?`<div class="chips" style="margin-top:8px">
+        ${!trial&&subLastPay(s)&&subLastPay(s).fee===undefined?`<div class="chips" style="margin-top:12px">
           <button class="chip sm" onclick="app.startFee('${s.id}')">${feeFor===s.id?'إخفاء':'زوّد مصاريف تدبير'}</button>
         </div>`:''}
-        ${feeFor===s.id?`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        ${feeFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">مبلغ تدبير العملة اللي اتخصم لوحده</label>
           <input class="f" id="feein" type="text" inputmode="decimal" oninput="numFix(this,1)">
           <div class="hint">هيتسجل حركة منفصلة بتصنيف عمولات ورسوم، وهيتجمع مع الاشتراك في الإجمالي.</div>
@@ -1804,7 +1808,7 @@ function wSubs(){
         ${trial?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بعد التجربة: ${s.willRenew
           ?((s.afterCycle==='yearly'?'سنوي':'شهري')+' · '+money(s.amount,s.cur))
           :'هلغيها'}</div>`:''}
-        <div class="chips" style="margin-top:13px">
+        <div class="chips" style="margin-top:12px">
           ${trial?`${s.willRenew?`<button class="chip sm${daysTo(s.next)<=0?' on':''}" onclick="app.convertNow('${s.id}')">حوّلها لاشتراك</button>`:''}
             <button class="chip sm" onclick="app.startConv('${s.id}')">${convFor===s.id?'إخفاء':'عدّل الخطة'}</button>`
             :subEnded(s)?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
@@ -1815,7 +1819,7 @@ function wSubs(){
                              :`<button class="chip sm" onclick="app.cancelEnd('${s.id}')">وقف التجديد</button>`}`}
           ${delBtn('sub'+s.id,`app.delSub('${s.id}')`)}
         </div>
-        ${editSub===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+        ${editSub===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">اسم الاشتراك</label>
           <input class="f" value="${esc(sDraft.name)}" oninput="app.sdSet('name',this.value)">
 
@@ -1853,13 +1857,13 @@ function wSubs(){
           <button class="btn" onclick="app.saveSubEdit('${s.id}')">احفظ التعديل</button>
           <button class="btn ghost" onclick="app.cancelSubEdit()">إلغاء</button>
         </div>`:''}
-        ${paySubFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:6px">
+        ${paySubFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">دفعته إمتى؟</label>
           ${dateField(paySubDate,'app.setPaySubDate')}
           <button class="btn" onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(s.amount,s.cur)}</button>
           <button class="btn ghost" onclick="app.cancelPaySub()">إلغاء</button>
         </div>`:''}
-        ${openDues(s).map(d=>`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        ${openDues(s).map(d=>`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px">
             <span>فلوس ليك${d.who?' عند '+esc(d.who):' عند الناس'} · دفعة ${dLabel(d.date)}</span>
             <span class="n" style="color:var(--mint);font-weight:600">${fmt(d.amount)}</span>
@@ -1874,8 +1878,8 @@ function wSubs(){
             <button class="chip sm" onclick="app.dropDue('${s.id}','${d.id}')">شيلها</button>
           </div>`}
         </div>`).join('')}
-        ${convFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
-          <label class="f" style="margin-top:8px">هتجدد بعد التجربة؟</label>
+        ${convFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <label class="f" style="margin-top:14px">هتجدد بعد التجربة؟</label>
           <div class="chips">
             <button class="chip sm${subDraft.willRenew?' on':''}" onclick="app.subPick('willRenew',true)">أيوه</button>
             <button class="chip sm${subDraft.willRenew?'':' on'}" onclick="app.subPick('willRenew',false)">لأ، هلغيها</button>
@@ -1907,7 +1911,7 @@ function wIns(){
   const left=list.reduce((a,i)=>a+insLeft(i),0);
   const ok=insOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" onclick="app.toggleIns()">${showIns?'إلغاء':'زوّد قسط'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleIns()">${showIns?'إلغاء':'زوّد قسط'}</button>
     ${showIns?`
       <label class="f">القسط ده إيه؟</label>
       <input class="f" value="${esc(insDraft.name)}" oninput="app.insSet('name',this.value)">
@@ -1943,13 +1947,13 @@ function wIns(){
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:6px">${insSrcLabel(i)}${insAhead(i)>0?` · مدفوع مقدم <span class="n">${insAhead(i)}</span> شهر`:''}</div>
         ${insLast(i)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(insLast(i).d)} · عن شهر ${mLabel(insLast(i).m)}</div>`:''}
-        <div class="chips" style="margin-top:13px">
+        <div class="chips" style="margin-top:12px">
           ${done?'':`<button class="chip sm${insDue(i)?' on':''}" onclick="app.startPay('${i.id}','front')">${insDue(i)?'سدد':'ادفع مقدم —'} ${mLabel(insNextMonth(i))}</button>`}
           ${(!done&&canPostpone(i))?`<button class="chip sm" onclick="app.postponeIns('${i.id}')">أجّل شهر</button>`:''}
           ${insLast(i)?`<button class="chip sm" onclick="app.undoIns('${i.id}')">تراجع آخر دفعة</button>`:''}
           ${delBtn('ins'+i.id,`app.delIns('${i.id}')`)}
         </div>
-        ${payFor===i.id?`<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:6px">
+        ${payFor===i.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">دفعته إمتى؟</label>
           ${dateField(payDate,'app.setPayDate')}
           ${i.src==='office'?`<label class="f">المبلغ</label>
@@ -1972,7 +1976,7 @@ function wCerts(){
   const mo=list.reduce((a,c)=>a+(Number(c.monthly)||0),0);
   const ok=certOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" onclick="app.toggleCert()">${showCert?'إلغاء':'زوّد شهادة'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleCert()">${showCert?'إلغاء':'زوّد شهادة'}</button>
     ${showCert?`
       <label class="f">مبلغ الشهادة</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.amount)}" oninput="app.certSet('amount',numFix(this,1))">
@@ -1994,7 +1998,7 @@ function wCerts(){
     ${list.length?`<div class="panel">${list.map(c=>`
       <div class="arow">
         <span class="rail" style="background:#46C2A8"></span>
-        <span class="nm">${esc(c.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7">
+        <span class="nm">${esc(c.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
           <span class="n">${fmt(c.amount)}</span> · <span class="n">${c.rate}</span>% · فايدة جاية ${dayLabel(certNext(c))}
           ${c.end?`<span style="display:block">تجديد ${dayLabel(c.end)}</span>`:''}</span></span>
         <span class="vl" style="color:var(--mint)">${fmt(c.monthly)}</span>
@@ -2046,7 +2050,7 @@ function vSettings(){
   return `<div style="padding-top:20px">
     ${msg?`<div class="note ok">${esc(msg)}</div>`:''}
 
-    <div class="sec-h" style="margin-top:16px"><h3>المزامنة التلقائية</h3></div>
+    <div class="sec-h" style="margin-top:6px"><h3>المزامنة التلقائية</h3></div>
     <p class="hint" style="margin-top:-4px">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
     ${ghGist?`
       <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
@@ -2092,7 +2096,7 @@ function vSettings(){
       <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
     </div>
 
-    <div class="sec-h" style="margin-top:26px"><h3>التصنيفات</h3><span>${D.cats.length}</span></div>
+    <div class="sec-h" style="margin-top:28px"><h3>التصنيفات</h3><span>${D.cats.length}</span></div>
     <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
       ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
       ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">تأكيد</button>`
