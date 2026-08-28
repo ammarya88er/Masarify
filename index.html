@@ -254,7 +254,6 @@ body.office .bookseg{border-color:#2E5147;}
 
 <div id="printarea"></div>
 <div id="toast"><span></span></div>
-<input type="file" id="picker" accept="image/*" capture="environment" style="display:none" onchange="app.pickFile(this)">
 <input type="file" id="picker2" accept="image/*" style="display:none" onchange="app.pickFile(this)">
 
 <script>
@@ -379,7 +378,7 @@ let fMonth='', fCat='', fAcct='';
 let accCfg=null;
 function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''});}
-let certDraft={amount:'10000',rate:'19.5',start:today(),end:'',account:'bank',type:'cert'};
+let certDraft={amount:'',monthly:'',start:today(),end:'',account:'bank',type:'cert'};
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
@@ -387,7 +386,10 @@ let catDraft='';
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
-let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='';
+let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
+let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='';
+let refundParts={};
+const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
 let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
 let owedFor=null, owedAcct='', owedGot='';
 let ghPushTimer=null;
@@ -472,13 +474,15 @@ function normalizeData(){
   });
   if(!D.owed)D.owed=[];
   if(!D.floatLoans)D.floatLoans=[];
+  if(!D.ofees)D.ofees=[];
+  if(!D.ofeeLimit)D.ofeeLimit=200;
   if(D.ghLastSync===undefined)D.ghLastSync='';
   if(!D._qfix){
     stampQ();
     const byDate={};
     D.txns.forEach(t=>{
-      if(t.kind!=='income'||!t.note||t.note.indexOf(' — فايدة')<0)return;
-      const ci=(D.certs||[]).findIndex(c=>t.note===c.name+' — فايدة');
+      if(t.kind!=='income'||!t.note||t.note.indexOf(' — عائد')<0)return;
+      const ci=(D.certs||[]).findIndex(c=>t.note===c.name+' — عائد');
       if(ci<0)return;
       (byDate[t.date]=byDate[t.date]||[]).push({t:t,ci:ci});
     });
@@ -527,6 +531,7 @@ const certHeldBy=(cid,exceptId)=>{
   return a?a.name:'';
 };
 const openOwed=()=>(D.owed||[]).filter(o=>!o.got);
+const ofeeBalance=()=>Math.round((D.ofees||[]).reduce((a,f)=>a+(f.type==='take'?-Number(f.amount):Number(f.amount)),0)*100)/100;
 const loanBalance=()=>Math.round((D.floatLoans||[]).reduce((a,l)=>a+(l.dir==='take'?Number(l.amount):-Number(l.amount)),0)*100)/100;
 function stampQ(){
   if(!D._qmax)D._qmax=0;
@@ -634,9 +639,9 @@ function insWhen(i){
 
 /* --- شهادات --- */
 const certMonthly=(amount,rate)=>Math.round((Number(onlyNum(amount))||0)*(Number(onlyNum(rate))||0)/1200*100)/100;
-function mkCert(name,amount,rate,start,account,end,type){
-  return {id:uid(),name:name,type:type||'cert',amount:Number(onlyNum(amount))||0,rate:Number(onlyNum(rate))||0,
-    monthly:certMonthly(amount,rate),start:start,account:account,end:end||'',covered:'',payments:[]};
+function mkCert(name,amount,monthly,start,account,end,type){
+  return {id:uid(),name:name,type:type||'cert',amount:Number(onlyNum(amount))||0,
+    monthly:Number(onlyNum(monthly))||0,start:start,account:account,end:end||'',covered:'',payments:[]};
 }
 const dInMonth=m=>{const p=m.split('-');return new Date(Number(p[0]),Number(p[1]),0).getDate();};
 function certNext(c){
@@ -665,7 +670,7 @@ function catchUp(){
       const d=certNext(c);
       if(d>today())break;
       if(c.end&&d>c.end)break;
-      const t={id:uid(),book:'me',kind:'income',amount:Number(c.monthly),account:c.account,date:d,note:c.name+((c.type==='deposit')?' — عايد':' — فايدة')};
+      const t={id:uid(),book:'me',kind:'income',amount:Number(c.monthly),account:c.account,date:d,note:c.name+' — عائد'};
       D.txns.unshift(t);
       c.covered=monthOf(d);
       if(!c.payments)c.payments=[];
@@ -800,10 +805,11 @@ function promptText(){
   'التصنيفات المسموحة (استخدم الـ id بالظبط):\n'+
   D.cats.map(c=>c.id+' = '+c.label).join('\n')+'\n\n'+
   'قواعد:\n- كل صنف سطر لوحده بإجمالي سعره (الكمية × سعر الوحدة).\n'+
-  '- اكتب اسم الصنف بالعربي بحيث يوضح نوع المنتج نفسه (معجون أسنان، لبن، مكرونة، صابون غسيل)، مش نسخ حرفي للمكتوب.\n'+
-  '- سيب اسم الماركة زي ما هو مكتوب في الفاتورة بعد نوع المنتج، والحجم أو الوزن لو مكتوب.\n'+
-  '  مثال: COLGATE T/P 100ML تتكتب: معجون أسنان Colgate 100 مل.\n'+
-  '  ومثال: JUH MILK 1L تتكتب: لبن Juhayna 1 لتر.\n'+
+  '- اكتب اسم الصنف مختصر جدًا: نوع المنتج بالعربي + الماركة، وبس. من غير حجم ولا وزن ولا طعم ولا أي وصف زيادة.\n'+
+  '  مثال: MONSTER ENERGY MANGO LOCO 500ML تتكتب: مشروب طاقة مونستر.\n'+
+  '  ومثال: COLGATE T/P HERBAL 100ML تتكتب: معجون أسنان كولجيت.\n'+
+  '  ومثال: JUH MILK FULL CREAM 1L تتكتب: لبن جهينة.\n'+
+  '- لو الصنف مالوش ماركة واضحة، اكتب نوعه بس (طماطم، عيش، بصل).\n'+
   '- لو الاسم في الفاتورة مختصر أو رموز، استنتج نوع المنتج من السياق واكتبه بالعربي.\n'+
   '- خليك ثابت: نفس المنتج ياخد نفس الاسم كل مرة.\n'+
   '- لو فيه خصم حطه كصنف اسمه "خصم" بمبلغ بالسالب وتصنيف other.\n'+
@@ -1038,7 +1044,7 @@ function alertsPanel(){
 
   if(book==='office')(function(){
     const b=balances('office');
-    accountsFor('office').forEach(a=>{
+    D.accounts.forEach(a=>{
       const v=b[a.id]||0;
       if(v>=-0.01)return;
       rows.push(`<div class="alert">
@@ -1050,11 +1056,18 @@ function alertsPanel(){
       </div>
       ${refundFor===a.id?`<div class="inline">
         <label class="f">تاخدها من أنهي حساب عهدة؟ <b>*</b></label>
-        ${payChips(refundAcct,'app.setRefundAcct',a.id,'office')}
+        ${(function(){const ob=balances('office');
+          const opts=D.accounts.filter(x=>x.id!==a.id&&(ob[x.id]||0)>0.01);
+          if(!opts.length)return '<div class="hint">مفيش رصيد عهدة في أي حساب دلوقتي — استناها لحد ما توصل عهدة جديدة.</div>';
+          return '<div class="chips">'+opts.map(x=>`<button class="chip sm${refundParts[x.id]!==undefined?' on':''}" onclick="app.toggleRefundPart('${x.id}',${Math.abs(v)})">${esc(x.name)} · <span class="n">${fmt(ob[x.id])}</span></button>`).join('')+'</div>'
+            +opts.filter(x=>refundParts[x.id]!==undefined).map(x=>`
+              <label class="f">هتاخد كام من ${esc(x.name)}؟</label>
+              <input class="f" type="text" inputmode="decimal" value="${esc(refundParts[x.id])}" oninput="app.setRefundPart('${x.id}',numFix(this,1))">`).join('')
+            +(Object.keys(refundParts).length>1?`<div class="hint">المجموع <span class="n" id="refsum">${fmt(refundTotal())}</span> من <span class="n">${fmt(Math.abs(v))}</span></div>`:'');})()}
         <label class="f">وتدخل على أنهي حساب من حساباتك؟ <b>*</b></label>
         ${payChips(refundTo,'app.setRefundTo','','me')}
         <div class="hint">لو سيبتها من غير استرداد، هتتخصم لوحدها من العهدة الجاية.</div>
-        <button class="btn" ${refundAcct&&refundTo?'':'disabled'} onclick="app.doRefund('${a.id}',${Math.abs(v)})">سجّل الاسترداد</button>
+        <button class="btn" ${refundTotal()>0&&refundTo?'':'disabled'} onclick="app.doRefund('${a.id}',${Math.abs(v)})">سجّل الاسترداد</button>
         <button class="btn ghost" onclick="app.cancelRefund()">إلغاء</button>
       </div>`:''}`);
     });
@@ -1108,6 +1121,30 @@ function alertsPanel(){
       <button class="chip sm" onclick="app.goSubs()">شوفها</button>
     </div>`)));
 
+  if(book==='me'&&ofeeBalance()>=Number(D.ofeeLimit||200))rows.push(`
+    <div class="alert">
+      <span class="rail" style="background:#C4A484"></span>
+      <span class="g"><span class="t">رسوم مكتب ليك</span>
+        <span class="s" style="display:block">دفعتها من فلوسك ووصلت حد <span class="n">${fmt(D.ofeeLimit)}</span></span></span>
+      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(ofeeBalance(),'EGP')}</span>
+      <button class="chip sm" onclick="app.startOfee()">${ofeeFor?'إخفاء':'أخدتها'}</button>
+    </div>
+    ${ofeeFor?`<div class="inline">
+      <label class="f">أخدت كام؟</label>
+      <div class="chips">
+        <button class="chip sm${ofeeMode==='full'?' on':''}" onclick="app.setOfeeMode('full')">المبلغ بالظبط (<span class="n">${fmt(ofeeBalance())}</span>)</button>
+        <button class="chip sm${ofeeMode==='part'?' on':''}" onclick="app.setOfeeMode('part')">مبلغ تاني</button>
+      </div>
+      ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${ofeeBalance()}" oninput="numFix(this,1)">`:''}
+      <label class="f">من أنهي حساب عهدة؟ <b>*</b></label>
+      ${payChips(ofeeAcct,'app.setOfeeAcct','','office')}
+      <label class="f">دخلت على أنهي حساب عندك؟ <b>*</b></label>
+      ${payChips(ofeeTo,'app.setOfeeTo','','me')}
+      <div class="hint">هتتسجل مصروف مكتب بتصنيف مشترك، وأي فرق هيترحّل للمرة الجاية.</div>
+      <button class="btn" ${ofeeAcct&&ofeeTo?'':'disabled'} onclick="app.takeOfee()">سجّل</button>
+      <button class="btn ghost" onclick="app.cancelOfee()">إلغاء</button>
+    </div>`:''}`);
+
   if(book==='me'&&(!D.lastBackup||daysTo(D.lastBackup)<-30))rows.push(`
     <div class="alert">
       <span class="rail" style="background:#8FA0C4"></span>
@@ -1159,7 +1196,7 @@ function subOk(){
   if(subDraft.cycle==='trial')return subDraft.willRenew?Number(onlyNum(subDraft.amount))>0:true;
   return Number(onlyNum(subDraft.amount))>0;}
 function insOk(){return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
-function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.rate))>0&&certDraft.start&&certDraft.account);}
+function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account);}
 function vAddOffice(){
   const k=draftO.kind;
   const ok=oOk();
@@ -1212,7 +1249,7 @@ function vAddOffice(){
         </div>
         ${draftO.hasFee?`<label class="f">قيمة الرسوم</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(draftO.feeAmt)}" oninput="app.oSet('feeAmt',numFix(this,1))">
-          <div class="hint">هتتسجل بند مستقل باسم «رسوم» بنفس التصنيف.</div>`:''}
+          <div class="hint">الرسوم بتتحسب عليك أنت، ولما توصل <span class="n">${fmt(D.ofeeLimit)}</span> جنيه هفكرك تاخدها من المكتب.</div>`:''}
 
         <label class="f">فيه جزء من فلوسك؟</label>
         <div class="chips">
@@ -1256,13 +1293,17 @@ function txnEditForm(t){
   const hasItems=t.items&&t.items.length;
   const isOffice=t.book==='office';
   const isTransfer=t.kind==='transfer';
+  const linkedOwed=(D.owed||[]).filter(o=>o.srcTxn===t.id&&!o.got).length;
   return `<div onclick="event.stopPropagation()" style="border-top:1px solid var(--line);margin-top:10px;padding-top:4px">
+    ${linkedOwed?`<div class="hint">مربوطة بـ<span class="n">${linkedOwed}</span> مستحق في «محتاج انتباهك» — لو مسحت الحركة هيتشالوا معاها.</div>`:''}
     ${hasItems?'<div class="hint">الفاتورة دي مبلغها محسوب من أصنافها، فتقدر تعدّل التاريخ والحساب والاسم بس.</div>':`
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`}
 
     ${isTransfer?'':`<label class="f">${isOffice&&t.kind==='expense'?'اسم البند':'الوصف'}</label>
       <input class="f" value="${esc(eTxn.note)}" oninput="app.eTxnSet('note',this.value)">
+      <label class="f">المكان</label>
+      <input class="f" value="${esc(eTxn.place)}" oninput="app.eTxnSet('place',this.value)">
       ${isOffice&&t.kind==='expense'?itemSuggestions('app.eTxnItem'):''}`}
 
     ${isOffice&&t.kind==='expense'?`<label class="f">التصنيف</label>
@@ -1404,6 +1445,8 @@ function vScan(){
         ${scan.items.map((it,k)=>`
         <div class="rl">
           <button class="x" onclick="app.delItem(${k})">×</button>
+          <button class="x" style="color:${it.off?'#2E7D5B':'#B9B3A6'};font-size:12px;font-weight:600"
+            onclick="app.toggleItemOffice(${k})" title="للمكتب">م</button>
           <input class="nm" value="${esc(it.name)}" oninput="app.iset(${k},'name',this.value)">
           <select onchange="app.iset(${k},'cat',this.value)">
             ${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${c.label}</option>`).join('')}
@@ -1414,9 +1457,19 @@ function vScan(){
       </div>
 
       <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">زوّد صنف ناقص</button>
+      ${book!=='office'?`<div class="hint">اضغط <b style="color:var(--muted)">م</b> جنب أي صنف عشان تحوّله لدفتر المكتب.</div>`:''}
 
       <label class="f">الفاتورة دي اتدفعت من إيه؟ <b>*</b></label>
       ${payChips(scan.account,'app.scanAccount')}
+
+      ${book!=='office'&&scan.items.some(i=>i.off)?`
+        <div class="note warn">فيه <span class="n">${scan.items.filter(i=>i.off).length}</span> صنف متعلّم إنه للمكتب بإجمالي <span class="n">${fmt(scan.items.filter(i=>i.off).reduce((a,i)=>a+(Number(i.amount)||0),0))}</span> — هيتسجلوا في دفتر المكتب لوحدهم.</div>
+        <label class="f">بند المكتب اسمه إيه؟ <b>*</b></label>
+        <input class="f" value="${esc(scan.oitem||scan.merchant||'')}" oninput="app.scanOItem(this.value)">
+        <label class="f">تصنيف المكتب <b>*</b></label>
+        <div class="chips">${D.ocats.map(c=>`<button class="chip sm${scan.ocat===c.id?' on':''}" onclick="app.scanOcat('${c.id}')">${esc(c.label)}</button>`).join('')}</div>
+        <div class="hint">الفاتورة كلها هتتخصم من الحساب اللي فوق، وأصناف المكتب هتتسجل إنها <b style="color:var(--mint)">ليك عند المكتب</b> لحد ما تستردها.</div>
+      `:''}
 
       ${book==='office'?`
         <label class="f">اسم البند <b>*</b></label>
@@ -1429,7 +1482,7 @@ function vScan(){
       <label class="f">التاريخ</label>
       ${dateField(scan.date,'app.scanDate')}
 
-      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(total)} جنيه</button>
+      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))&&(book==='office'||!scan.items.some(i=>i.off)||((scan.oitem||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(total)} جنيه</button>
       <button class="btn ghost" onclick="app.cancelScan()">إلغاء</button>
     </div>`;
   }
@@ -1440,11 +1493,7 @@ function vScan(){
       <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 3.5h12v16.5l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8h6M9 11.5h6M9 15h3"/></svg>
       <p>ارفع صورة الفاتورة</p>
-      <small>هقراها وأقسّم كل صنف على تصنيفه،<br>وتقدر تعدّل أي حاجة قبل الحفظ.</small>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
-      <button class="btn" style="margin:0" onclick="document.getElementById('picker').click()">صوّرها دلوقتي</button>
-      <button class="btn ghost" style="margin:0" onclick="document.getElementById('picker2').click()">اختار من الصور</button>
+      <small>صوّرها دلوقتي أو اختار صورة من موبايلك.<br>هقراها وأقسّم كل صنف على تصنيفه.</small>
     </div>
     ${scan.err?`<div class="note err">${esc(scan.err)}</div>`:''}
     ${!getKey()?`<div class="note warn">لسه محطتش مفتاح الـ API. من غيره قراءة الفواتير مش هتشتغل — افتح الإعدادات من فوق.</div>`:''}
@@ -2016,30 +2065,41 @@ function wCerts(){
       </div>
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.amount)}" oninput="app.certSet('amount',numFix(this,1))">
-      <label class="f">نسبة العايد السنوي</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.rate)}" oninput="app.certSet('rate',numFix(this,1))">
+      <label class="f">العائد الشهري</label>
+      <input class="f" type="text" inputmode="decimal" placeholder="اللي بينزل كل شهر" value="${esc(certDraft.monthly)}" oninput="app.certSet('monthly',numFix(this,1))">
       <label class="f">${certDraft.type==='deposit'?'تاريخ الإيداع':'تاريخ الشراء'}</label>
       <input class="f" type="date" value="${certDraft.start}" onchange="app.certSet('start',this.value)">
       <label class="f">تاريخ التجديد (اختياري)</label>
       <input class="f" type="date" value="${certDraft.end||''}" onchange="app.certSet('end',this.value)">
-      <label class="f">العايد بيدخل على إيه؟ <b>*</b></label>
+      <label class="f">العائد بيدخل على إيه؟ <b>*</b></label>
       ${payChips(certDraft.account,'app.certAccount')}
-      <div class="hint">العايد الشهري هيطلع <span class="n" id="certmo">${fmt(certMonthly(certDraft.amount,certDraft.rate))}</span> جنيه، وأول واحدة بعد شهر من تاريخ الشراء.</div>
+      <div class="hint">أول عائد بعد شهر من التاريخ ده، وبيتكرر كل شهر في نفس اليوم.</div>
       <button class="btn" id="certsave" ${ok?'':'disabled'} onclick="app.addCert()">احفظ</button>
     `:''}
     ${list.length?`<div class="stats" style="margin-bottom:16px">
       <div class="stat"><b>${fmt(cap)}</b><span>الإجمالي</span></div>
-      <div class="stat"><b style="color:var(--mint)">${fmt(mo)}</b><span>عايد الشهر</span></div>
+      <div class="stat"><b style="color:var(--mint)">${fmt(mo)}</b><span>عائد الشهر</span></div>
     </div>`:''}
     ${list.length?`<div class="panel">${list.map(c=>`
       <div class="arow">
         <span class="rail" style="background:#46C2A8"></span>
         <span class="nm">${esc(c.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
-          <span class="n">${fmt(c.amount)}</span> · <span class="n">${c.rate}</span>% · فايدة جاية ${dayLabel(certNext(c))}
+          <span class="n">${fmt(c.amount)}</span> · عائد جاي ${dayLabel(certNext(c))}
           ${c.end?`<span style="display:block">تجديد ${dayLabel(c.end)}</span>`:''}</span></span>
         <span class="vl" style="color:var(--mint)">${fmt(c.monthly)}</span>
+        <button class="chip sm" onclick="app.startCertEdit('${c.id}')">${certEdit===c.id?'إخفاء':'عدّل'}</button>
         ${delBtn('cert'+c.id,`app.delCert('${c.id}')`)}
-      </div>`).join('')}</div>`:'<div class="empty" style="padding:18px 10px">مفيش شهادات مسجلة.</div>'}
+      </div>
+      ${certEdit===c.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+        <label class="f" style="margin-top:12px">العائد الشهري</label>
+        <input class="f" id="cmo" type="text" inputmode="decimal" value="${c.monthly}" oninput="numFix(this,1)">
+        <label class="f">المبلغ</label>
+        <input class="f" id="camt" type="text" inputmode="decimal" value="${c.amount}" oninput="numFix(this,1)">
+        <label class="f">تاريخ التجديد</label>
+        <input class="f" id="cend" type="date" value="${c.end||''}">
+        <button class="btn" onclick="app.saveCertEdit('${c.id}')">احفظ</button>
+        <button class="btn ghost" onclick="app.cancelCertEdit()">إلغاء</button>
+      </div>`:''}`).join('')}</div>`:'<div class="empty" style="padding:18px 10px">مفيش حاجة مسجلة.</div>'}
 
   </div>`;
 }
@@ -2182,6 +2242,12 @@ function vSettings(){
       <button class="btn" onclick="app.ocatAdd()">ضيف تصنيف</button>
     </div>
 
+    <div class="sec"><div class="sec-h"><h3>حد رسوم المكتب</h3></div>
+      <p class="hint" style="margin-top:-4px">رسوم مصاريف المكتب بتتحسب عليك، ولما توصل الحد ده بيجيلك تنبيه تاخدها.</p>
+      <input class="f" id="ofeelim" type="text" inputmode="decimal" value="${D.ofeeLimit}" style="margin-top:12px" oninput="numFix(this,1)">
+      <button class="btn" onclick="app.saveOfeeLimit()">احفظ الحد</button>
+    </div>
+
     <div class="sec"><div class="sec-h"><h3>سعر الدولار التقديري</h3></div>
       <p class="hint" style="margin-top:-4px">بيتستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
       <input class="f" id="ratein" type="text" inputmode="decimal" value="${D.rate}" style="margin-top:12px" oninput="numFix(this,1)">
@@ -2288,8 +2354,13 @@ const app={
       D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:amt,account:draftO.account,
         date:draftO.date,item:it,ocat:draftO.ocat,note:it,place:String(draftO.place||'').trim()||undefined});
       const ofv=draftO.hasFee?(Number(onlyNum(draftO.feeAmt))||0):0;
-      if(ofv>0)D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:ofv,account:draftO.account,
-        date:draftO.date,item:'رسوم — '+it,ocat:draftO.ocat,note:'رسوم — '+it});
+      if(ofv>0){
+        const ft={id:uid(),book:'me',kind:'expense',amount:ofv,cat:'fees',account:draftO.account,
+          date:draftO.date,note:'رسوم مكتب — '+it};
+        D.txns.unshift(ft);
+        if(!D.ofees)D.ofees=[];
+        D.ofees.push({id:uid(),type:'fee',amount:ofv,date:draftO.date,note:it,srcTxn:ft.id});
+      }
       if(mine>0){
         D.txns.unshift({id:uid(),book:'office',kind:'float',amount:mine,account:draftO.account,
           date:draftO.date,note:'من فلوسي — '+it});
@@ -2371,7 +2442,7 @@ const app={
   startTxnEdit(e,id){
     e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);if(!t)return;
-    eTxn={id:id,amount:String(t.amount||''),date:t.date,account:t.account,
+    eTxn={id:id,amount:String(t.amount||''),date:t.date,account:t.account,place:t.place||'',
       cat:t.cat||'',ocat:t.ocat||'',note:(t.book==='office'?(t.item||t.note||''):(t.note||t.merchant||''))};
     confirmKey='';render();
   },
@@ -2386,6 +2457,7 @@ const app={
     const hasItems=t.items&&t.items.length;
     if(!hasItems){const a=Number(onlyNum(eTxn.amount))||0;if(a>0)t.amount=a;}
     t.date=eTxn.date||t.date;
+    if(t.kind!=='transfer')t.place=String(eTxn.place||'').trim()||undefined;
     if(t.kind!=='transfer'&&eTxn.account)t.account=eTxn.account;
     if(t.book==='office'&&t.kind==='expense'){
       if(eTxn.note.trim()){t.item=normItem(eTxn.note);t.note=t.item;}
@@ -2406,6 +2478,10 @@ const app={
   delTxn(e,id){e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);
     refundVoucher(t);
+    D.owed=(D.owed||[]).filter(o=>o.srcTxn!==id||o.got);
+    D.floatLoans=(D.floatLoans||[]).filter(l=>l.srcTxn!==id);
+    D.ofees=(D.ofees||[]).filter(fx=>fx.srcTxn!==id);
+    (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>d.srcTxn!==id||d.got);});
     D.txns=(t&&t.link)?D.txns.filter(x=>x.link!==t.link):D.txns.filter(x=>x.id!==id);
     openTxn=null;eTxn=null;confirmKey='';save();render();},
 
@@ -2510,7 +2586,7 @@ const app={
     }
     if(fromFloat>0){
       if(!D.floatLoans)D.floatLoans=[];
-      D.floatLoans.push({id:uid(),dir:'take',amount:fromFloat,date:draft.date,
+      D.floatLoans.push({id:uid(),dir:'take',amount:fromFloat,date:draft.date,srcTxn:srcTxnId,
         note:draft.note||catOf(draft.cat).label});
     }
     if(draft.kind==='expense'&&draft.owed){
@@ -2579,8 +2655,30 @@ const app={
   scanItem(v){scan.item=v;},
   scanItemPick(v){scan.item=v;render();},
   scanOcat(id){scan.ocat=id;render();},
+  scanOItem(v){scan.oitem=v;},
+  scanOacct(id){scan.oacct=id;render();},
+  toggleItemOffice(k){scan.items[k].off=!scan.items[k].off;render();},
   scanAccount(id){scan.account=id;render();},
   saveReceipt(){
+    if(book!=='office'&&scan.items.some(i=>i.off)){
+      const off=scan.items.filter(i=>i.off), mineItems=scan.items.filter(i=>!i.off);
+      const offTotal=Math.round(off.reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
+      const oit=normItem(scan.oitem||scan.merchant||'فاتورة');
+      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:offTotal,account:scan.account,
+        date:scan.date,item:oit,ocat:scan.ocat,note:oit,place:scan.merchant||undefined,
+        items:off.map(i=>({name:i.name,amount:i.amount,cat:i.cat}))});
+      if(mineItems.length){
+        const mineTotal=Math.round(mineItems.reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
+        const vch2=useVoucher(scan.voucherId,mineTotal,scan.date);
+        D.txns.unshift({id:uid(),book:'me',kind:'expense',
+          amount:Math.round((mineTotal-(vch2?vch2.amount:0))*100)/100,
+          account:scan.account,date:scan.date,merchant:scan.merchant,note:scan.merchant,
+          place:scan.merchant||undefined,items:mineItems,voucher:vch2||undefined});
+      }
+      sortTxns();save();
+      scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};
+      render();window.scrollTo(0,0);app.toast('الفاتورة اتقسمت واتحفظت');return;
+    }
     const total=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
     const vch=useVoucher(scan.voucherId,total,scan.date);
     D.txns.unshift({id:uid(),book:book,kind:'expense',amount:Math.round((total-(vch?vch.amount:0))*100)/100,
@@ -2670,6 +2768,24 @@ const app={
   },
 
   /* --- فاوتشرات --- */
+  startOfee(){ofeeFor=!ofeeFor;ofeeMode='full';ofeeAcct='';ofeeTo='';render();},
+  cancelOfee(){ofeeFor=false;render();},
+  setOfeeMode(m){ofeeMode=m;render();},
+  setOfeeAcct(id){ofeeAcct=id;render();},
+  setOfeeTo(id){ofeeTo=id;render();},
+  takeOfee(){
+    const bal=ofeeBalance();
+    const amt=ofeeMode==='full'?bal:(numVal('ofeein')||0);
+    if(amt<=0||!ofeeAcct||!ofeeTo)return;
+    const link=uid();
+    D.txns.unshift({id:uid(),link:link,book:'office',kind:'expense',amount:amt,account:ofeeAcct,
+      date:today(),item:'رسوم',ocat:'shared',note:'رسوم'});
+    D.txns.unshift({id:uid(),link:link,book:'me',kind:'expense',amount:-amt,cat:'fees',account:ofeeTo,
+      date:today(),note:'استرداد رسوم مكتب'});
+    if(!D.ofees)D.ofees=[];
+    D.ofees.push({id:uid(),type:'take',amount:amt,date:today(),note:'استرداد'});
+    ofeeFor=false;ofeeAcct='';ofeeTo='';sortTxns();save();render();app.toast('اتسجلت');
+  },
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
   settleLoan(){
@@ -2681,18 +2797,34 @@ const app={
     }
     loanFor=false;render();app.toast('اتسجلت');
   },
-  startRefund(id){refundFor=refundFor===id?null:id;refundAcct='';refundTo='';render();},
-  cancelRefund(){refundFor=null;render();},
-  setRefundAcct(id){refundAcct=id;render();},
+  startRefund(id){refundFor=refundFor===id?null:id;refundParts={};refundTo='';render();},
+  toggleRefundPart(accId,need){
+    if(refundParts[accId]!==undefined){delete refundParts[accId];}
+    else{
+      const ob=balances('office')[accId]||0;
+      const left=Math.max(0,Math.round((need-refundTotal())*100)/100);
+      refundParts[accId]=String(Math.min(ob,left||ob));
+    }
+    render();
+  },
+  setRefundPart(accId,v){
+    refundParts[accId]=v;
+    setText('refsum',fmt(refundTotal()));
+  },
+  cancelRefund(){refundFor=null;refundParts={};render();},
   setRefundTo(id){refundTo=id;render();},
-  doRefund(accId,amount){
-    if(!refundAcct||!refundTo||amount<=0)return;
-    const link=uid();
-    D.txns.unshift({id:uid(),link:link,book:'office',kind:'transfer',amount:amount,
-      account:refundAcct,to:accId,date:today(),note:'استرداد اللي دفعته من فلوسي'});
-    D.txns.unshift({id:uid(),link:link,book:'me',kind:'transfer',amount:amount,
-      account:accId,to:refundTo,date:today(),note:'استرداد من العهدة'});
-    refundFor=null;refundAcct='';refundTo='';sortTxns();save();render();app.toast('اتسجل');
+  doRefund(accId){
+    if(!refundTo||refundTotal()<=0)return;
+    Object.keys(refundParts).forEach(src=>{
+      const amt=Number(onlyNum(refundParts[src]))||0;
+      if(amt<=0)return;
+      const link=uid();
+      D.txns.unshift({id:uid(),link:link,book:'office',kind:'transfer',amount:amt,
+        account:src,to:accId,date:today(),note:'استرداد اللي دفعته من فلوسي'});
+      D.txns.unshift({id:uid(),link:link,book:'me',kind:'transfer',amount:amt,
+        account:accId,to:refundTo,date:today(),note:'استرداد من العهدة'});
+    });
+    refundFor=null;refundParts={};refundTo='';sortTxns();save();render();app.toast('اتسجل');
   },
   goVouchers(){tab='wallet';wtab='vouchers';render();window.scrollTo(0,0);},
   goAccounts(){tab='wallet';wtab='accounts';render();window.scrollTo(0,0);},
@@ -2900,12 +3032,12 @@ const app={
       if(ppl.length){
         ppl.forEach(p=>{
           const amt=usd?Math.round(Number(p.amount)*D.rate*100)/100:Number(p.amount);
-          if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:paySubDate,got:false});
+          if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:paySubDate,got:false,srcTxn:t.id});
         });
       }else{
         const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
         const owed=Math.round((full-mineEgp)*100)/100;
-        if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false});
+        if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false,srcTxn:t.id});
       }
     }
     s.next=dAdd(s.next,s.cycle==='yearly'?12:1);
@@ -3021,20 +3153,29 @@ const app={
 
   /* --- شهادات --- */
   toggleCert(){showCert=!showCert;render();},
+  startCertEdit(id){certEdit=certEdit===id?null:id;render();},
+  cancelCertEdit(){certEdit=null;render();},
+  saveCertEdit(id){
+    const c=D.certs.find(x=>x.id===id);if(!c)return;
+    const mo=numVal('cmo'), am=numVal('camt');
+    const e=document.getElementById('cend');
+    if(mo>0)c.monthly=mo;
+    if(am>0)c.amount=am;
+    if(e&&e.value)c.end=e.value;
+    certEdit=null;save();render();app.toast('اتعدلت');
+  },
   certSet(k,v){certDraft[k]=v;
     if(k==='start'||k==='end'||k==='type'){render();return;}
-    setDisabled('certsave',certOk());
-    const el=document.getElementById('certmo');
-    if(el)el.textContent=fmt(certMonthly(certDraft.amount,certDraft.rate));},
+    setDisabled('certsave',certOk());},
   certAccount(id){certDraft.account=id;render();},
   addCert(){
     const isDep=certDraft.type==='deposit';
     const cnt=(D.certs||[]).filter(c=>(c.type||'cert')===(isDep?'deposit':'cert')).length+1;
-    D.certs.push(mkCert((isDep?'وديعة ':'شهادة ')+cnt,certDraft.amount,certDraft.rate,certDraft.start,
+    D.certs.push(mkCert((isDep?'وديعة ':'شهادة ')+cnt,certDraft.amount,certDraft.monthly,certDraft.start,
       certDraft.account,certDraft.end,isDep?'deposit':'cert'));
-    certDraft={amount:'10000',rate:'19.5',start:today(),end:'',account:'bank',type:certDraft.type};showCert=false;
+    certDraft={amount:'',monthly:'',start:today(),end:'',account:'bank',type:certDraft.type};showCert=false;
     const cu=catchUp();save();
-    autoMsg=cu.n?('اتقيد '+cu.n+' فايدة بإجمالي '+fmt(cu.tot)+' جنيه.'):'';
+    autoMsg=cu.n?('اتقيد '+cu.n+' عائد بإجمالي '+fmt(cu.tot)+' جنيه.'):'';
     render();
   },
   delCert(id){
@@ -3081,6 +3222,11 @@ const app={
       a.credit=!!c.credit;
       a.limit=c.credit?(Number(onlyNum(c.limit))||0):0;});
     accCfgInit();save();msg='اتحفظ.';render();
+  },
+  saveOfeeLimit(){
+    const v=numVal('ofeelim');
+    if(v>0){D.ofeeLimit=v;save();msg='اتحفظ.';}
+    render();
   },
   saveRate(){
     const v=numVal('ratein');
@@ -3156,7 +3302,7 @@ if(document.addEventListener)document.addEventListener('visibilitychange',()=>{i
 (function(){
   const cu=catchUp();
   const parts=[];
-  if(cu.n)parts.push('اتقيد '+cu.n+' دفعة فوايد بإجمالي '+fmt(cu.tot)+' جنيه على حسابك.');
+  if(cu.n)parts.push('اتقيد '+cu.n+' دفعة عوائد بإجمالي '+fmt(cu.tot)+' جنيه على حسابك.');
   const tr=autoTrials();
   if(tr.length)parts.push('خلصت تجربة '+tr.join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
   autoMsg=parts.join(' ');
