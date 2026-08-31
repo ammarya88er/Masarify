@@ -374,7 +374,7 @@ let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, pa
 let showIns=false, showCert=false, showSub=false;
 let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',vc:'pay',fee:'',to2:'cash'};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
-let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:''};
+let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
 let accDraft={name:'',credit:false,limit:'',sec:false,secured:[],
@@ -394,7 +394,7 @@ let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
-let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='';
+let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let refundParts={};
 const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
 let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
@@ -490,6 +490,7 @@ function normalizeData(){
   if(!D.owed)D.owed=[];
   if(!D.floatLoans)D.floatLoans=[];
   if(!D.ofees)D.ofees=[];
+  if(!D.groups)D.groups=[];
   if(!D.ofeeLimit)D.ofeeLimit=200;
   if(D.ghLastSync===undefined)D.ghLastSync='';
   if(!D._qfix){
@@ -581,6 +582,17 @@ const dayShift=(ds,n)=>{const p=ds.split('-').map(Number);
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
 const normItem=s=>String(s||'').trim().replace(/\s+/g,' ');
 
+function groupOwning(name,exceptId){
+  const n=normItem(name||'');
+  if(!n)return null;
+  return (D.groups||[]).find(g=>g.id!==exceptId&&(g.items||[]).some(i=>normItem(i)===n))||null;
+}
+function groupNameFor(item){
+  const n=normItem(item||'');
+  if(!n)return '';
+  const g=(D.groups||[]).find(x=>(x.items||[]).some(i=>normItem(i)===n));
+  return g?g.name:'';
+}
 function officeReport(from,to){
   const off=D.txns.filter(t=>t.book==='office');
   const sign=t=>{const v=Number(t.amount)||0;
@@ -591,9 +603,13 @@ function officeReport(from,to){
                   .sort((a,b)=>a.date<b.date?-1:1);
   const exp=off.filter(t=>t.kind==='expense'&&t.date>=from&&t.date<=to);
   const g={};
-  exp.forEach(t=>{const key=(t.ocat||'')+'|'+normItem(t.item||t.note||t.merchant||'بند');
-    if(!g[key])g[key]={item:normItem(t.item||t.note||t.merchant||'بند'),ocat:t.ocat||'',n:0,sum:0};
-    g[key].n++;g[key].sum+=Number(t.amount)||0;});
+  exp.forEach(t=>{
+    const raw=normItem(t.item||t.note||t.merchant||'بند');
+    const gn=groupNameFor(raw);
+    const key=(t.ocat||'')+'|'+(gn||raw);
+    if(!g[key])g[key]={item:gn||raw,ocat:t.ocat||'',n:0,sum:0,grouped:!!gn,parts:{}};
+    g[key].n++;g[key].sum+=Number(t.amount)||0;
+    if(gn)g[key].parts[raw]=Math.round(((g[key].parts[raw]||0)+(Number(t.amount)||0))*100)/100;});
   const items=Object.values(g).sort((a,b)=>b.sum-a.sum);
   const byCat={};
   items.forEach(i=>byCat[i.ocat]=(byCat[i.ocat]||0)+i.sum);
@@ -601,7 +617,7 @@ function officeReport(from,to){
   const spent=items.reduce((a,i)=>a+i.sum,0);
   const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
   return {from:from,to:to,opening:r2(opening),floats:floats,floatsTotal:r2(floatsTotal),
-          items:items.map(i=>({item:i.item,ocat:i.ocat,n:i.n,sum:r2(i.sum)})),
+          items:items.map(i=>({item:i.item,ocat:i.ocat,n:i.n,sum:r2(i.sum),grouped:i.grouped,parts:i.parts})),
           byCat:Object.keys(byCat).reduce((o,k)=>{o[k]=r2(byCat[k]);return o;},{}),
           spent:r2(spent),result:r2(opening+floatsTotal-spent)};
 }
@@ -1075,7 +1091,7 @@ function alertsPanel(){
       ${refundFor===a.id?`<div class="inline">
         <label class="f">تاخدها من أنهي حساب عهدة؟ <b>*</b></label>
         ${(function(){const ob=balances('office');
-          const opts=D.accounts.filter(x=>x.id!==a.id&&(ob[x.id]||0)>0.01);
+          const opts=D.accounts.filter(x=>x.id!==a.id&&!x.credit&&(ob[x.id]||0)>0.01);
           if(!opts.length)return '<div class="hint">مفيش رصيد عهدة في أي حساب دلوقتي — استناها لحد ما توصل عهدة جديدة.</div>';
           return '<div class="chips">'+opts.map(x=>`<button class="chip sm${refundParts[x.id]!==undefined?' on':''}" onclick="app.toggleRefundPart('${x.id}',${Math.abs(v)})">${esc(x.name)} · <span class="n">${fmt(ob[x.id])}</span></button>`).join('')+'</div>'
             +opts.filter(x=>refundParts[x.id]!==undefined).map(x=>`
@@ -1084,6 +1100,11 @@ function alertsPanel(){
             +(Object.keys(refundParts).length>1?`<div class="hint">المجموع <span class="n" id="refsum">${fmt(refundTotal())}</span> من <span class="n">${fmt(Math.abs(v))}</span></div>`:'');})()}
         <label class="f">وتدخل على أنهي حساب من حساباتك؟ <b>*</b></label>
         ${payChips(refundTo,'app.setRefundTo','','me')}
+        ${(function(){const need=Math.abs(v), got=refundTotal(), d=Math.round((got-need)*100)/100;
+          if(Math.abs(d)<0.005)return '';
+          return d>0
+            ? `<div class="hint">المستحق <span class="n">${fmt(need)}</span> · هتاخد <span class="n">${fmt(got)}</span> · الزيادة <span class="n">${fmt(d)}</span> هتتزود على نفس بند المصروف وتدخل رصيدك.</div>`
+            : `<div class="hint">المستحق <span class="n">${fmt(need)}</span> · هتاخد <span class="n">${fmt(got)}</span> · الباقي <span class="n">${fmt(-d)}</span> هيفضل ليك عند المكتب.</div>`;})()}
         <div class="hint">لو سيبتها من غير استرداد، هتتخصم لوحدها من العهدة الجاية.</div>
         <button class="btn" ${refundTotal()>0&&refundTo?'':'disabled'} onclick="app.doRefund('${a.id}',${Math.abs(v)})">سجّل الاسترداد</button>
         <button class="btn ghost" onclick="app.cancelRefund()">إلغاء</button>
@@ -1197,7 +1218,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من عهدة المكتب':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?' (تقديري)':''):''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من عهدة المكتب':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?' (تقديري)':''):''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -1242,7 +1263,8 @@ function vAddOffice(){
 
 
     ${k==='loan'?'':`<label class="f">${k==='float'?'دخلت فين؟':k==='bonus'?'يخرج من إيه؟':'اتدفعت من إيه؟'} <b>*</b></label>
-    ${payChips(draftO.account,'app.oAccount','','office')}`}
+    ${(function(){const opts=D.accounts.filter(x=>k==='expense'?true:!x.credit);
+      return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)}</button>`).join('')+'</div>';})()}`}
 
     ${k==='bonus'?`
       <label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
@@ -1276,6 +1298,18 @@ function vAddOffice(){
         ${draftO.hasFee?`<label class="f">قيمة الرسوم</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(draftO.feeAmt)}" oninput="app.oSet('feeAmt',numFix(this,1))">
           <div class="hint">الرسوم بتتحسب عليك أنت، ولما توصل <span class="n">${fmt(D.ofeeLimit)}</span> جنيه هفكرك تاخدها من المكتب.</div>`:''}
+
+        <label class="f">اللي خرج من العهدة (لو مختلف)</label>
+        <input class="f" type="text" inputmode="decimal" placeholder="سيبها فاضية لو نفس المبلغ"
+          value="${esc(draftO.paid)}" oninput="app.oSetLive('paid',numFix(this,1))">
+        <div class="hint" id="opaidhint">${(function(){
+          const a=Number(onlyNum(draftO.amount))||0, p=Number(onlyNum(draftO.paid))||0;
+          if(!p||Math.abs(p-a)<0.005)return 'سيبها فاضية لو اللي خرج من العهدة هو نفس المصروف بالظبط.';
+          return p>a
+            ? 'المكتب هيتسجل عليه '+fmt(p)+' في سطر واحد، و'+fmt(p-a)+' هيدخل رصيدك.'
+            : 'الفرق '+fmt(a-p)+' هيتحسب إنك دفعته من فلوسك، وهيبقى ليك عند المكتب.';})()}</div>
+        ${(function(){const a=Number(onlyNum(draftO.amount))||0,p=Number(onlyNum(draftO.paid))||0;
+          return (p>a+0.005)?`<label class="f">الفرق يدخل على أنهي حساب؟ <b>*</b></label>${payChips(draftO.diffTo,'app.oDiffTo','','me')}`:'';})()}
 
         <label class="f">فيه جزء من فلوسك؟</label>
         <div class="chips">
@@ -1610,7 +1644,8 @@ function repLines(r){
     <h4>المنصرف</h4>
     ${r.items.length?groupedItems(r).map(g=>`
       <div class="catline">${esc(ocatOf(g.ocat).label)}</div>
-      ${g.items.map(i=>`<div class="l"><span class="n">${fmt(i.sum)}</span><span>${esc(i.item)}${i.n>1?` <small>×${i.n}</small>`:''}</span></div>`).join('')}
+      ${g.items.map(i=>`<div class="l"><span class="n">${fmt(i.sum)}</span><span>${esc(i.item)}${i.n>1?` <small>×${i.n}</small>`:''}${
+        (i.grouped&&i.parts)?`<small style="display:block;color:var(--muted)">${Object.keys(i.parts).map(k=>esc(k)+' '+fmt(i.parts[k])).join(' · ')}</small>`:''}</span></div>`).join('')}
       <div class="l catsum"><span class="n">${fmt(g.sum)}</span><span>مجموع ${esc(ocatOf(g.ocat).label)}</span></div>
     `).join('')
       :'<div class="l"><span></span><span>مفيش مصاريف في الفترة دي</span></div>'}
@@ -2297,6 +2332,33 @@ function vSettings(){
       <button class="btn" onclick="app.ocatAdd()">ضيف تصنيف</button>
     </div>
 
+    <div class="sec-h" style="margin-top:28px"><h3>تجميع بنود المكتب</h3><span>${(D.groups||[]).length}</span></div>
+    <p class="hint" style="margin-top:-4px">البنود اللي جوه المجموعة بتتسجل مفصّلة زي ما هي، بس بتظهر في تقرير التقفيل في سطر واحد باسم المجموعة.</p>
+    <div class="panel" style="margin-top:12px">
+      ${(D.groups||[]).length?(D.groups||[]).map(g=>`
+        <div class="arow">
+          <span class="nm">${esc(g.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">${(g.items||[]).map(esc).join(' · ')||'مفيش بنود'}</span></span>
+          <button class="chip sm" onclick="app.editGroup('${g.id}')">${grpEdit===g.id?'إخفاء':'عدّل'}</button>
+          ${delBtn('grp'+g.id,`app.delGroup('${g.id}')`)}
+        </div>
+        ${grpEdit===g.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+          <label class="f" style="margin-top:12px">اسم المجموعة</label>
+          <input class="f" value="${esc(g.name)}" oninput="app.grpSet('${g.id}','name',this.value)">
+          <label class="f">البنود اللي جواها</label>
+          ${(g.items||[]).map((it,ix)=>{const own=groupOwning(it,g.id);
+            return `<div style="display:grid;grid-template-columns:1fr 34px;gap:8px;margin-bottom:8px">
+            <input class="f" style="${own?'border-color:#5E332B':''}" value="${esc(it)}" oninput="app.grpItem('${g.id}',${ix},this.value)">
+            <button class="chip sm" style="padding:0" onclick="app.grpDelItem('${g.id}',${ix})">×</button>
+          </div>${own?`<div class="hint" style="color:#FF9C90;margin-top:-4px">«${esc(it)}» موجود في مجموعة «${esc(own.name)}» — شيله من هنا أو من هناك.</div>`:''}`;}).join('')}
+          <button class="btn ghost" style="margin-top:0" onclick="app.grpAddItem('${g.id}')">زوّد بند فاضي</button>
+          ${(function(){const n=itemNames().filter(x=>!groupNameFor(x));
+            return n.length?`<div class="hint">أو اختار من بنودك:</div><div class="chips">${n.map(x=>`<button class="chip sm" onclick="app.grpAddNamed('${g.id}','${esc(x).replace(/'/g,"&#39;")}')">${esc(x)}</button>`).join('')}</div>`:'';})()}
+          <button class="btn" id="grpsave${g.id}" ${(g.items||[]).some(it=>groupOwning(it,g.id))?'disabled':''} onclick="app.saveGroup('${g.id}')">احفظ</button>
+        </div>`:''}`).join(''):'<div class="empty" style="padding:16px 10px">مفيش مجموعات.</div>'}
+    </div>
+    <input class="f" id="newgrp" placeholder="اسم مجموعة جديدة" style="margin-top:12px">
+    <button class="btn ghost" onclick="app.addGroup()">زوّد مجموعة</button>
+
     <div class="sec"><div class="sec-h"><h3>حد رسوم المكتب</h3></div>
       <p class="hint" style="margin-top:-4px">رسوم مصاريف المكتب بتتحسب عليك، ولما توصل الحد ده بيجيلك تنبيه تاخدها.</p>
       <input class="f" id="ofeelim" type="text" inputmode="decimal" value="${D.ofeeLimit}" style="margin-top:12px" oninput="numFix(this,1)">
@@ -2373,10 +2435,19 @@ const app={
   oDir(d){draftO.dir=d;render();},
   oMine(v){draftO.mine=v;if(!v)draftO.mineAmt='';render();},
   oHasFee(v){draftO.hasFee=v;if(!v)draftO.feeAmt='';render();},
+  oDiffTo(id){draftO.diffTo=id;render();},
   oSetLive(k,v){
     draftO[k]=v;setDisabled('osave',oOk());
     const el=document.getElementById('ominehint');
     if(el)el.textContent=fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)));
+    const ph=document.getElementById('opaidhint');
+    if(ph){
+      const a=Number(onlyNum(draftO.amount))||0, p=Number(onlyNum(draftO.paid))||0;
+      ph.textContent=(!p||Math.abs(p-a)<0.005)
+        ?'سيبها فاضية لو اللي خرج من العهدة هو نفس المصروف بالظبط.'
+        :(p>a?'المكتب هيتسجل عليه '+fmt(p)+' في سطر واحد، و'+fmt(p-a)+' هيدخل رصيدك.'
+             :'الفرق '+fmt(a-p)+' هيتحسب إنك دفعته من فلوسك، وهيبقى ليك عند المكتب.');
+    }
   },
   oItemPick(v){draftO.item=v;render();},
   oDate(v){draftO.date=v;render();},
@@ -2391,7 +2462,7 @@ const app={
       D.floatLoans.push({id:uid(),dir:draftO.dir==='back'?'back':'take',amount:amt,
         date:draftO.date,note:String(draftO.note||'').trim()});
       save();
-      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:''};
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
       render();window.scrollTo(0,0);app.toast('اتسجلت');return;
     }
     if(draftO.kind==='float'){
@@ -2404,10 +2475,18 @@ const app={
       D.txns.unshift({id:uid(),link:link,book:'me',kind:'income',amount:amt,account:draftO.to,
         date:draftO.date,note:it,fromOffice:true});
     }else{
+      const paidOut=Number(onlyNum(draftO.paid))||0;
+      const extra=paidOut>amt+0.005?Math.round((paidOut-amt)*100)/100:0;
       let mine=draftO.mine?(Number(onlyNum(draftO.mineAmt))||0):0;
+      if(paidOut>0&&paidOut<amt-0.005)mine=Math.max(mine,Math.round((amt-paidOut)*100)/100);
       if(mine>amt)mine=amt;
-      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:amt,account:draftO.account,
-        date:draftO.date,item:it,ocat:draftO.ocat,note:it,place:String(draftO.place||'').trim()||undefined});
+      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:Math.round((amt+extra)*100)/100,
+        account:draftO.account,date:draftO.date,item:it,ocat:draftO.ocat,note:it,
+        real:extra>0?amt:undefined,place:String(draftO.place||'').trim()||undefined});
+      if(extra>0){
+        D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,
+          account:draftO.diffTo||'cash',date:draftO.date,note:'باقي تقريب — '+it});
+      }
       const ofv=draftO.hasFee?(Number(onlyNum(draftO.feeAmt))||0):0;
       if(ofv>0){
         const ft={id:uid(),book:'me',kind:'expense',amount:ofv,cat:'fees',account:draftO.account,
@@ -2424,7 +2503,7 @@ const app={
       }
     }
     sortTxns();save();
-    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:''};
+    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   setCloseTo(v){closeTo=v;render();},
@@ -2940,16 +3019,35 @@ const app={
   },
   cancelRefund(){refundFor=null;refundParts={};render();},
   setRefundTo(id){refundTo=id;render();},
-  doRefund(accId){
+  doRefund(accId,need){
     if(!refundTo||refundTotal()<=0)return;
+    const owed=Number(need)||0;
+    let left=Math.min(refundTotal(),owed);
     Object.keys(refundParts).forEach(src=>{
       const amt=Number(onlyNum(refundParts[src]))||0;
       if(amt<=0)return;
-      const link=uid();
-      D.txns.unshift({id:uid(),link:link,book:'office',kind:'transfer',amount:amt,
+      // كل اللي خرج من العهدة بيتحرك من مصدر العهدة للحساب اللي دفعت منه
+      D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,
         account:src,to:accId,date:today(),note:'استرداد اللي دفعته من فلوسي'});
-      D.txns.unshift({id:uid(),link:link,book:'me',kind:'transfer',amount:amt,
+      // اللي بيقفل المستحق بس هو اللي بيرجع لحسابك
+      const cover=Math.min(amt,left);
+      left=Math.round((left-cover)*100)/100;
+      if(cover>0.005)D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:cover,
         account:accId,to:refundTo,date:today(),note:'استرداد من العهدة'});
+      // الزيادة: بتتزود على نفس بند المصروف وتدخل رصيدك
+      const over=Math.round((amt-cover)*100)/100;
+      if(over>0.005){
+        const target=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.account===accId);
+        if(target){
+          target.real=target.real||target.amount;
+          target.amount=Math.round((Number(target.amount)+over)*100)/100;
+        }else{
+          D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:over,account:accId,
+            date:today(),item:'تقريب',ocat:'shared',note:'تقريب'});
+        }
+        D.txns.unshift({id:uid(),book:'me',kind:'income',amount:over,account:refundTo,
+          date:today(),note:'باقي تقريب من العهدة'});
+      }
     });
     refundFor=null;refundParts={};refundTo='';sortTxns();save();render();app.toast('اتسجل');
   },
@@ -3345,6 +3443,52 @@ const app={
       a.credit=!!c.credit;
       a.limit=c.credit?(Number(onlyNum(c.limit))||0):0;});
     accCfgInit();save();msg='اتحفظ.';render();
+  },
+  addGroup(){
+    const el=document.getElementById('newgrp');
+    const n=el?String(el.value||'').trim():'';
+    if(!n)return;
+    if(!D.groups)D.groups=[];
+    D.groups.push({id:uid(),name:n,items:[]});
+    if(el)el.value='';
+    grpEdit=D.groups[D.groups.length-1].id;
+    save();render();
+  },
+  editGroup(id){grpEdit=grpEdit===id?null:id;confirmKey='';render();},
+  grpSet(id,k,v){const g=(D.groups||[]).find(x=>x.id===id);if(g)g[k]=v;},
+  grpItem(id,ix,v){
+    const g=(D.groups||[]).find(x=>x.id===id);
+    if(g&&g.items){g.items[ix]=v;const own=groupOwning(v,id);setDisabled('grpsave'+id,!own);}
+  },
+  grpAddItem(id){const g=(D.groups||[]).find(x=>x.id===id);if(!g)return;
+    if(!g.items)g.items=[];g.items.push('');save();render();},
+  grpAddNamed(id,name){const g=(D.groups||[]).find(x=>x.id===id);if(!g)return;
+    const own=groupOwning(name,id);
+    if(own){alert('«'+name+'» موجود في مجموعة «'+own.name+'».');return;}
+    if(!g.items)g.items=[];
+    if(g.items.map(x=>normItem(x)).indexOf(normItem(name))<0)g.items.push(name);
+    save();render();},
+  grpDelItem(id,ix){const g=(D.groups||[]).find(x=>x.id===id);if(!g||!g.items)return;
+    g.items.splice(ix,1);save();render();},
+  saveGroup(id){
+    const g=(D.groups||[]).find(x=>x.id===id);if(!g)return;
+    g.name=String(g.name||'').trim()||'مجموعة';
+    g.items=(g.items||[]).map(x=>String(x||'').trim()).filter(Boolean);
+    const dup=g.items.find(it=>groupOwning(it,id));
+    if(dup){
+      const own=groupOwning(dup,id);
+      alert('«'+dup+'» موجود في مجموعة «'+own.name+'». شيله من واحدة منهم الأول.');
+      render();return;
+    }
+    // امنع تكرار نفس البند جوه نفس المجموعة
+    const seen=[];
+    g.items=g.items.filter(it=>{const n=normItem(it);
+      if(seen.indexOf(n)>-1)return false;seen.push(n);return true;});
+    grpEdit=null;save();render();app.toast('اتحفظت');
+  },
+  delGroup(id){
+    D.groups=(D.groups||[]).filter(g=>g.id!==id);
+    grpEdit=null;confirmKey='';save();render();
   },
   saveOfeeLimit(){
     const v=numVal('ofeelim');
