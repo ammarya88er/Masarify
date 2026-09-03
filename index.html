@@ -374,7 +374,7 @@ let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, pa
 let showIns=false, showCert=false, showSub=false;
 let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',vc:'pay',fee:'',to2:'cash'};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
-let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
+let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
 let accDraft={name:'',credit:false,limit:'',sec:false,secured:[],
@@ -1217,7 +1217,7 @@ function txnRow(t){
   return `
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
-    <span class="g"><span class="t">${esc(title)}</span>
+    <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
       <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من عهدة المكتب':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?' (تقديري)':''):''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
@@ -1254,7 +1254,19 @@ function vAddOffice(){
       <button class="${k==='float'?'on':''}" onclick="app.oKind('float')">استلام عهدة</button>
       <button class="${k==='bonus'?'on':''}" onclick="app.oKind('bonus')">حافز ليا</button>
       <button class="${k==='loan'?'on':''}" onclick="app.oKind('loan')">سلفة</button>
+      <button class="${k==='xfer'?'on':''}" onclick="app.oKind('xfer')">تحويل</button>
     </div>
+    ${k==='xfer'?`
+      <label class="f">من أنهي حساب؟ <b>*</b></label>
+      ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit);
+        return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)} · <span class="n">${fmt(ob[x.id]||0)}</span></button>`).join('')+'</div>';})()}
+      <label class="f">لأنهي حساب؟ <b>*</b></label>
+      ${(function(){const opts=D.accounts.filter(x=>!x.credit&&x.id!==draftO.account);
+        return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.to===x.id?' on':''}" onclick="app.oTo('${x.id}')">${esc(x.name)}</button>`).join('')+'</div>';})()}
+      <div class="hint">بينقل فلوس العهدة من حساب لحساب — إجمالي العهدة مش هيتغير.</div>
+      <label class="f">ملاحظة (اختياري)</label>
+      <input class="f" placeholder="سحب من ATM مثلاً" value="${esc(draftO.note)}" oninput="app.oSet('note',this.value)">
+    `:''}
     ${k==='loan'?`<div class="chips" style="margin-top:12px">
       <button class="chip sm${draftO.dir==='take'?' on':''}" onclick="app.oDir('take')">أخدت من العهدة</button>
       <button class="chip sm${draftO.dir==='back'?' on':''}" onclick="app.oDir('back')">رجّعت للعهدة</button>
@@ -1262,7 +1274,7 @@ function vAddOffice(){
     <div class="hint">رصيد العهدة مش هيتغير — ده بس تسجيل إن معاك فلوس منها عشان ترجّعها.</div>`:''}
 
 
-    ${k==='loan'?'':`<label class="f">${k==='float'?'دخلت فين؟':k==='bonus'?'يخرج من إيه؟':'اتدفعت من إيه؟'} <b>*</b></label>
+    ${(k==='loan'||k==='xfer')?'':`<label class="f">${k==='float'?'دخلت فين؟':k==='bonus'?'يخرج من إيه؟':'اتدفعت من إيه؟'} <b>*</b></label>
     ${(function(){const opts=D.accounts.filter(x=>k==='expense'?true:!x.credit);
       return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)}</button>`).join('')+'</div>';})()}`}
 
@@ -1272,7 +1284,7 @@ function vAddOffice(){
       <div class="hint">لو نفس الحساب (CIB مثلاً)، الفلوس مش هتتحرك فعليًا — بس هتخرج من نصيب المكتب وتدخل نصيبك.</div>
     `:''}
 
-    ${k==='loan'?`
+    ${k==='xfer'?'':k==='loan'?`
       <label class="f">على إيه؟ (اختياري)</label>
       <input class="f" value="${esc(draftO.note)}" oninput="app.oSet('note',this.value)">
     `:k==='float'?`
@@ -1287,6 +1299,9 @@ function vAddOffice(){
       <div class="chips">${D.ocats.map(c=>`<button class="chip${draftO.ocat===c.id?' on':''}" onclick="app.oCat('${c.id}')">${esc(c.label)}</button>`).join('')}</div>
 
       ${k==='expense'?`
+        <label class="f">ملاحظات (اختياري)</label>
+        <input class="f" placeholder="تفاصيل زيادة عن البند" value="${esc(draftO.onote)}" oninput="app.oSet('onote',this.value)">
+
         <label class="f">المكان (اختياري)</label>
         <input class="f" placeholder="اسم المحل أو المكان" value="${esc(draftO.place)}" oninput="app.oSet('place',this.value)">
 
@@ -1347,6 +1362,7 @@ function itemSuggestions(fn){
 }
 function oOk(){const k=draftO.kind;
   if(k==='loan')return Number(onlyNum(draftO.amount))>0;
+  if(k==='xfer')return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.to&&draftO.to!==draftO.account);
   return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&(k==='float'||(draftO.item.trim()&&draftO.ocat))&&(k!=='bonus'||draftO.to));}
 
 function txnEditForm(t){
@@ -1370,6 +1386,8 @@ function txnEditForm(t){
 
     ${isTransfer?'':`<label class="f">${isOffice&&t.kind==='expense'?'اسم البند':'الوصف'}</label>
       <input class="f" value="${esc(eTxn.note)}" oninput="app.eTxnSet('note',this.value)">
+      ${isOffice&&t.kind==='expense'?`<label class="f">ملاحظات</label>
+        <input class="f" value="${esc(eTxn.onote)}" oninput="app.eTxnSet('onote',this.value)">`:''}
       <label class="f">المكان</label>
       <input class="f" value="${esc(eTxn.place)}" oninput="app.eTxnSet('place',this.value)">
       ${isOffice&&t.kind==='expense'?itemSuggestions('app.eTxnItem'):''}`}
@@ -1574,6 +1592,8 @@ function vScan(){
       <p>ارفع صورة الفاتورة</p>
       <small>صوّرها دلوقتي أو اختار صورة من موبايلك.<br>هقراها وأقسّم كل صنف على تصنيفه.</small>
     </div>
+    <button class="btn ghost" onclick="app.pasteImage()">الصق صورة من الحافظة</button>
+    <div class="hint">لو ناسخ سكرين شوت، اضغط هنا على طول من غير ما تحفظه.</div>
     ${scan.err?`<div class="note err">${esc(scan.err)}</div>`:''}
     ${!getKey()?`<div class="note warn">لسه محطتش مفتاح الـ API. من غيره قراءة الفواتير مش هتشتغل — افتح الإعدادات من فوق.</div>`:''}
   </div>`;
@@ -2456,13 +2476,22 @@ const app={
     const amt=Number(onlyNum(draftO.amount))||0;
     if(amt<=0)return;
     if(draftO.kind!=='loan'&&!draftO.account)return;
+    if(draftO.kind==='xfer'&&(!draftO.to||draftO.to===draftO.account))return;
     const it=normItem(draftO.item);
+    if(draftO.kind==='xfer'){
+      D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,account:draftO.account,
+        to:draftO.to,date:draftO.date,note:String(draftO.note||'').trim()||'تحويل عهدة'});
+      sortTxns();save();
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',
+        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
+      render();window.scrollTo(0,0);app.toast('اتحول');return;
+    }
     if(draftO.kind==='loan'){
       if(!D.floatLoans)D.floatLoans=[];
       D.floatLoans.push({id:uid(),dir:draftO.dir==='back'?'back':'take',amount:amt,
         date:draftO.date,note:String(draftO.note||'').trim()});
       save();
-      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
       render();window.scrollTo(0,0);app.toast('اتسجلت');return;
     }
     if(draftO.kind==='float'){
@@ -2481,7 +2510,8 @@ const app={
       if(paidOut>0&&paidOut<amt-0.005)mine=Math.max(mine,Math.round((amt-paidOut)*100)/100);
       if(mine>amt)mine=amt;
       D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:Math.round((amt+extra)*100)/100,
-        account:draftO.account,date:draftO.date,item:it,ocat:draftO.ocat,note:it,
+        account:draftO.account,date:draftO.date,item:it,ocat:draftO.ocat,
+        note:String(draftO.onote||'').trim()||it,
         real:extra>0?amt:undefined,place:String(draftO.place||'').trim()||undefined});
       if(extra>0){
         D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,
@@ -2503,7 +2533,7 @@ const app={
       }
     }
     sortTxns();save();
-    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash'};
+    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   setCloseTo(v){closeTo=v;render();},
@@ -2577,6 +2607,7 @@ const app={
     e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);if(!t)return;
     eTxn={id:id,amount:String(t.amount||''),date:t.date,account:t.account,place:t.place||'',
+      onote:(t.book==='office'&&t.note!==t.item)?(t.note||''):'',
       cat:t.cat||'',ocat:t.ocat||'',note:(t.book==='office'?(t.item||t.note||''):(t.note||t.merchant||''))};
     confirmKey='';render();
   },
@@ -2604,7 +2635,8 @@ const app={
     if(t.kind!=='transfer')t.place=String(eTxn.place||'').trim()||undefined;
     if(t.kind!=='transfer'&&eTxn.account)t.account=eTxn.account;
     if(t.book==='office'&&t.kind==='expense'){
-      if(eTxn.note.trim()){t.item=normItem(eTxn.note);t.note=t.item;}
+      if(eTxn.note.trim())t.item=normItem(eTxn.note);
+      t.note=String(eTxn.onote||'').trim()||t.item;
       if(eTxn.ocat)t.ocat=eTxn.ocat;
     }else if(t.kind!=='transfer'){
       t.note=eTxn.note;
@@ -2812,6 +2844,24 @@ const app={
   },
 
   /* --- فاتورة --- */
+  async pasteImage(){
+    try{
+      if(!navigator.clipboard||!navigator.clipboard.read){
+        scan.err='المتصفح ده مش بيسمح باللصق. اختار الصورة من فوق.';render();return;
+      }
+      const items=await navigator.clipboard.read();
+      for(const it of items){
+        const type=(it.types||[]).find(t=>t.indexOf('image/')===0);
+        if(type){
+          const blob=await it.getType(type);
+          return app.pickFile({files:[new File([blob],'pasted.png',{type:type})],value:''});
+        }
+      }
+      scan.err='مفيش صورة في الحافظة.';render();
+    }catch(e){
+      scan.err='مقدرتش أوصل للحافظة. اختار الصورة من فوق.';render();
+    }
+  },
   async pickFile(el){
     const f=el.files&&el.files[0];el.value='';
     if(!f)return;
@@ -3565,6 +3615,16 @@ load();
 sortTxns();
 if(D._needSort){delete D._needSort;save();}
 if(ghToken&&ghGist){ghLastPull=Date.now();ghReconcile();}
+if(document.addEventListener)document.addEventListener('paste',e=>{
+  if(tab!=='scan'||scan.stage==='working')return;
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(let i=0;i<items.length;i++){
+    if(items[i].type&&items[i].type.indexOf('image/')===0){
+      const f=items[i].getAsFile();
+      if(f){e.preventDefault();app.pickFile({files:[f],value:''});return;}
+    }
+  }
+});
 if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden)ghMaybePull();});
 (function(){
   const cu=catchUp();
