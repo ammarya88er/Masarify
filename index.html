@@ -181,6 +181,12 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
 .rep .catline:first-child{margin-top:4px;}
 .rep .l.catsum{font-weight:600;color:#D6DCE4;border-top:1px dashed var(--line);margin-top:6px;padding-top:8px;}
 
+.rl .who{background:#E7E2D6;border:1px solid #CDC7B8;color:#5C5648;border-radius:9px;
+  font:inherit;font-size:10.5px;font-weight:600;padding:5px 9px;cursor:pointer;white-space:nowrap;}
+.rl .who.on{background:#2E7D5B;border-color:#2E7D5B;color:#fff;}
+.rl .who.on.off{background:#8C7BF0;border-color:#8C7BF0;}
+.rl .x{margin-inline-start:8px;}
+
 .alert{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);}
 .alert:last-child{border-bottom:0;}
 .alert .g{flex:1;min-width:0;}
@@ -393,8 +399,10 @@ let catDraft='';
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
+let ownerFor=null;
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
+let owedOpen=false;
 let refundParts={};
 const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
 let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
@@ -905,7 +913,7 @@ function acctRow(a,b,extra,attrs){
   return `<div class="arow" ${attrs||''}>
     <span class="rail" style="background:${aColor(a.id)}"></span>
     <span class="nm">${esc(a.name)}${split}
-      ${lim?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">فاضل <span class="n">${fmt(v)}</span> من <span class="n">${fmt(lim)}</span>${(lim-v)>0.01?` · عليك <span class="n">${fmt(lim-v)}</span>`:''}</span>
+      ${lim?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">عليك <span class="n">${fmt(Math.max(0,lim-v))}</span> من <span class="n">${fmt(lim)}</span></span>
       <span class="track" style="display:block;margin-top:6px;height:4px"><span class="fill" style="display:block;width:${lim?left/lim*100:0}%;background:${aColor(a.id)}"></span></span>`:''}
     </span>
     <span class="vl" style="color:${v<0?'var(--clay)':'var(--text)'}">${fmt(v)}</span>
@@ -1031,13 +1039,14 @@ function alertsPanel(){
       <button class="chip sm" onclick="app.startPay('${i.id}')">سدد</button>
     </div>`));
 
-  if(book==='me')(D.subs||[]).filter(subSoon).forEach(s=>rows.push(`
+  if(book==='me')(D.subs||[]).filter(s=>subSoon(s)&&!(s.hideUntil===s.next&&daysTo(s.next)>0)).forEach(s=>rows.push(`
     <div class="alert">
       <span class="rail" style="background:${s.cycle==='trial'?'#F58F52':catOf(s.cat).color}"></span>
       <span class="g"><span class="t">${esc(s.name)}</span>
         <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):cycleLabel(s)} · ${whenLabel(s.next)}</span></span>
       ${s.cycle==='trial'?'':`<span class="vl" style="white-space:nowrap">${money(s.amount,s.cur)}</span>`}
       <button class="chip sm" onclick="app.${s.cycle==='trial'?((s.willRenew&&daysTo(s.next)<=0)?'convertNow':'goSubs'):'paySub'}('${s.id}')">${s.cycle==='trial'?((s.willRenew&&daysTo(s.next)<=0)?'حوّلها':'شوفها'):'سجّل'}</button>
+      ${daysTo(s.next)>0?`<button class="chip sm" onclick="app.hideSubAlert('${s.id}')">شفتها</button>`:''}
     </div>`));
 
   if(book==='me')(D.vouchers||[]).filter(v=>vchOpen(v)&&v.expiry&&daysTo(v.expiry)<=14).forEach(v=>rows.push(`
@@ -1118,10 +1127,21 @@ function alertsPanel(){
       amount:Number(o.amount)||0,date:o.date,label:o.note||'',ref:o}));
     (D.subs||[]).forEach(s=>openDues(s).forEach(d=>items.push({src:'due',id:d.id,who:String(d.who||'').trim(),
       amount:Number(d.amount)||0,date:d.date,label:s.name+' · حصة دفعة '+dLabel(d.date),sub:s,ref:d})));
-    if(!items.length)return;
+    if(!items.length){D._owedSeen=0;return;}
     const groups={};
     items.forEach(it=>{const key=it.who||'__none__';(groups[key]=groups[key]||[]).push(it);});
-    Object.keys(groups).forEach(key=>{
+    const keys=Object.keys(groups);
+    const grand=Math.round(items.reduce((a,o)=>a+o.amount,0)*100)/100;
+    if((D._owedSeen||0)!==items.length){owedOpen=true;D._owedSeen=items.length;}
+    rows.push(`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
+      <span class="rail" style="background:var(--mint)"></span>
+      <span class="g"><span class="t">فلوس ليك</span>
+        <span class="s" style="display:block">${keys.length} ${keys.length===1?'شخص':'ناس'} · ${items.length} مستحق</span></span>
+      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(grand,'EGP')}</span>
+      <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span>
+    </div>`);
+    if(!owedOpen)return;
+    keys.forEach(key=>{
       const list=groups[key];
       const total=Math.round(list.reduce((a,o)=>a+o.amount,0)*100)/100;
       const who=key==='__none__'?'':key;
@@ -1348,6 +1368,12 @@ function vAddOffice(){
     <button class="btn" id="osave" ${ok?'':'disabled'} onclick="app.oSave()">احفظ</button>
   </div>`;
 }
+function peopleNames(){
+  const out=[];
+  (D.owed||[]).forEach(o=>{const n=String(o.who||'').trim();if(n&&out.indexOf(n)<0)out.push(n);});
+  (D.subs||[]).forEach(s=>(s.people||[]).forEach(p=>{const n=String(p.name||'').trim();if(n&&out.indexOf(n)<0)out.push(n);}));
+  return out.slice(0,8);
+}
 function itemNames(){
   const seen=[],out=[];
   D.txns.filter(t=>t.book==='office'&&t.kind==='expense'&&t.item).forEach(t=>{
@@ -1380,7 +1406,15 @@ function txnEditForm(t){
       </div>`).join('')}
       <div class="hint">التعديل بيتحفظ مع «احفظ التعديل».</div>
     `:''}
-    ${hasItems?'<div class="hint">الفاتورة دي مبلغها محسوب من أصنافها، فتقدر تعدّل التاريخ والحساب والاسم بس.</div>':`
+    ${hasItems?`
+      <label class="f" style="margin-top:8px">أصناف الفاتورة</label>
+      ${t.items.map((i,ix)=>`<div style="display:grid;grid-template-columns:1fr 78px 62px;gap:8px;margin-bottom:8px;align-items:center">
+        <input class="f" value="${esc(i.name)}" oninput="app.eItemName(${ix},this.value)">
+        <span class="n" style="text-align:end;font-size:13px;color:var(--muted)">${fmt(i.amount)}</span>
+        <button class="chip sm" style="padding:8px 0" onclick="app.eItemOffice('${t.id}',${ix})">${i.off?'مكتب':'ليا'}</button>
+      </div>`).join('')}
+      <div class="hint">تقدر تغيّر اسم الصنف أو تحوّله للمكتب. المبلغ والتصنيف زي ما هما.</div>
+    `:`
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`}
 
@@ -1527,6 +1561,12 @@ function vAdd(){
   </div>`;
 }
 
+function scanMyShare(){
+  const mine=(scan.items||[]).filter(i=>!i.off&&!i.who).reduce((a,i)=>a+(Number(i.amount)||0),0);
+  const disc=Number(onlyNum(scan.disc||''))||0;
+  const others=(scan.people||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0);
+  return Math.max(0,Math.round((mine-disc-others)*100)/100);
+}
 function vScan(){
   if(scan.stage==='working')return `<div style="padding:90px 0;text-align:center">
     <div class="spin"></div><p style="color:var(--muted);font-size:13px;margin-top:16px">بقرا الفاتورة وبقسّم الأصناف…</p></div>`;
@@ -1539,19 +1579,39 @@ function vScan(){
         <div class="rh"><b>${esc(scan.merchant||'فاتورة')}</b><div>${scan.date} · ${scan.items.length}</div></div>
         ${scan.items.map((it,k)=>`
         <div class="rl">
-          <button class="x" onclick="app.delItem(${k})">×</button>
-          <button class="x" style="color:${it.off?'#2E7D5B':'#B9B3A6'};font-size:12px;font-weight:600"
-            onclick="app.toggleItemOffice(${k})" title="للمكتب">م</button>
           <input class="nm" value="${esc(it.name)}" oninput="app.iset(${k},'name',this.value)">
           <select onchange="app.iset(${k},'cat',this.value)">
             ${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${c.label}</option>`).join('')}
           </select>
           <input class="vl" type="text" inputmode="decimal" value="${it.amount}" oninput="app.iset(${k},'amount',numFix(this,1))">
-        </div>`).join('')}
+          <button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?'مكتب':(it.who?esc(it.who):'ليا')}</button>
+          <button class="x" onclick="app.delItem(${k})">×</button>
+        </div>
+        ${ownerFor===k?`<div class="rl" style="border:0;padding-top:0;flex-wrap:wrap;gap:6px">
+          <button class="chip sm${(!it.off&&!it.who)?' on':''}" onclick="app.setOwner(${k},'')">ليا</button>
+          <button class="chip sm${it.off?' on':''}" onclick="app.setOwner(${k},'__office__')">المكتب</button>
+          ${peopleNames().map(n=>`<button class="chip sm${it.who===n?' on':''}" onclick="app.setOwner(${k},'${esc(n).replace(/'/g,"&#39;")}')">${esc(n)}</button>`).join('')}
+          <input class="f" style="margin:6px 0 0" placeholder="اسم جديد" onchange="app.setOwner(${k},this.value)">
+        </div>`:''}`).join('')}
         <div class="rt"><span>الإجمالي${(Number(onlyNum(scan.disc||''))||0)>0?' بعد الخصم':''}</span><span id="rtot">${fmt(Math.max(0,total-(Number(onlyNum(scan.disc||''))||0)))}</span></div>
       </div>
 
       <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">زوّد صنف ناقص</button>
+      ${book!=='office'?`
+        <label class="f">قسّم المبلغ مع ناس؟</label>
+        <div class="chips">
+          <button class="chip sm${scan.split?'':' on'}" onclick="app.scanSplit(false)">لأ</button>
+          <button class="chip sm${scan.split?' on':''}" onclick="app.scanSplit(true)">أيوه</button>
+        </div>
+        ${scan.split?`
+          ${(scan.people||[]).map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
+            <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.scanPerson(${i},'name',this.value)">
+            <input class="f" type="text" inputmode="decimal" placeholder="نصيبه" value="${esc(p.amount)}" oninput="app.scanPerson(${i},'amount',numFix(this,1))">
+            <button class="chip sm" style="padding:0" onclick="app.scanPersonDel(${i})">×</button>
+          </div>`).join('')}
+          <button class="btn ghost" style="margin-top:0" onclick="app.scanPersonAdd()">زوّد شخص</button>
+          <div class="hint">بيتقسم على المبلغ اللي ليك بعد ما تشيل أصناف الناس والمكتب. نصيبك هيطلع <span class="n" id="scanshare">${fmt(scanMyShare())}</span> جنيه.</div>
+        `:''}`:''}
       <label class="f">خصم على الفاتورة (اختياري)</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(scan.disc||'')}" oninput="app.scanDisc(numFix(this,1))">
       ${book!=='office'?`<div class="hint">اضغط <b style="color:var(--muted)">م</b> جنب أي صنف عشان تحوّله لدفتر المكتب.</div>`:''}
@@ -1559,7 +1619,7 @@ function vScan(){
       <label class="f">الفاتورة دي اتدفعت من إيه؟ <b>*</b></label>
       ${payChips(scan.account,'app.scanAccount')}
 
-      ${book!=='office'&&scan.items.some(i=>i.off)?`
+      ${book!=='office'&&(scan.items||[]).some(i=>i.off)?`
         <div class="note warn">فيه <span class="n">${scan.items.filter(i=>i.off).length}</span> صنف متعلّم إنه للمكتب بإجمالي <span class="n">${fmt(scan.items.filter(i=>i.off).reduce((a,i)=>a+(Number(i.amount)||0),0))}</span> — هيتسجلوا في دفتر المكتب لوحدهم.</div>
         <label class="f">بند المكتب اسمه إيه؟ <b>*</b></label>
         <input class="f" value="${esc(scan.oitem||scan.merchant||'')}" oninput="app.scanOItem(this.value)">
@@ -1579,7 +1639,7 @@ function vScan(){
       <label class="f">التاريخ</label>
       ${dateField(scan.date,'app.scanDate')}
 
-      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))&&(book==='office'||!scan.items.some(i=>i.off)||((scan.oitem||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(total)} جنيه</button>
+      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))&&(book==='office'||!(scan.items||[]).some(i=>i.off)||((scan.oitem||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(total)} جنيه</button>
       <button class="btn ghost" onclick="app.cancelScan()">إلغاء</button>
     </div>`;
   }
@@ -2612,6 +2672,25 @@ const app={
     confirmKey='';render();
   },
   eTxnSet(k,v){eTxn[k]=v;},
+  eItemName(ix,v){
+    if(!eTxn.itemNames)eTxn.itemNames={};
+    eTxn.itemNames[ix]=v;
+  },
+  eItemOffice(id,ix){
+    const t=D.txns.find(x=>x.id===id);
+    if(!t||!t.items||!t.items[ix])return;
+    const it=t.items[ix];
+    const amt=Number(it.amount)||0;
+    if(t.items.length<2){alert('الفاتورة فيها صنف واحد — عدّل الحركة نفسها بدل كده.');return;}
+    // شيل الصنف من فاتورتك وحوّله لدفتر المكتب
+    t.items=t.items.filter((_,k)=>k!==ix);
+    t.amount=Math.round((Number(t.amount)-amt)*100)/100;
+    const oit=normItem(it.name||t.merchant||'بند');
+    D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:amt,account:t.account,
+      date:t.date,item:oit,ocat:(D.ocats[0]&&D.ocats[0].id)||'company',note:oit,
+      place:t.merchant||undefined});
+    eTxn=null;sortTxns();save();render();app.toast('اتحول للمكتب');
+  },
   editOwedField(id,k,v){
     const o=(D.owed||[]).find(x=>x.id===id);if(!o)return;
     if(!eTxn.owedEdits)eTxn.owedEdits={};
@@ -2641,6 +2720,12 @@ const app={
     }else if(t.kind!=='transfer'){
       t.note=eTxn.note;
       if(t.kind==='expense'&&!hasItems&&eTxn.cat)t.cat=eTxn.cat;
+    }
+    if(eTxn.itemNames&&t.items){
+      Object.keys(eTxn.itemNames).forEach(ix=>{
+        const v=String(eTxn.itemNames[ix]||'').trim();
+        if(v&&t.items[ix])t.items[ix].name=v;
+      });
     }
     if(eTxn.owedEdits){
       Object.keys(eTxn.owedEdits).forEach(oid=>{
@@ -2901,6 +2986,19 @@ const app={
   scanItemPick(v){scan.item=v;render();},
   scanOcat(id){scan.ocat=id;render();},
   scanOItem(v){scan.oitem=v;},
+  pickOwner(k){ownerFor=ownerFor===k?null:k;render();},
+  setOwner(k,v){
+    const it=scan.items[k];if(!it)return;
+    const name=String(v||'').trim();
+    if(name==='__office__'){it.off=true;it.who='';}
+    else if(!name){it.off=false;it.who='';}
+    else {it.off=false;it.who=name;}
+    ownerFor=null;render();
+  },
+  scanSplit(v){scan.split=v;if(!scan.people||!scan.people.length)scan.people=[{name:'',amount:''}];render();},
+  scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;setText('scanshare',fmt(scanMyShare()));}},
+  scanPersonAdd(){if(!scan.people)scan.people=[];scan.people.push({name:'',amount:''});render();},
+  scanPersonDel(i){if(scan.people)scan.people.splice(i,1);if(!scan.people.length)scan.people.push({name:'',amount:''});render();},
   scanDisc(v){
     scan.disc=v;
     const raw=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
@@ -2910,41 +3008,100 @@ const app={
     if(box&&book!=='office')box.innerHTML=vchPicker(scan.voucherId,net,'app.scanVch');
   },
   scanOacct(id){scan.oacct=id;render();},
-  toggleItemOffice(k){scan.items[k].off=!scan.items[k].off;render();},
+
   scanAccount(id){scan.account=id;render();},
   saveReceipt(){
-    if(book!=='office'&&scan.items.some(i=>i.off)){
-      const off=scan.items.filter(i=>i.off), mineItems=scan.items.filter(i=>!i.off);
-      const offTotal=Math.round(off.reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
-      const oit=normItem(scan.oitem||scan.merchant||'فاتورة');
-      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:offTotal,account:scan.account,
-        date:scan.date,item:oit,ocat:scan.ocat,note:oit,place:scan.merchant||undefined,
-        items:off.map(i=>({name:i.name,amount:i.amount,cat:i.cat}))});
-      if(mineItems.length){
-        const mineTotal=Math.round(mineItems.reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
-        const vch2=useVoucher(scan.voucherId,mineTotal,scan.date);
-        D.txns.unshift({id:uid(),book:'me',kind:'expense',
-          amount:Math.round((mineTotal-(vch2?vch2.amount:0))*100)/100,
-          account:scan.account,date:scan.date,merchant:scan.merchant,note:scan.merchant,
-          place:scan.merchant||undefined,items:mineItems,voucher:vch2||undefined});
-      }
-      sortTxns();save();
-      scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};
-      render();window.scrollTo(0,0);app.toast('الفاتورة اتقسمت واتحفظت');return;
-    }
-    const rawTotal=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
+    const items=scan.items||[];
+    const offItems=items.filter(i=>i.off);
+    const whoItems=items.filter(i=>!i.off&&i.who);
+    const mineItems=items.filter(i=>!i.off&&!i.who);
+    const sum=a=>Math.round(a.reduce((x,i)=>x+(Number(i.amount)||0),0)*100)/100;
+    const rawTotal=sum(items);
     const sdisc=Math.min(rawTotal,Number(onlyNum(scan.disc||''))||0);
-    const total=Math.round((rawTotal-sdisc)*100)/100;
-    const vch=useVoucher(scan.voucherId,total,scan.date);
-    D.txns.unshift({id:uid(),book:book,kind:'expense',amount:Math.round((total-(vch?vch.amount:0))*100)/100,
-      discount:sdisc||undefined,
-      account:scan.account,date:scan.date,item:book==='office'?normItem(scan.item||scan.merchant||'فاتورة'):undefined,
-      ocat:book==='office'?scan.ocat:undefined,
-      merchant:scan.merchant,note:scan.merchant,items:scan.items,voucher:vch||undefined});
+
+    if(book==='office'){
+      const oit=normItem(scan.item||scan.merchant||'فاتورة');
+      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:Math.max(0,rawTotal-sdisc),
+        account:scan.account,date:scan.date,item:oit,ocat:scan.ocat,note:oit,
+        discount:sdisc||undefined,place:scan.merchant||undefined,items:items});
+      sortTxns();save();
+      scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',
+        oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]};
+      ownerFor=null;render();window.scrollTo(0,0);app.toast('اتحفظت');return;
+    }
+
+    if(offItems.length){
+      const oit=normItem(scan.oitem||scan.merchant||'فاتورة');
+      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:sum(offItems),account:scan.account,
+        date:scan.date,item:oit,ocat:scan.ocat,note:oit,place:scan.merchant||undefined,
+        items:offItems.map(i=>({name:i.name,amount:i.amount,cat:i.cat}))});
+    }
+
+    const myItems=mineItems.concat(whoItems);
+    const myTotalRaw=sum(myItems);
+    const myTotal=Math.max(0,Math.round((myTotalRaw-sdisc)*100)/100);
+    if(myItems.length||sdisc>0){
+      const vch=useVoucher(scan.voucherId,myTotal,scan.date);
+      const txnId=uid();
+      D.txns.unshift({id:txnId,book:'me',kind:'expense',
+        amount:Math.round((myTotal-(vch?vch.amount:0))*100)/100,
+        cat:(mineItems[0]&&mineItems[0].cat)||'other',
+        account:scan.account,date:scan.date,merchant:scan.merchant,note:scan.merchant,
+        place:scan.merchant||undefined,discount:sdisc||undefined,
+        items:myItems,voucher:vch||undefined});
+
+      if(!D.owed)D.owed=[];
+      const byWho={};
+      whoItems.forEach(i=>{const n=String(i.who).trim();
+        byWho[n]=Math.round(((byWho[n]||0)+(Number(i.amount)||0))*100)/100;});
+      Object.keys(byWho).forEach(n=>{
+        D.owed.push({id:uid(),amount:byWho[n],who:n,date:scan.date,
+          note:(scan.merchant||'فاتورة'),cat:'lentcat',srcTxn:txnId,got:false,lent:true});
+      });
+      if(scan.split)(scan.people||[]).forEach(p=>{
+        const amt=Number(onlyNum(p.amount))||0;
+        if(amt>0)D.owed.push({id:uid(),amount:amt,who:String(p.name||'').trim(),date:scan.date,
+          note:(scan.merchant||'فاتورة'),cat:(mineItems[0]&&mineItems[0].cat)||'other',
+          srcTxn:txnId,got:false});
+      });
+    }
+
     sortTxns();save();
-    scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};
-    render();window.scrollTo(0,0);app.toast('الفاتورة اتحفظت');
+    scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',
+      oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]};
+    ownerFor=null;
+    render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
+  addItem(){scan.items.push({name:'صنف جديد',amount:0,cat:'other'});render();},
+  scanDate(v){scan.date=v;render();},
+  scanItem(v){scan.item=v;},
+  scanItemPick(v){scan.item=v;render();},
+  scanOcat(id){scan.ocat=id;render();},
+  scanOItem(v){scan.oitem=v;},
+  pickOwner(k){ownerFor=ownerFor===k?null:k;render();},
+  setOwner(k,v){
+    const it=scan.items[k];if(!it)return;
+    const name=String(v||'').trim();
+    if(name==='__office__'){it.off=true;it.who='';}
+    else if(!name){it.off=false;it.who='';}
+    else {it.off=false;it.who=name;}
+    ownerFor=null;render();
+  },
+  scanSplit(v){scan.split=v;if(!scan.people||!scan.people.length)scan.people=[{name:'',amount:''}];render();},
+  scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;setText('scanshare',fmt(scanMyShare()));}},
+  scanPersonAdd(){if(!scan.people)scan.people=[];scan.people.push({name:'',amount:''});render();},
+  scanPersonDel(i){if(scan.people)scan.people.splice(i,1);if(!scan.people.length)scan.people.push({name:'',amount:''});render();},
+  scanDisc(v){
+    scan.disc=v;
+    const raw=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
+    const net=Math.max(0,Math.round((raw-(Number(onlyNum(v))||0))*100)/100);
+    setText('rtot',fmt(net));
+    const box=document.getElementById('vchbox');
+    if(box&&book!=='office')box.innerHTML=vchPicker(scan.voucherId,net,'app.scanVch');
+  },
+  scanOacct(id){scan.oacct=id;render();},
+
+  scanAccount(id){scan.account=id;render();},
   cancelScan(){scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};render();},
 
   /* --- حسابات --- */
@@ -3042,6 +3199,7 @@ const app={
     D.ofees.push({id:uid(),type:'take',amount:amt,date:today(),note:'استرداد'});
     ofeeFor=false;ofeeAcct='';ofeeTo='';sortTxns();save();render();app.toast('اتسجلت');
   },
+  toggleOwedPanel(){owedOpen=!owedOpen;render();},
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
   settleLoan(){
@@ -3185,6 +3343,7 @@ const app={
   scanVch(id){scan.voucherId=id;render();},
 
   /* --- اشتراكات --- */
+  hideSubAlert(id){const s=D.subs.find(x=>x.id===id);if(s){s.hideUntil=s.next;save();render();}},
   goSubs(){tab='wallet';wtab='subs';render();window.scrollTo(0,0);},
   toggleSub(){showSub=!showSub;render();},
   subSet(k,v){subDraft[k]=v;setDisabled('subsave',subOk());
