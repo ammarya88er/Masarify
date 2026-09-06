@@ -400,11 +400,13 @@ let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
 let ownerFor=null;
+let retFor=null, retAcct='', retDate=today();
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false;
 let refundParts={};
 const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
+let upFor=null, upDraft={amount:'',refund:'',acct:'',date:today()};
 let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
 let owedFor=null, owedAcct='', owedGot='';
 let ghPushTimer=null;
@@ -1408,12 +1410,24 @@ function txnEditForm(t){
     `:''}
     ${hasItems?`
       <label class="f" style="margin-top:8px">أصناف الفاتورة</label>
-      ${t.items.map((i,ix)=>`<div style="display:grid;grid-template-columns:1fr 78px 62px;gap:8px;margin-bottom:8px;align-items:center">
-        <input class="f" value="${esc(i.name)}" oninput="app.eItemName(${ix},this.value)">
+      ${t.items.map((i,ix)=>`<div style="display:grid;grid-template-columns:1fr 70px 54px 54px;gap:6px;margin-bottom:8px;align-items:center;${i.returned?'opacity:.55':''}">
+        <input class="f" value="${esc(i.name)}" ${i.returned?'disabled':''} oninput="app.eItemName(${ix},this.value)">
         <span class="n" style="text-align:end;font-size:13px;color:var(--muted)">${fmt(i.amount)}</span>
-        <button class="chip sm" style="padding:8px 0" onclick="app.eItemOffice('${t.id}',${ix})">${i.off?'مكتب':'ليا'}</button>
-      </div>`).join('')}
-      <div class="hint">تقدر تغيّر اسم الصنف أو تحوّله للمكتب. المبلغ والتصنيف زي ما هما.</div>
+        ${i.returned
+          ?`<span style="grid-column:span 2;font-size:11px;color:var(--mint);text-align:center">مرتجع ${dLabel(i.returnedOn||t.date)}</span>`
+          :`<button class="chip sm" style="padding:8px 0" onclick="app.eItemOffice('${t.id}',${ix})">${i.off?'مكتب':'ليا'}</button>
+            <button class="chip sm" style="padding:8px 0" onclick="app.startReturn('${t.id}',${ix})">رجّعته</button>`}
+      </div>
+      ${retFor===(t.id+':'+ix)?`<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px">
+        <div class="hint" style="margin-top:0">هترجّع <span class="n">${fmt(i.amount)}</span> — <b>${esc(i.name)}</b></div>
+        <label class="f">رجعت على أنهي حساب؟</label>
+        ${payChips(retAcct||t.account,'app.setRetAcct','',t.book||'me')}
+        <label class="f">إمتى؟</label>
+        ${dateField(retDate,'app.setRetDate')}
+        <button class="btn" onclick="app.doReturn('${t.id}',${ix})">أكد الإرجاع</button>
+        <button class="btn ghost" onclick="app.cancelReturn()">إلغاء</button>
+      </div>`:''}`).join('')}
+      <div class="hint">تقدر تغيّر اسم الصنف، تحوّله للمكتب، أو تسجّل إنك رجّعته. المبلغ والتصنيف زي ما هما.</div>
     `:`
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`}
@@ -2072,11 +2086,25 @@ function wSubs(){
             :subEnded(s)?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
             :`<button class="chip sm${subSoon(s)?' on':''}" onclick="app.paySub('${s.id}')">سجّل الدفع</button>
               <button class="chip sm" onclick="app.startSubEdit('${s.id}')">${editSub===s.id?'إخفاء':'عدّل'}</button>
+              <button class="chip sm" onclick="app.startUpgrade('${s.id}')">${upFor===s.id?'إخفاء':'رقّيته'}</button>
               <button class="chip sm" onclick="app.skipSub('${s.id}')">أجّل دورة</button>
               ${s.cancelAtEnd?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
                              :`<button class="chip sm" onclick="app.cancelEnd('${s.id}')">وقف التجديد</button>`}`}
           ${delBtn('sub'+s.id,`app.delSub('${s.id}')`)}
         </div>
+        ${upFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <label class="f">المبلغ الجديد</label>
+          <input class="f" type="text" inputmode="decimal" value="${esc(upDraft.amount)}" oninput="app.upSet('amount',numFix(this,1))">
+          <label class="f">رجعلك كام من القديم؟</label>
+          <input class="f" type="text" inputmode="decimal" value="${esc(upDraft.refund)}" oninput="app.upSet('refund',numFix(this,1))">
+          <label class="f">رجعوا على أنهي حساب؟</label>
+          ${payChips(upDraft.acct||s.account||'card','app.upAcct','','me')}
+          <label class="f">من إمتى؟</label>
+          ${dateField(upDraft.date,'app.upDate')}
+          <div class="hint">هيتسجل استرداد بالسالب على تصنيف الاشتراك، ودفعة جديدة بالمبلغ الجديد، والتجديد الجاي بعد ${s.cycle==='yearly'?'سنة':'شهر'} من التاريخ ده.</div>
+          <button class="btn" onclick="app.doUpgrade('${s.id}')">أكد الترقية</button>
+          <button class="btn ghost" onclick="app.cancelUpgrade()">إلغاء</button>
+        </div>`:''}
         ${editSub===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">اسم الاشتراك</label>
           <input class="f" value="${esc(sDraft.name)}" oninput="app.sdSet('name',this.value)">
@@ -2675,6 +2703,34 @@ const app={
   eItemName(ix,v){
     if(!eTxn.itemNames)eTxn.itemNames={};
     eTxn.itemNames[ix]=v;
+  },
+  startReturn(id,ix){
+    const key=id+':'+ix;
+    if(retFor===key){retFor=null;render();return;}
+    const t=D.txns.find(x=>x.id===id);
+    retFor=key;retAcct=(t&&t.account)||'';retDate=today();render();
+  },
+  cancelReturn(){retFor=null;render();},
+  setRetAcct(id){retAcct=id;render();},
+  setRetDate(v){retDate=v;render();},
+  doReturn(id,ix){
+    const t=D.txns.find(x=>x.id===id);
+    if(!t||!t.items||!t.items[ix])return;
+    const it=t.items[ix];
+    if(it.returned){retFor=null;render();return;}
+    const amt=Math.round((Number(it.amount)||0)*100)/100;
+    if(amt<=0){retFor=null;render();return;}
+    const acct=retAcct||t.account;
+    // الصنف يفضل في الفاتورة بس متعلّم إنه مرتجع
+    it.returned=true;it.returnedOn=retDate;
+    // والفلوس ترجع كحركة مستقلة بالسالب على تصنيف الصنف
+    D.txns.unshift({id:uid(),book:t.book||'me',kind:'expense',amount:-amt,
+      cat:(t.book==='office')?undefined:(it.cat||t.cat||'other'),
+      ocat:(t.book==='office')?t.ocat:undefined,
+      item:(t.book==='office')?normItem(it.name||'مرتجع'):undefined,
+      account:acct,date:retDate,note:'مرتجع — '+(it.name||t.merchant||''),
+      place:t.merchant||t.place||undefined});
+    retFor=null;retAcct='';sortTxns();save();render();app.toast('اترجع');
   },
   eItemOffice(id,ix){
     const t=D.txns.find(x=>x.id===id);
@@ -3383,6 +3439,39 @@ const app={
     editSub=id;paySubFor=null;render();
   },
   cancelSubEdit(){editSub=null;render();},
+  startUpgrade(id){
+    if(upFor===id){upFor=null;render();return;}
+    const s=D.subs.find(x=>x.id===id);if(!s)return;
+    upDraft={amount:String(s.amount||''),refund:'',acct:s.account||'card',date:today()};
+    upFor=id;editSub=null;paySubFor=null;render();
+  },
+  cancelUpgrade(){upFor=null;render();},
+  upSet(k,v){upDraft[k]=v;},
+  upAcct(id){upDraft.acct=id;render();},
+  upDate(v){upDraft.date=v;render();},
+  doUpgrade(id){
+    const s=D.subs.find(x=>x.id===id);if(!s)return;
+    const newAmt=Number(onlyNum(upDraft.amount))||0;
+    const refund=Number(onlyNum(upDraft.refund))||0;
+    const acct=upDraft.acct||s.account||'card';
+    const d=upDraft.date||today();
+    if(newAmt<=0){upFor=null;render();return;}
+    const cat=s.cat||'subs';
+    if(refund>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
+      date:d,note:'استرداد ترقية — '+s.name});
+    const usd=s.cur==='USD';
+    const full=usd?Math.round(newAmt*D.rate*100)/100:newAmt;
+    const t={id:uid(),book:'me',kind:'expense',amount:full,cat:cat,account:s.account||'card',date:d,
+      note:s.name+' — بعد الترقية',usd:usd?newAmt:undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+    D.txns.unshift(t);
+    if(!s.payments)s.payments=[];
+    const pay={d:d,t:t.id,paid:full};
+    if(!usd){const est=Math.round(full*0.03*100)/100;if(est>0){pay.fee=est;pay.feePending=true;}}
+    s.payments.push(pay);
+    s.amount=newAmt;
+    s.next=dAdd(d,s.cycle==='yearly'?12:1);
+    upFor=null;sortTxns();save();render();app.toast('اترقّى');
+  },
   sdSet(k,v){sDraft[k]=v;
     setText('sdshare',fmt(Math.max(0,(Number(onlyNum(sDraft.amount))||0)-sDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
   sdPick(k,v){sDraft[k]=v;render();},
