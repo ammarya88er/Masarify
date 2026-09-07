@@ -380,7 +380,7 @@ let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, pa
 let showIns=false, showCert=false, showSub=false;
 let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',vc:'pay',fee:'',to2:'cash'};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
-let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
+let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
 let accDraft={name:'',credit:false,limit:'',sec:false,secured:[],
@@ -1274,7 +1274,6 @@ function vAddOffice(){
     <div class="seg">
       <button class="${k==='expense'?'on':''}" onclick="app.oKind('expense')">مصروف</button>
       <button class="${k==='float'?'on':''}" onclick="app.oKind('float')">استلام عهدة</button>
-      <button class="${k==='bonus'?'on':''}" onclick="app.oKind('bonus')">حافز ليا</button>
       <button class="${k==='loan'?'on':''}" onclick="app.oKind('loan')">سلفة</button>
       <button class="${k==='xfer'?'on':''}" onclick="app.oKind('xfer')">تحويل</button>
     </div>
@@ -1296,15 +1295,9 @@ function vAddOffice(){
     <div class="hint">رصيد العهدة مش هيتغير — ده بس تسجيل إن معاك فلوس منها عشان ترجّعها.</div>`:''}
 
 
-    ${(k==='loan'||k==='xfer')?'':`<label class="f">${k==='float'?'دخلت فين؟':k==='bonus'?'يخرج من إيه؟':'اتدفعت من إيه؟'} <b>*</b></label>
+    ${(k==='loan'||k==='xfer')?'':`<label class="f">${k==='float'?'دخلت فين؟':'اتدفعت من إيه؟'} <b>*</b></label>
     ${(function(){const opts=D.accounts.filter(x=>k==='expense'?true:!x.credit);
       return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)}</button>`).join('')+'</div>';})()}`}
-
-    ${k==='bonus'?`
-      <label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
-      ${payChips(draftO.to,'app.oTo','','me')}
-      <div class="hint">لو نفس الحساب (CIB مثلاً)، الفلوس مش هتتحرك فعليًا — بس هتخرج من نصيب المكتب وتدخل نصيبك.</div>
-    `:''}
 
     ${k==='xfer'?'':k==='loan'?`
       <label class="f">على إيه؟ (اختياري)</label>
@@ -1316,7 +1309,7 @@ function vAddOffice(){
       <label class="f">اسم البند <b>*</b></label>
       <input class="f" id="oitem" value="${esc(draftO.item)}" oninput="app.oSet('item',this.value)">
       ${itemSuggestions('app.oItemPick')}
-      <div class="hint">${k==='bonus'?'هيظهر في تقرير التقفيل كبند منصرف، وفي فلوسك كدخل.':'اضغط على اسم جاهز أو اكتب اسم جديد — نفس الاسم بيتجمع في سطر واحد وقت التقفيل.'}</div>
+      <div class="hint">اضغط على اسم جاهز أو اكتب اسم جديد — نفس الاسم بيتجمع في سطر واحد وقت التقفيل.</div>
       <label class="f">التصنيف <b>*</b></label>
       <div class="chips">${D.ocats.map(c=>`<button class="chip${draftO.ocat===c.id?' on':''}" onclick="app.oCat('${c.id}')">${esc(c.label)}</button>`).join('')}</div>
 
@@ -1326,6 +1319,15 @@ function vAddOffice(){
 
         <label class="f">المكان (اختياري)</label>
         <input class="f" placeholder="اسم المحل أو المكان" value="${esc(draftO.place)}" oninput="app.oSet('place',this.value)">
+
+        <label class="f">المبلغ ده جالي أنا؟</label>
+        <div class="chips">
+          <button class="chip sm${draftO.toMe?'':' on'}" onclick="app.oToMe(false)">لأ، اتصرف بره</button>
+          <button class="chip sm${draftO.toMe?' on':''}" onclick="app.oToMe(true)">أيوه، أخدته</button>
+        </div>
+        ${draftO.toMe?`<label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
+          ${payChips(draftO.to,'app.oTo','','me')}
+          <div class="hint">هيتسجل بند منصرف على المكتب باسمه وتصنيفه، ودخل ليك بنفس المبلغ. لو نفس الحساب، الفلوس مش هتتحرك فعليًا — بس هتخرج من نصيب المكتب وتدخل نصيبك.</div>`:''}
 
         <label class="f">فيها عمولات ورسوم؟</label>
         <div class="chips">
@@ -1391,7 +1393,7 @@ function itemSuggestions(fn){
 function oOk(){const k=draftO.kind;
   if(k==='loan')return Number(onlyNum(draftO.amount))>0;
   if(k==='xfer')return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.to&&draftO.to!==draftO.account);
-  return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&(k==='float'||(draftO.item.trim()&&draftO.ocat))&&(k!=='bonus'||draftO.to));}
+  return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&(k==='float'||(draftO.item.trim()&&draftO.ocat))&&(!draftO.toMe||draftO.to));}
 
 function txnEditForm(t){
   const hasItems=t.items&&t.items.length;
@@ -2543,6 +2545,7 @@ const app={
   oDir(d){draftO.dir=d;render();},
   oMine(v){draftO.mine=v;if(!v)draftO.mineAmt='';render();},
   oHasFee(v){draftO.hasFee=v;if(!v)draftO.feeAmt='';render();},
+  oToMe(v){draftO.toMe=v;if(!v)draftO.to='';render();},
   oDiffTo(id){draftO.diffTo=id;render();},
   oSetLive(k,v){
     draftO[k]=v;setDisabled('osave',oOk());
@@ -2571,7 +2574,7 @@ const app={
         to:draftO.to,date:draftO.date,note:String(draftO.note||'').trim()||'تحويل عهدة'});
       sortTxns();save();
       draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',
-        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
+        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false};
       render();window.scrollTo(0,0);app.toast('اتحول');return;
     }
     if(draftO.kind==='loan'){
@@ -2579,18 +2582,12 @@ const app={
       D.floatLoans.push({id:uid(),dir:draftO.dir==='back'?'back':'take',amount:amt,
         date:draftO.date,note:String(draftO.note||'').trim()});
       save();
-      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false};
       render();window.scrollTo(0,0);app.toast('اتسجلت');return;
     }
     if(draftO.kind==='float'){
       D.txns.unshift({id:uid(),book:'office',kind:'float',amount:amt,account:draftO.account,
         date:draftO.date,note:String(draftO.note||'').trim()});
-    }else if(draftO.kind==='bonus'){
-      const link=uid();
-      D.txns.unshift({id:uid(),link:link,book:'office',kind:'expense',amount:amt,account:draftO.account,
-        date:draftO.date,item:it,ocat:draftO.ocat,note:it});
-      D.txns.unshift({id:uid(),link:link,book:'me',kind:'income',amount:amt,account:draftO.to,
-        date:draftO.date,note:it,fromOffice:true});
     }else{
       const paidOut=Number(onlyNum(draftO.paid))||0;
       const extra=paidOut>amt+0.005?Math.round((paidOut-amt)*100)/100:0;
@@ -2604,6 +2601,13 @@ const app={
       if(extra>0){
         D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,
           account:draftO.diffTo||'cash',date:draftO.date,note:'باقي تقريب — '+it});
+      }
+      if(draftO.toMe&&draftO.to){
+        const link=uid();
+        const last=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.item===it&&t.date===draftO.date);
+        if(last)last.link=link;
+        D.txns.unshift({id:uid(),link:link,book:'me',kind:'income',amount:amt,account:draftO.to,
+          date:draftO.date,note:it,fromOffice:true});
       }
       const ofv=draftO.hasFee?(Number(onlyNum(draftO.feeAmt))||0):0;
       if(ofv>0){
@@ -2621,7 +2625,7 @@ const app={
       }
     }
     sortTxns();save();
-    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:''};
+    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   setCloseTo(v){closeTo=v;render();},
