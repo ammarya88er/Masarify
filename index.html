@@ -403,7 +403,7 @@ let ownerFor=null;
 let retFor=null, retAcct='', retDate=today();
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
-let owedOpen=false;
+let owedOpen=false, catsOpen=false;
 let refundParts={};
 const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
 let upFor=null, upDraft={amount:'',refund:'',acct:'',date:today()};
@@ -997,7 +997,11 @@ function vHome(){
   </div>
 
   <div class="sec">
-    <div class="sec-h"><h3>راح فين</h3>${byCat.length?`<span>${byCat.length} تصنيف</span>`:''}</div>
+    <div class="sec-h" onclick="app.toggleCats()" style="cursor:pointer">
+      <h3>راح فين</h3>
+      <span>${byCat.length?byCat.length+' تصنيف · '+fmt(gross):''} ${byCat.length?(catsOpen?'▲':'▼'):''}</span>
+    </div>
+    ${!catsOpen?'':`
     ${(function(){const u=mt.reduce((a,t)=>a+vchUsed(t),0);
       return u?`<div class="hint" style="margin:-4px 0 14px">منهم <span class="n">${fmt(u)}</span> جنيه اتغطوا بفاوتشرات، يعني اللي خرج من جيبك فعلًا أقل.</div>`:'';})()}
     ${byCat.length?byCat.map(([id,v])=>{const c=catOf(id);return `
@@ -1006,7 +1010,7 @@ function vHome(){
           <span class="r"><span class="pc">${Math.round(v/gross*100)}%</span>
           <span class="am" style="color:${c.color}">${fmt(v)}</span></span></div>
         <div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,(v/max)*100))}%;background:${c.color}"></div></div>
-      </div>`}).join(''):'<div class="empty">مفيش مصاريف مسجلة الشهر ده.</div>'}
+      </div>`}).join(''):'<div class="empty">مفيش مصاريف مسجلة الشهر ده.</div>'}`}
   </div>
 
   <div class="sec">
@@ -1592,7 +1596,7 @@ function vScan(){
     return `
     <div style="padding-top:20px">
       <div class="receipt">
-        <div class="rh"><b>${esc(scan.merchant||'فاتورة')}</b><div>${scan.date} · ${scan.items.length}</div></div>
+        <div class="rh"><b>${esc(scan.merchant||(scan.manual?'فاتورة بإيدك':'فاتورة'))}</b><div>${scan.date} · ${scan.items.length}</div></div>
         ${scan.items.map((it,k)=>`
         <div class="rl">
           <input class="nm" value="${esc(it.name)}" oninput="app.iset(${k},'name',this.value)">
@@ -1652,6 +1656,9 @@ function vScan(){
         <div class="chips">${D.ocats.map(c=>`<button class="chip${scan.ocat===c.id?' on':''}" onclick="app.scanOcat('${c.id}')">${esc(c.label)}</button>`).join('')}</div>
       `:`<div id="vchbox">${vchPicker(scan.voucherId,total,'app.scanVch')}</div>`}
 
+      ${scan.manual?`<label class="f">اسم المحل (اختياري)</label>
+        <input class="f" value="${esc(scan.merchant)}" oninput="app.scanMerchant(this.value)">`:''}
+
       <label class="f">التاريخ</label>
       ${dateField(scan.date,'app.scanDate')}
 
@@ -1670,6 +1677,7 @@ function vScan(){
     </div>
     <button class="btn ghost" onclick="app.pasteImage()">الصق صورة من الحافظة</button>
     <div class="hint">لو ناسخ سكرين شوت، اضغط هنا على طول من غير ما تحفظه.</div>
+    <button class="btn ghost" onclick="app.manualBill()">اكتب فاتورة بإيدك</button>
     ${scan.err?`<div class="note err">${esc(scan.err)}</div>`:''}
     ${!getKey()?`<div class="note warn">لسه محطتش مفتاح الـ API. من غيره قراءة الفواتير مش هتشتغل — افتح الإعدادات من فوق.</div>`:''}
   </div>`;
@@ -3039,9 +3047,16 @@ const app={
     const box=document.getElementById('vchbox');
     if(box)box.innerHTML=vchPicker(scan.voucherId,t,'app.scanVch');
   },
+  manualBill(){
+    scan={stage:'review',items:[{name:'',amount:0,cat:(D.cats[0]&&D.cats[0].id)||'other'}],
+      merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',
+      oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}],manual:true};
+    ownerFor=null;render();window.scrollTo(0,0);
+  },
   delItem(k){scan.items.splice(k,1);render();},
   addItem(){scan.items.push({name:'صنف جديد',amount:0,cat:'other'});render();},
   scanDate(v){scan.date=v;render();},
+  scanMerchant(v){scan.merchant=v;},
   scanItem(v){scan.item=v;},
   scanItemPick(v){scan.item=v;render();},
   scanOcat(id){scan.ocat=id;render();},
@@ -3132,36 +3147,6 @@ const app={
     ownerFor=null;
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
-  addItem(){scan.items.push({name:'صنف جديد',amount:0,cat:'other'});render();},
-  scanDate(v){scan.date=v;render();},
-  scanItem(v){scan.item=v;},
-  scanItemPick(v){scan.item=v;render();},
-  scanOcat(id){scan.ocat=id;render();},
-  scanOItem(v){scan.oitem=v;},
-  pickOwner(k){ownerFor=ownerFor===k?null:k;render();},
-  setOwner(k,v){
-    const it=scan.items[k];if(!it)return;
-    const name=String(v||'').trim();
-    if(name==='__office__'){it.off=true;it.who='';}
-    else if(!name){it.off=false;it.who='';}
-    else {it.off=false;it.who=name;}
-    ownerFor=null;render();
-  },
-  scanSplit(v){scan.split=v;if(!scan.people||!scan.people.length)scan.people=[{name:'',amount:''}];render();},
-  scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;setText('scanshare',fmt(scanMyShare()));}},
-  scanPersonAdd(){if(!scan.people)scan.people=[];scan.people.push({name:'',amount:''});render();},
-  scanPersonDel(i){if(scan.people)scan.people.splice(i,1);if(!scan.people.length)scan.people.push({name:'',amount:''});render();},
-  scanDisc(v){
-    scan.disc=v;
-    const raw=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
-    const net=Math.max(0,Math.round((raw-(Number(onlyNum(v))||0))*100)/100);
-    setText('rtot',fmt(net));
-    const box=document.getElementById('vchbox');
-    if(box&&book!=='office')box.innerHTML=vchPicker(scan.voucherId,net,'app.scanVch');
-  },
-  scanOacct(id){scan.oacct=id;render();},
-
-  scanAccount(id){scan.account=id;render();},
   cancelScan(){scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};render();},
 
   /* --- حسابات --- */
@@ -3260,6 +3245,7 @@ const app={
     ofeeFor=false;ofeeAcct='';ofeeTo='';sortTxns();save();render();app.toast('اتسجلت');
   },
   toggleOwedPanel(){owedOpen=!owedOpen;render();},
+  toggleCats(){catsOpen=!catsOpen;render();},
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
   settleLoan(){
@@ -3865,6 +3851,7 @@ if('serviceWorker' in navigator){
 }
 load();
 sortTxns();
+
 if(D._needSort){delete D._needSort;save();}
 if(ghToken&&ghGist){ghLastPull=Date.now();ghReconcile();}
 if(document.addEventListener)document.addEventListener('paste',e=>{
