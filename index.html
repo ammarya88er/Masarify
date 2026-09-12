@@ -420,6 +420,7 @@ let needsFor=null, nd={mode:'one',name:'',cat:'',acct:'',items:[{name:'',amount:
 const ndSum=()=>Math.round(nd.items.reduce((a,i)=>a+(Number(onlyNum(i.amount))||0),0)*100)/100;
 let refundParts={};
 const refundTotal=()=>Math.round(Object.keys(refundParts).reduce((a,k)=>a+(Number(onlyNum(refundParts[k]))||0),0)*100)/100;
+let repFor=null, repDate=today();
 let upFor=null, upDraft={amount:'',refund:'',acct:'',date:today()};
 let editSub=null, sDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),split:false,people:[{name:'',amount:''}]};
 let owedFor=null, owedAcct='', owedGot='';
@@ -541,6 +542,13 @@ function normalizeData(){
   if(!D.graceDay)D.graceDay=15;
   if(D.insureRate===undefined)D.insureRate=0.9;
   if(!D.stmts)D.stmts=[];
+  if(!D._stmtFix){
+    D._stmtFix=1;
+    const old=(D.stmts||[]).filter(s=>!Number(s.paid));
+    const feeIds=old.map(s=>s.feeTxn).filter(Boolean);
+    if(feeIds.length)D.txns=D.txns.filter(t=>feeIds.indexOf(t.id)<0);
+    D.stmts=(D.stmts||[]).filter(s=>Number(s.paid)>0);
+  }
   if(!D.vehicles)D.vehicles=[];
   if(D.licExp===undefined)D.licExp='';
   if(D.officeOn===undefined)D.officeOn=hasOfficeData();
@@ -744,15 +752,32 @@ function insRemainOn(accId){
   return Math.round(Math.max(0,all-insDueThisStmt(accId))*100)/100;
 }
 const stmtRecord=(accId,key)=>(D.stmts||[]).find(s=>s.acct===accId&&s.key===key);
+function stmtRange(a,key){
+  // الدورة: من يوم الكشف بتاع الشهر اللي فات لحد اليوم اللي قبله في الشهر ده
+  const d=acctStmtDay(a);
+  return {from:mAdd(key,-1)+'-'+pad(d), to:dayShift(key+'-'+pad(d),-1)};
+}
 function buildStmt(a,key){
-  const lim=Number(a.limit)||0;
-  const bal=balances('me')[a.id]||0;
-  const owed=Math.round(Math.max(0,lim-bal)*100)/100;
-  const carry=insRemainOn(a.id);
+  const r=stmtRange(a,key);
+  // اللي اتصرف على الكارت جوه الدورة بس
+  let spent=0;
+  D.txns.forEach(t=>{
+    if((t.book||'me')!=='me')return;
+    if(t.date<r.from||t.date>r.to)return;
+    if(t.kind==='expense'&&t.account===a.id)spent+=Number(t.amount)||0;
+    if(t.kind==='transfer'&&t.account===a.id)spent+=Number(t.amount)||0;
+    if(t.kind==='transfer'&&t.to===a.id)spent-=Number(t.amount)||0;
+    if(t.kind==='income'&&t.account===a.id)spent-=Number(t.amount)||0;
+  });
+  spent=Math.round(Math.max(0,spent)*100)/100;
+  // الأقساط اللي على الكارت: قسط الشهر بس، والباقي مش مستحق دلوقتي
+  const carry=Math.round((D.installments||[]).filter(i=>i.src===a.id&&!insDone(i))
+    .reduce((x,i)=>x+Math.max(0,insLeft(i)-insNextAmount(i)),0)*100)/100;
   const monthly=insDueThisStmt(a.id);
-  const base=Math.round(Math.max(0,owed-carry)*100)/100;
+  const base=Math.round(Math.max(0,spent-carry)*100)/100;
   const fee=Math.round(base*acctRate(a)/100*100)/100;
-  return {owed:owed,carry:carry,monthly:monthly,base:base,fee:fee,
+  return {owed:spent,carry:carry,monthly:monthly,base:base,fee:fee,
+    from:r.from,to:r.to,
     total:Math.round((base+fee)*100)/100};
 }
 const isCardIns=i=>!!(D.accounts.find(a=>a.id===i.src&&a.credit));
@@ -1585,7 +1610,8 @@ function alertsPanel(){
       const s=buildStmt(a,key);
       if(s.total<=0.01)return;
       st={id:uid(),acct:a.id,key:key,owed:s.owed,carry:s.carry,monthly:s.monthly,
-        base:s.base,fee:s.fee,total:s.total,paid:0,hidden:false,insDone:false};
+        base:s.base,fee:s.fee,total:s.total,from:s.from,to:s.to,
+        paid:0,hidden:false,insDone:false};
       if(s.fee>0){
         const ft={id:uid(),book:'me',kind:'expense',amount:s.fee,cat:'fees',account:a.id,
           date:stmtDate(key,a),note:'تأمين '+a.name+' — '+mLabel(key)};
@@ -1603,7 +1629,8 @@ function alertsPanel(){
     <div class="alert">
       <span class="rail" style="background:${late?'var(--clay)':'#C79447'}"></span>
       <span class="g"><span class="t">${late?'آخر ميعاد سداد ':'مديونية '}${esc(a.name)}</span>
-        <span class="s" style="display:block">${mLabel(key)} · آخر ميعاد ${dayLabel(due)}${
+        <span class="s" style="display:block">مشتريات ${dLabel(st.from||stmtRange(a,key).from)} ← ${dLabel(st.to||stmtRange(a,key).to)}</span>
+        <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}${
           st.carry>0.01?` · متبقي مقسط <span class="n">${fmt(st.carry)}</span>`:''}</span>
         <span class="s" style="display:block">أصل <span class="n">${fmt(st.base)}</span> + تأمين <span class="n">${fmt(st.fee)}</span>${
           Number(st.paid)>0.01?` · سددت <span class="n">${fmt(st.paid)}</span>`:''}</span></span>
@@ -2505,7 +2532,7 @@ function wSubs(){
       <div class="hint">بيتخصم من كارت المشتريات وتصنيفه اشتراكات.</div>
 
       <label class="f">ساعة الخصم (اختياري)</label>
-      <input class="f" type="time" value="${esc(subDraft.at||'')}" onchange="app.subPick('at',this.value)">
+      <input class="f" type="time" value="${esc(subDraft.at||'')}" onchange="app.subSetAt(this.value)">
       <div class="hint">لو كتبتها، الاشتراك هيتسجل تلقائيًا أول ما تفتح البرنامج بعد الساعة دي. ولو سيبتها فاضية هيتسجل أول ما يعدي يوم الخصم.</div>
       <label class="f">الاشتراك ده متقسم مع ناس؟</label>
       <div class="chips">
@@ -2588,11 +2615,21 @@ function wSubs(){
               <button class="chip sm" onclick="app.startSubEdit('${s.id}')">${editSub===s.id?'إخفاء':'عدّل'}</button>
               <button class="chip sm" onclick="app.startUpgrade('${s.id}')">${upFor===s.id?'إخفاء':'رقّيته'}</button>
               <button class="chip sm" onclick="app.skipSub('${s.id}')">أجّل دورة</button>
+              ${subLastPay(s)?`<button class="chip sm" onclick="app.startRepeat('${s.id}')">${repFor===s.id?'إخفاء':'اتسحب تاني'}</button>`:''}
               ${subLastPay(s)?`<button class="chip sm" onclick="app.undoSubPay('${s.id}')">تراجع آخر دفعة</button>`:''}
               ${s.cancelAtEnd?`<button class="chip sm" onclick="app.resume('${s.id}')">رجّع التجديد</button>`
                              :`<button class="chip sm" onclick="app.cancelEnd('${s.id}')">وقف التجديد</button>`}`}
           ${delBtn('sub'+s.id,`app.delSub('${s.id}')`)}
         </div>
+        ${repFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <div class="hint" style="margin-top:0">لو اتسحب منك مرتين في نفس الدورة، سجّل السحبة الزيادة هنا. تاريخ التجديد مش هيتغير.</div>
+          <label class="f">المبلغ</label>
+          <input class="f" id="repamt" type="text" inputmode="decimal" value="${s.amount}" oninput="numFix(this,1)">
+          <label class="f">التاريخ</label>
+          ${dateField(repDate,'app.setRepDate')}
+          <button class="btn" onclick="app.addRepeat('${s.id}')">سجّل السحبة</button>
+          <button class="btn ghost" onclick="app.cancelRepeat()">إلغاء</button>
+        </div>`:''}
         ${upFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">المبلغ الجديد</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(upDraft.amount)}" oninput="app.upSet('amount',numFix(this,1))">
@@ -2627,7 +2664,7 @@ function wSubs(){
           <input class="f" type="date" value="${sDraft.next}" onchange="app.sdPick('next',this.value)">
 
           <label class="f">ساعة الخصم (اختياري)</label>
-          <input class="f" type="time" value="${esc(sDraft.at||'')}" onchange="app.sdPick('at',this.value)">
+          <input class="f" type="time" value="${esc(sDraft.at||'')}" onchange="app.sdSetAt(this.value)">
 
           <label class="f">متقسم مع ناس؟</label>
           <div class="chips">
@@ -4231,6 +4268,8 @@ const app={
   personAdd(){subDraft.people.push({name:'',amount:''});render();},
   personDel(i){subDraft.people.splice(i,1);if(!subDraft.people.length)subDraft.people.push({name:'',amount:''});render();},
   subPick(k,v){subDraft[k]=v;render();},
+  subSetAt(v){subDraft.at=v;},
+  sdSetAt(v){sDraft.at=v;},
   subAccount(id){subDraft.account=id;if(id!=='card')subDraft.cur='EGP';render();},
   addSub(){
     D.subs.push({id:uid(),name:subDraft.name.trim(),
@@ -4261,6 +4300,26 @@ const app={
     editSub=id;paySubFor=null;render();
   },
   cancelSubEdit(){editSub=null;render();},
+  startRepeat(id){
+    if(repFor===id){repFor=null;render();return;}
+    repFor=id;repDate=today();upFor=null;editSub=null;paySubFor=null;render();
+  },
+  cancelRepeat(){repFor=null;render();},
+  setRepDate(v){repDate=v;render();},
+  addRepeat(id){
+    const s=D.subs.find(x=>x.id===id);if(!s)return;
+    const amt=numVal('repamt')||Number(s.amount)||0;
+    if(amt<=0)return;
+    const usd=s.cur==='USD';
+    const full=usd?Math.round(amt*D.rate*100)/100:amt;
+    const t={id:uid(),book:'me',kind:'expense',amount:full,cat:s.cat||'subs',
+      account:s.account||'card',date:repDate||today(),note:s.name+' — سحب متكرر',
+      usd:usd?amt:undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+    D.txns.unshift(t);
+    if(!s.payments)s.payments=[];
+    s.payments.push({d:repDate||today(),t:t.id,paid:full,dup:true});
+    repFor=null;sortTxns();save();render();app.toast('اتسجلت');
+  },
   startUpgrade(id){
     if(upFor===id){upFor=null;render();return;}
     const s=D.subs.find(x=>x.id===id);if(!s)return;
@@ -4390,7 +4449,7 @@ const app={
     const ids=[p.t,p.feeTxn].filter(Boolean);
     D.txns=D.txns.filter(t=>ids.indexOf(t.id)<0);
     s.dues=(s.dues||[]).filter(d=>d.srcTxn!==p.t||d.got);
-    s.next=dAdd(s.next,s.cycle==='yearly'?-12:-1);
+    if(!p.dup)s.next=dAdd(s.next,s.cycle==='yearly'?-12:-1);
     save();render();app.toast('اترجعت');
   },
   startDue(id){dueFor=id;dueAcct='';render();},
@@ -4786,8 +4845,6 @@ if(document.addEventListener)document.addEventListener('visibilitychange',()=>{i
   if(cu.n)parts.push('اتقيد '+cu.n+' دفعة عوائد بإجمالي '+fmt(cu.tot)+' جنيه على حسابك.');
   const tr=autoTrials();
   if(tr.length)parts.push('خلصت تجربة '+tr.join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
-  const ac=autoCharge();
-  if(ac.length)parts.push('اتخصم '+ac.map(x=>x.name+' '+fmt(x.amount)).join(' و')+' تلقائيًا.');
   autoMsg=parts.join(' ');
 })();
 render();
