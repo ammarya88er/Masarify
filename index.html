@@ -102,9 +102,12 @@ input.f,select.f{width:100%;max-width:100%;min-width:0;background:var(--surf);bo
   -webkit-appearance:none;appearance:none;}
 input.f:focus{outline:2px solid var(--accent);outline-offset:1px;}
 input[type=date].f,input[type=time].f{direction:ltr;text-align:center;font-family:var(--f-num);
-  font-size:15px;display:block;height:42px;line-height:normal;width:100%;padding:0 12px;}
+  font-size:15px;display:flex;align-items:center;justify-content:center;
+  height:44px;line-height:1;width:100%;padding:0 12px;}
 input[type=date].f::-webkit-date-and-time-value,
-input[type=time].f::-webkit-date-and-time-value{text-align:center;margin:0;width:100%;}
+input[type=time].f::-webkit-date-and-time-value{text-align:center;margin:0;width:100%;line-height:1;}
+input[type=date].f::-webkit-datetime-edit,
+input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .money{position:relative;margin-top:6px;}
 .money input{width:100%;background:var(--surf);border:1px solid var(--line);border-radius:20px;
   padding:26px 60px 26px 20px;color:var(--text);font-family:var(--f-num);font-size:36px;
@@ -444,7 +447,7 @@ let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
 let ownerFor=null;
 let needsTxn=null;
-let vehTab='', showVeh=false, vehDraft={kind:'سكوتر',name:''};
+let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''};
 let retFor=null, retAcct='', retDate=today();
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
@@ -1624,7 +1627,6 @@ function alertsPanel(){
     if(D.licExp)docs.push({t:'رخصة القيادة',d:D.licExp,k:'lic',id:''});
     (D.vehicles||[]).forEach(v=>{
       if(v.regExp)docs.push({t:'رخصة '+v.name,d:v.regExp,k:'regExp',id:v.id});
-      if(v.inspExp)docs.push({t:'فحص '+v.name,d:v.inspExp,k:'inspExp',id:v.id});
     });
     docs.filter(x=>daysTo(x.d)<=30).forEach(x=>{
       const late=daysTo(x.d)<0;
@@ -2969,11 +2971,13 @@ function wVeh(){
         </div>
         <label class="f">رخصة المركبة</label>
         <input class="f" type="date" value="${cur.regExp||''}" onchange="app.setVehDate('${cur.id}','regExp',this.value)">
-        <label class="f">الفحص</label>
-        <input class="f" type="date" value="${cur.inspExp||''}" onchange="app.setVehDate('${cur.id}','inspExp',this.value)">
         <div class="chips" style="margin-top:12px">
+          <button class="chip sm" onclick="app.renameVeh('${cur.id}')">${vehRename===cur.id?'إخفاء':'غيّر الاسم'}</button>
           ${delBtn('veh'+cur.id,`app.delVeh('${cur.id}')`)}
         </div>
+        ${vehRename===cur.id?`<label class="f">الاسم الجديد</label>
+          <input class="f" id="vehnewname" value="${esc(cur.name)}">
+          <button class="btn" onclick="app.saveVehName('${cur.id}')">احفظ</button>`:''}
       </div>`;})():'<div class="empty" style="padding:22px 10px">مسجلتش مركبات لسه.<br><span style="font-size:12px">زوّد سكوتر أو عربية عشان تتابع بنزينها وصيانتها وأوراقها.</span></div>'}
 
     ${showVeh?`<div class="panel" style="padding:15px 16px;margin-top:12px">
@@ -3159,6 +3163,8 @@ function vSettings(){
         <div style="display:flex;align-items:center;gap:10px">
           <span class="rail" style="background:${aColor(a.id)}"></span>
           <input class="f" style="padding:9px 11px;font-size:14px" value="${esc(c.name)}" oninput="app.accCfgSet('${a.id}','name',this.value)">
+        </div>
+        <div>
           <label class="f">نوع الحساب</label>
           <div class="chips">
             ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني']]
@@ -4196,7 +4202,7 @@ const app={
     D.monthMode=wel.monthMode==='cal'?'cal':'salary';
     if(wel.veh){
       const vn=String(wel.vehName||'').trim()||wel.vehKind;
-      D.vehicles.push({id:uid(),name:vn,kind:wel.vehKind,regExp:'',inspExp:''});
+      D.vehicles.push({id:uid(),name:vn,kind:wel.vehKind,regExp:''});
     }
     const sal=Number(onlyNum(wel.salary))||0;
     if(sal>0&&ids.length){
@@ -4757,11 +4763,19 @@ const app={
   addVeh(){
     const el=document.getElementById('vehname');
     const n=(el&&String(el.value||'').trim())||String(vehDraft.name||'').trim()||vehDraft.kind;
-    D.vehicles.push({id:uid(),name:n,kind:vehDraft.kind,regExp:'',inspExp:''});
+    D.vehicles.push({id:uid(),name:n,kind:vehDraft.kind,regExp:''});
     vehTab=D.vehicles[D.vehicles.length-1].id;
     showVeh=false;vehDraft={kind:'سكوتر',name:''};save();render();app.toast('اتحفظت');
   },
-  setVehTab(id){vehTab=id;render();},
+  setVehTab(id){vehTab=id;vehRename=null;render();},
+  renameVeh(id){vehRename=vehRename===id?null:id;render();},
+  saveVehName(id){
+    const v=D.vehicles.find(x=>x.id===id);if(!v)return;
+    const el=document.getElementById('vehnewname');
+    const n=el?String(el.value||'').trim():'';
+    if(n)v.name=n;
+    vehRename=null;save();render();app.toast('اتغير');
+  },
   setVehDate(id,k,v){const x=D.vehicles.find(y=>y.id===id);if(x){x[k]=v;save();render();}},
   setLicExp(v){D.licExp=v;save();render();},
   goVeh(){tab='wallet';wtab='veh';render();window.scrollTo(0,0);},
