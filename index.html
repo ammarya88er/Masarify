@@ -452,6 +452,7 @@ let retFor=null, retAcct='', retDate=today();
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false;
+let setsOpen={};
 let welSkipped=false;
 let wel={accs:[],salary:'',salaryDate:today(),salaryAcc:0,office:false,monthMode:'salary',veh:false,vehKind:'سكوتر',vehName:''};
 let stmtFor=null, stmtMode='full', stmtAcct='bank';
@@ -543,17 +544,9 @@ function normalizeData(){
     D.cats.splice(i>-1?i+1:D.cats.length,0,{id:'stimulants',label:'منبهات',color:'#A9CE4F'});
   }
   if(!D.rate)D.rate=50;
-  if(!D.ocats)D.ocats=[{id:'company',label:'مصاريف شركات'},{id:'shared',label:'مشترك'},
-    {id:'w1',label:'مسحوبات عصام'},{id:'w2',label:'مسحوبات علي'},{id:'oloan',label:'سلفة مكتب'}];
-  if(!D.ocats.some(c=>c.id==='oloan'))D.ocats.push({id:'oloan',label:'سلفة مكتب'});
-  if(!D._ocatOrder){
-    const want=['company','oloan','w1','w2','shared'];
-    D.ocats.sort((a,b)=>{
-      const ia=want.indexOf(a.id), ib=want.indexOf(b.id);
-      return (ia<0?99:ia)-(ib<0?99:ib);
-    });
-    D._ocatOrder=1;
-  }
+  if(D.p92===undefined)D.p92=0;
+  if(D.p95===undefined)D.p95=0;
+  if(!D.ocats)D.ocats=[];
   if(!D.closings)D.closings=[];
   if(D.lastClose===undefined)D.lastClose='';
   if(D.lastBackup===undefined)D.lastBackup='';
@@ -698,6 +691,8 @@ function balances(bk){
 }
 const accountsFor=bk=>D.accounts.filter(a=>a.scope==='both'||a.scope===(bk||book));
 const ocatOf=id=>(D.ocats||[]).find(c=>c.id===id)||{id:'',label:'—'};
+const defOcat=()=>{const l=D.ocats||[];const c=l.find(x=>x.id==='shared')||l[0];return (c&&c.id)||'';};
+const fuelPrice=ft=>Number(ft==='٩٥'?D.p95:D.p92)||0;
 const dayShift=(ds,n)=>{const p=ds.split('-').map(Number);
   const d=new Date(p[0],p[1]-1,p[2]+n);
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
@@ -1542,20 +1537,13 @@ function alertsPanel(){
     const keys=Object.keys(groups);
     const grand=Math.round(items.reduce((a,o)=>a+o.amount,0)*100)/100;
     if((D._owedSeen||0)!==items.length){owedOpen=true;D._owedSeen=items.length;}
-    rows.push(`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
-      <span class="rail" style="background:var(--mint)"></span>
-      <span class="g"><span class="t">فلوس ليك</span>
-        <span class="s" style="display:block">${keys.length} ${keys.length===1?'شخص':'ناس'} · ${items.length} مستحق</span></span>
-      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(grand,'EGP')}</span>
-      <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span>
-    </div>`);
-    if(!owedOpen)return;
-    keys.forEach(key=>{
+    let owedBody='';
+    if(owedOpen)keys.forEach(key=>{
       const list=groups[key];
       const total=Math.round(list.reduce((a,o)=>a+o.amount,0)*100)/100;
       const who=key==='__none__'?'':key;
       const gid='g_'+key;
-      rows.push(`
+      owedBody+=`
       <div class="alert">
         <span class="rail" style="background:var(--mint)"></span>
         <span class="g"><span class="t">فلوس ليك${who?' عند '+esc(who):''}</span>
@@ -1572,8 +1560,15 @@ function alertsPanel(){
         <button class="btn" ${owedAcct?'':'disabled'} onclick="app.confirmOwedGet('${esc(gid)}')">أكد الاستلام</button>
         <button class="btn ghost" onclick="app.dropOwedGroup('${esc(gid)}')">شيلها خالص</button>
         <button class="btn ghost" onclick="app.cancelOwedGet()">إلغاء</button>
-      </div>`:''}`);
+      </div>`:''}`;
     });
+    rows.push(`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
+      <span class="rail" style="background:var(--mint)"></span>
+      <span class="g"><span class="t">فلوس ليك</span>
+        <span class="s" style="display:block">${keys.length} ${keys.length===1?'شخص':'ناس'} · ${items.length} مستحق</span></span>
+      <span class="vl" style="color:var(--mint);white-space:nowrap">${money(grand,'EGP')}</span>
+      <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span>
+    </div>${owedBody}`);
   })();
 
   if(book==='me')(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{
@@ -1775,7 +1770,7 @@ function alertsPanel(){
       ${payChips(ofeeAcct,'app.setOfeeAcct','','office')}
       <label class="f">دخلت على أنهي حساب عندك؟ <b>*</b></label>
       ${payChips(ofeeTo,'app.setOfeeTo','','me')}
-      <div class="hint">هتتسجل مصروف مكتب بتصنيف مشترك، وأي فرق هيترحّل للمرة الجاية.</div>
+      <div class="hint">هتتسجل مصروف مكتب${defOcat()?' بتصنيف '+esc(ocatOf(defOcat()).label):' من غير تصنيف'}، وأي فرق هيترحّل للمرة الجاية.</div>
       <button class="btn" ${ofeeAcct&&ofeeTo?'':'disabled'} onclick="app.takeOfee()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelOfee()">إلغاء</button>
     </div>`:''}`);
@@ -1806,7 +1801,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من عهدة المكتب':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?' (تقديري)':''):''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من عهدة المكتب':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?' (تقديري)':''):''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -1878,6 +1873,7 @@ function vAddOffice(){
       <div class="hint">اضغط على اسم جاهز أو اكتب اسم جديد — نفس الاسم بيتجمع في سطر واحد وقت التقفيل.</div>
       <label class="f">التصنيف <b>*</b></label>
       <div class="chips">${D.ocats.map(c=>`<button class="chip${draftO.ocat===c.id?' on':''}" onclick="app.oCat('${c.id}')">${esc(c.label)}</button>`).join('')}</div>
+      ${D.ocats.length?'':'<div class="hint">مفيش تصنيفات لسه — ضيفها من الإعدادات.</div>'}
 
       ${k==='expense'?`
         <label class="f">ملاحظات (اختياري)</label>
@@ -2014,6 +2010,10 @@ function txnEditForm(t){
     ${!isOffice&&t.kind==='expense'&&!hasItems?`<label class="f">التصنيف</label>
       <div class="chips">${D.cats.map(c=>`<button class="chip sm${eTxn.cat===c.id?' on':''}" onclick="app.eTxnPick('cat','${c.id}')">${c.label}</button>`).join('')}</div>`:''}
 
+    ${!isOffice&&!hasItems&&t.cat==='fuel'&&t.veh?`<label class="f">كام لتر؟</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.liters)}" oninput="app.eTxnSet('liters',numFix(this,1))">
+      <div class="hint">${t.litersEst?'الرقم ده تقريبي — اكتب اللي في الفاتورة والكلمة هتختفي.':'لو سبتها فاضية هتترجع لحساب تقريبي من السعر.'}</div>`:''}
+
     ${isTransfer?'':`<label class="f">الحساب</label>
       ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me')}`}
 
@@ -2113,10 +2113,13 @@ function vAdd(){
         <div class="chips">${D.vehicles.map(v=>`<button class="chip sm${draft.veh===v.id?' on':''}" onclick="app.setVeh('${v.id}')">${esc(v.name)}</button>`).join('')}</div>`:''}
       ${draft.cat==='fuel'?`<label class="f">نوع البنزين</label>
         <div class="chips">
-          ${['٩٢','٩٥','سولار'].map(f=>`<button class="chip sm${draft.fuelType===f?' on':''}" onclick="app.setFuelType('${f}')">${f}</button>`).join('')}
+          ${['٩٢','٩٥'].map(f=>`<button class="chip sm${draft.fuelType===f?' on':''}" onclick="app.setFuelType('${f}')">${f}</button>`).join('')}
         </div>
         <label class="f">كام لتر؟ (اختياري)</label>
-        <input class="f" type="text" inputmode="decimal" value="${esc(draft.liters)}" oninput="app.dset('liters',numFix(this,1))">`:''}
+        <input class="f" type="text" inputmode="decimal" value="${esc(draft.liters)}" oninput="app.dset('liters',numFix(this,1))">
+        ${String(draft.liters||'').trim()?'':`<div class="hint">${fuelPrice(draft.fuelType)>0
+          ?`سيبها فاضية وهتتحسب تقريبًا من المبلغ وسعر اللتر (<span class="n">${fmt(fuelPrice(draft.fuelType))}</span>).`
+          :'لو عايزها تتحسب لوحدها، حط سعر اللتر في الإعدادات.'}</div>`}`:''}
       <label class="f">قراءة العداد (اختياري)</label>
       <input class="f" type="text" inputmode="numeric" value="${esc(draft.odo)}" oninput="app.dset('odo',numFix(this,0))">
       <div class="hint">لو كتبت العداد واللترات، البرنامج هيحسبلك استهلاك المركبة في «مركباتي».</div>
@@ -2965,7 +2968,7 @@ function wVeh(){
           <div class="stat"><b>${fmt(s.total)}</b><span>إجمالي المصروف</span></div>
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:12px;line-height:1.9">
-          ${s.lastFuel?`آخر تعبئة ${dLabel(s.lastFuel.date)} · <span class="n">${fmt(s.lastFuel.liters)}</span> لتر بـ<span class="n">${fmt(s.lastFuel.amount)}</span>${s.lastFuel.fuelType?' ('+esc(s.lastFuel.fuelType)+')':''}`:'مفيش تعبئات مسجلة'}
+          ${s.lastFuel?`آخر تعبئة ${dLabel(s.lastFuel.date)} · <span class="n">${fmt(s.lastFuel.liters)}</span> لتر بـ<span class="n">${fmt(s.lastFuel.amount)}</span>${s.lastFuel.fuelType?' ('+esc(s.lastFuel.fuelType)+')':''}${s.lastFuel.litersEst?' · تقريبي':''}`:'مفيش تعبئات مسجلة'}
           <span style="display:block">${s.lastFix?`آخر صيانة ${dLabel(s.lastFix.date)} · <span class="n">${fmt(s.lastFix.amount)}</span>${s.lastFix.odo?' عند <span class="n">'+fmt(s.lastFix.odo)+'</span> كم':''}`:'مفيش صيانات مسجلة'}</span>
           ${s.odo?`<span style="display:block">آخر قراءة عداد <span class="n">${fmt(s.odo)}</span> كم</span>`:''}
         </div>
@@ -3098,11 +3101,22 @@ function logList(){
     :'<div class="empty">مفيش نتايج.</div>';
 }
 
+function setSec(key,title,badge,body,mt){
+  const on=!!setsOpen[key];
+  return `<div class="sec"${mt?` style="margin-top:${mt}"`:''}>
+    <div class="sec-h" onclick="app.toggleSet('${key}')" style="cursor:pointer${on?'':';margin-bottom:0'}">
+      <h3>${esc(title)}</h3>
+      <span>${badge!==''&&badge!==undefined?esc(String(badge))+' · ':''}${on?'▲':'▼'}</span>
+    </div>
+    ${on?body():''}
+  </div>`;
+}
+
 function vSettings(){
   return `<div style="padding-top:20px">
     ${msg?`<div class="note ok">${esc(msg)}</div>`:''}
 
-    <div class="sec-h" style="margin-top:6px"><h3>المزامنة التلقائية</h3></div>
+    ${setSec('sync','المزامنة التلقائية','',()=>`
     <p class="hint" style="margin-top:-4px">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
     ${ghGist?`
       <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
@@ -3124,8 +3138,9 @@ function vSettings(){
         <li>الصقه في الخانة فوق واضغط اربط.</li>
       </ol>`:''}
     `}
+    `,'6px')}
 
-    <div class="sec"><div class="sec-h"><h3>مفتاح قراءة الفواتير</h3></div>
+    ${setSec('apikey','مفتاح قراءة الفواتير','',()=>`
       <p class="hint" style="margin-top:-4px">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
       ${(getKey()&&!showKeyEdit)?`
         <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
@@ -3138,7 +3153,7 @@ function vSettings(){
         <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
         ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
       `}
-    </div>
+    `)}
 
     <div class="sec"><div class="sec-h"><h3>نسخة احتياطية</h3></div>
       <p class="hint" style="margin-top:-4px">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
@@ -3148,15 +3163,16 @@ function vSettings(){
       <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
     </div>
 
-    <div class="sec-h" style="margin-top:28px"><h3>التصنيفات</h3><span>${D.cats.length}</span></div>
+    ${setSec('cats','التصنيفات',D.cats.length,()=>`
     <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
       ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
       ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">تأكيد</button>`
       :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`).join('')}</div>
     <input class="f" id="newcat" placeholder="اسم تصنيف جديد" style="margin-top:10px">
     <button class="btn" onclick="app.addCat()">ضيف تصنيف</button>
+    `)}
 
-    <div class="sec"><div class="sec-h"><h3>الحسابات</h3></div>
+    ${setSec('accs','الحسابات',D.accounts.length,()=>`
       <p class="hint" style="margin-top:-4px">عدّل الأسامي، وحدد مين فيهم ليه حد أقصى.</p>
       ${D.accounts.map(a=>{const c=(accCfg&&accCfg[a.id])||{name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''};
       return `<div class="panel" style="padding:14px 16px;margin-top:12px">
@@ -3204,18 +3220,18 @@ function vSettings(){
         </div>`:''}
       </div>`}).join('')}
       <button class="btn" onclick="app.saveAccounts()">احفظ الحسابات</button>
-    </div>
+    `)}
 
-    ${officeOn()?`<div class="sec"><div class="sec-h"><h3>تصنيفات المكتب</h3></div>
+    ${officeOn()?setSec('ocats','تصنيفات المكتب',D.ocats.length,()=>`
       <p class="hint" style="margin-top:-4px">اللي بتختار منها وأنت بتسجل مصروف عهدة.</p>
       <div style="margin-top:10px">${D.ocats.map(c=>`<span class="catchip"><b style="background:#8C7BF0"></b>${esc(c.label)}
         ${confirmKey==='ocat'+c.id?`<button onclick="app.ocatDel('${c.id}')" style="color:var(--mint)">تأكيد</button>`
           :`<button onclick="app.askDel('ocat${c.id}')">×</button>`}</span>`).join('')}</div>
       <input class="f" id="newocat" placeholder="تصنيف جديد" style="margin-top:10px">
       <button class="btn" onclick="app.ocatAdd()">ضيف تصنيف</button>
-    </div>`:''}
+    `):''}
 
-    ${officeOn()?`<div class="sec-h" style="margin-top:28px"><h3>تجميع بنود المكتب</h3><span>${(D.groups||[]).length}</span></div>
+    ${officeOn()?setSec('groups','تجميع بنود المكتب',(D.groups||[]).length,()=>`
     <p class="hint" style="margin-top:-4px">البنود اللي جوه المجموعة بتتسجل مفصّلة زي ما هي، بس بتظهر في تقرير التقفيل في سطر واحد باسم المجموعة.</p>
     <div class="panel" style="margin-top:12px">
       ${(D.groups||[]).length?(D.groups||[]).map(g=>`
@@ -3240,7 +3256,8 @@ function vSettings(){
         </div>`:''}`).join(''):'<div class="empty" style="padding:16px 10px">مفيش مجموعات.</div>'}
     </div>
     <input class="f" id="newgrp" placeholder="اسم مجموعة جديدة" style="margin-top:12px">
-    <button class="btn ghost" onclick="app.addGroup()">زوّد مجموعة</button>`:''}
+    <button class="btn ghost" onclick="app.addGroup()">زوّد مجموعة</button>
+    `):''}
 
     <div class="sec"><div class="sec-h"><h3>دفتر المكتب</h3></div>
       <p class="hint" style="margin-top:-4px">لو شغلته هيظهر سويتش فوق تبدّل بيه بين فلوسك وعهدة المكتب، ومعاه التقفيل والعهد والسلف.</p>
@@ -3289,14 +3306,23 @@ function vSettings(){
       <button class="btn" onclick="app.saveRate()">احفظ السعر</button>
     </div>
 
-    <div class="sec"><div class="sec-h"><h3>تركيبه على الموبايل</h3></div>
+    <div class="sec"><div class="sec-h"><h3>سعر لتر البنزين</h3></div>
+      <p class="hint" style="margin-top:-4px">لما تسجّل بنزين وتسيب خانة اللترات فاضية، هيحسبها من المبلغ وسعر اللتر ويكتب جنبها «تقريبي».</p>
+      <label class="f">لتر ٩٢</label>
+      <input class="f" id="p92in" type="text" inputmode="decimal" value="${D.p92||''}" oninput="numFix(this,1)">
+      <label class="f">لتر ٩٥</label>
+      <input class="f" id="p95in" type="text" inputmode="decimal" value="${D.p95||''}" oninput="numFix(this,1)">
+      <button class="btn" onclick="app.saveFuelPrices()">احفظ الأسعار</button>
+    </div>
+
+    ${setSec('install','تركيبه على الموبايل','',()=>`
       <ol class="steps">
         <li>افتح اللينك من متصفح الموبايل.</li>
         <li>افتح قايمة المتصفح (زرار المشاركة أو النقط التلاتة).</li>
         <li>اختار «إضافة إلى الشاشة الرئيسية».</li>
       </ol>
       <div class="hint">هيشتغل بعدها زي أي تطبيق، وهيفتح من غير نت كمان.</div>
-    </div>
+    `)}
 
     <div class="sec">${confirmKey==='wipe'
       ?`<button class="btn danger" onclick="app.wipe()">أكد مسح كل البيانات</button>
@@ -3530,7 +3556,7 @@ const app={
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
   closeAutoMsg(){autoMsg='';render();},
-  go(t){renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';}if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
+  go(t){renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';}setsOpen={};if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
   setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();},
@@ -3541,7 +3567,8 @@ const app={
     const t=D.txns.find(x=>x.id===id);if(!t)return;
     eTxn={id:id,amount:String(t.amount||''),date:t.date,account:t.account,place:t.place||'',
       onote:(t.book==='office'&&t.note!==t.item)?(t.note||''):'',
-      cat:t.cat||'',ocat:t.ocat||'',note:(t.book==='office'?(t.item||t.note||''):(t.note||t.merchant||''))};
+      cat:t.cat||'',ocat:t.ocat||'',liters:(t.liters===undefined||t.liters===null)?'':String(t.liters),
+      note:(t.book==='office'?(t.item||t.note||''):(t.note||t.merchant||''))};
     confirmKey='';render();
   },
   eTxnSet(k,v){eTxn[k]=v;},
@@ -3588,7 +3615,7 @@ const app={
     t.amount=Math.round((Number(t.amount)-amt)*100)/100;
     const oit=normItem(it.name||t.merchant||'بند');
     D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:amt,account:t.account,
-      date:t.date,item:oit,ocat:(D.ocats[0]&&D.ocats[0].id)||'company',note:oit,
+      date:t.date,item:oit,ocat:defOcat(),note:oit,
       place:t.merchant||undefined});
     eTxn=null;sortTxns();save();render();app.toast('اتحول للمكتب');
   },
@@ -3621,6 +3648,16 @@ const app={
     }else if(t.kind!=='transfer'){
       t.note=eTxn.note;
       if(t.kind==='expense'&&!hasItems&&eTxn.cat)t.cat=eTxn.cat;
+    }
+    if(t.book!=='office'&&!hasItems&&t.cat==='fuel'&&t.veh&&eTxn.liters!==undefined){
+      const L=Number(onlyNum(eTxn.liters))||0;
+      if(L>0){
+        if(L!==(Number(t.liters)||0)){t.liters=L;delete t.litersEst;}
+      }else{
+        const fp=fuelPrice(t.fuelType), amt=Number(t.amount)||0;
+        if(fp>0&&amt>0){t.liters=Math.round(amt/fp*100)/100;t.litersEst=true;}
+        else{t.liters=undefined;delete t.litersEst;}
+      }
     }
     if(eTxn.itemNames&&t.items){
       Object.keys(eTxn.itemNames).forEach(ix=>{
@@ -3786,7 +3823,12 @@ const app={
     const vch=useVoucher(draft.kind==='expense'&&!usd?draft.voucherId:'',gross,draft.date);
     const isLent=draft.kind==='expense'&&draft.owed&&draft.owedKind==='lent';
     const srcTxnId=uid();
-    D.txns.unshift({id:srcTxnId,book:'me',kind:draft.kind,amount:Math.round((gross-(vch?vch.amount:0))*100)/100,
+    const finalAmt=Math.round((gross-(vch?vch.amount:0))*100)/100;
+    const isFuel=(draft.cat==='fuel'&&!!draft.veh);
+    const litersIn=isFuel?(Number(onlyNum(draft.liters))||0):0;
+    const fPrice=isFuel?fuelPrice(draft.fuelType):0;
+    const litersAuto=(isFuel&&!litersIn&&fPrice>0&&finalAmt>0)?Math.round(finalAmt/fPrice*100)/100:0;
+    D.txns.unshift({id:srcTxnId,book:'me',kind:draft.kind,amount:finalAmt,
       cat:isLent?'lentcat':draft.cat,account:draft.account,to:draft.kind==='transfer'?draft.to:null,
       note:draft.note,date:draft.date,usd:usd||undefined,rate:usd?D.rate:undefined,
       pending:usd?true:undefined,voucher:vch||undefined,
@@ -3794,7 +3836,8 @@ const app={
       discount:disc||undefined,
       veh:((draft.cat==='fuel'||draft.cat==='repair')&&draft.veh)?draft.veh:undefined,
       fuelType:(draft.cat==='fuel'&&draft.veh)?draft.fuelType:undefined,
-      liters:(draft.cat==='fuel'&&draft.veh)?(Number(onlyNum(draft.liters))||undefined):undefined,
+      liters:isFuel?((litersIn||litersAuto)||undefined):undefined,
+      litersEst:litersAuto?true:undefined,
       odo:((draft.cat==='fuel'||draft.cat==='repair')&&draft.veh)?(Number(onlyNum(draft.odo))||undefined):undefined,
       lent:(draft.kind==='expense'&&draft.owed&&draft.owedKind==='lent')?true:undefined,
       salary:(draft.kind==='income'&&draft.salary)?true:undefined});
@@ -4146,7 +4189,7 @@ const app={
     if(amt<=0||!ofeeAcct||!ofeeTo)return;
     const link=uid();
     D.txns.unshift({id:uid(),link:link,book:'office',kind:'expense',amount:amt,account:ofeeAcct,
-      date:today(),item:'رسوم',ocat:'shared',note:'رسوم'});
+      date:today(),item:'رسوم',ocat:defOcat(),note:'رسوم'});
     D.txns.unshift({id:uid(),link:link,book:'me',kind:'expense',amount:-amt,cat:'fees',account:ofeeTo,
       date:today(),note:'استرداد رسوم مكتب'});
     if(!D.ofees)D.ofees=[];
@@ -4347,7 +4390,7 @@ const app={
           target.amount=Math.round((Number(target.amount)+over)*100)/100;
         }else{
           D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:over,account:accId,
-            date:today(),item:'تقريب',ocat:'shared',note:'تقريب'});
+            date:today(),item:'تقريب',ocat:defOcat(),note:'تقريب'});
         }
         D.txns.unshift({id:uid(),book:'me',kind:'income',amount:over,account:refundTo,
           date:today(),note:'باقي تقريب من العهدة'});
@@ -4952,6 +4995,12 @@ const app={
     if(v>0){D.rate=v;save();msg='اتحفظ.';}
     render();
   },
+  saveFuelPrices(){
+    D.p92=numVal('p92in')||0;
+    D.p95=numVal('p95in')||0;
+    save();msg='اتحفظ.';render();
+  },
+  toggleSet(k){setsOpen[k]=!setsOpen[k];render();},
   toggleGhHelp(){showGhHelp=!showGhHelp;render();},
   ghConnect(){return ghConnect();},
   ghSyncNow(){return ghReconcile();},
