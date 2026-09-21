@@ -426,7 +426,7 @@ let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='
 let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, payDate=today(), fixFor=null, convFor=null;
 let insEdit=null, iDraft={};
 let showIns=false, showCert=false, showSub=false;
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:''};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
@@ -460,6 +460,9 @@ let owedOpen=false, catsOpen=false;
 let setsOpen={};
 let openRow={};
 let rbackFor=null;
+let alertsOpen=false;
+let svEdit=null;
+const ASEEN='masareef:alertsSeen:';
 let welSkipped=false;
 let wel={accs:[],salary:'',salaryDate:today(),salaryAcc:0,office:false,monthMode:'salary',veh:false,vehKind:'سكوتر',vehName:''};
 let stmtFor=null, stmtMode='full', stmtAcct='bank';
@@ -552,6 +555,8 @@ function normalizeData(){
   }
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
+  (D.txns||[]).forEach(t=>{if(t.saveInt&&t.kind==='income')t.kind='yield';});
+  (D.accounts||[]).forEach(a=>{if(a.atype==='save'&&a.saveStart&&!a.saveRates)a.saveRates=[{from:a.saveStart,rate:Number(a.saveRate)||0}];});
   if(D.p92===undefined)D.p92=0;
   if(D.p95===undefined)D.p95=0;
   if(!D.ocats)D.ocats=[];
@@ -691,7 +696,7 @@ function balances(bk){
   const m={};D.accounts.forEach(a=>m[a.id]=(bk==='me'?(Number(a.opening)||0):(Number(a.openingOffice)||0)));
   D.txns.filter(t=>(t.book||'me')===bk).forEach(t=>{const v=Number(t.amount)||0;
     if(t.kind==='expense')m[t.account]=(m[t.account]||0)-v;
-    else if(t.kind==='income'||t.kind==='float')m[t.account]=(m[t.account]||0)+v;
+    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')m[t.account]=(m[t.account]||0)+v;
     else if(t.kind==='settle')m[t.account]=(m[t.account]||0)+(t.dir==='in'?v:-v);
     else if(t.kind==='transfer'){m[t.account]=(m[t.account]||0)-v;m[t.to]=(m[t.to]||0)+v;}});
   Object.keys(m).forEach(k=>{m[k]=Math.round((m[k]+Number.EPSILON)*100)/100;});
@@ -706,6 +711,215 @@ const fuelPrice=ft=>Number(ft==='٩٥'?D.p95:D.p92)||0;
 const ARRRATE=3;
 const isCreditAcc=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return !!(a&&a.credit);};
 const arrEst=v=>Math.round((Number(v)||0)*ARRRATE)/100;
+/* ==========================================================================
+   وعاء الادخار (atype:'save')
+   - بيظهر في التحويلات بس: مش في أي مكان تصرف منه أو تستلم عليه.
+   - برّه «إجمالي اللي معاك» خالص.
+   - العايد نوع حركة لوحده (kind:'yield'): بيزود رصيد الوعاء، ومش دخل.
+   - saveRates: [{from,rate}] — النسبة السنوية وتاريخ سريانها. كل يوم بنسبته.
+   - saveFreq:
+       day   → تراكمي يومي، بيتقيّد سطر واحد آخر كل شهر خلص (saveBooked = آخر شهر).
+               الشهر الشغال بيبان في رصيد الوعاء من غير قيد (saveAccrued).
+       month → يوم saveDay من كل شهر: الرصيد × متوسط النسبة ÷ ١٢.
+       year  → يوم saveYearDay (MM-DD) كل سنة: الرصيد × متوسط النسبة.
+       saveLast = آخر يوم دفع (شهري/سنوي).
+   - العمولة بتتكتب وقت التحويل، وبتتخصم من الوعاء.
+   ========================================================================== */
+const isSave=a=>!!a&&a.atype==='save';
+const saveAcc=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return isSave(a)?a:null;};
+const pad2=n=>String(n).padStart(2,'0');
+const isoAdd=(d,n)=>{const p=String(d).split('-').map(Number);const x=new Date(p[0],p[1]-1,p[2]+n);
+  return x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate());};
+const monthEnd=ym=>{const p=ym.split('-').map(Number);return ym+'-'+pad2(new Date(p[0],p[1],0).getDate());};
+const nextMonth=ym=>{const p=ym.split('-').map(Number);return p[1]===12?(p[0]+1)+'-01':p[0]+'-'+pad2(p[1]+1);};
+const yearDate=(y,md)=>{const p=String(md||'01-01').split('-').map(Number);
+  const last=new Date(y,p[0],0).getDate();return y+'-'+pad2(p[0])+'-'+pad2(Math.min(p[1],last));};
+function saveRateOn(a,d){
+  const h=(a.saveRates||[]).filter(x=>x.from<=d);
+  return h.length?Number(h[h.length-1].rate)||0:(Number(a.saveRate)||0);
+}
+function saveAvgRate(a,from,to){
+  let sum=0,n=0,d=from,g=0;
+  while(d<=to&&g++<400){sum+=saveRateOn(a,d);n++;d=isoAdd(d,1);}
+  return n?sum/n:saveRateOn(a,to);
+}
+function saveFlows(a){
+  const m={};
+  D.txns.forEach(t=>{
+    if((t.book||'me')!=='me')return;
+    const v=Number(t.amount)||0;let f=0;
+    if(t.kind==='transfer'){if(t.account===a.id)f-=v;if(t.to===a.id)f+=v;}
+    else if(t.account===a.id){
+      if(t.kind==='income'||t.kind==='float'||t.kind==='yield')f=v;
+      else if(t.kind==='expense')f=-v;
+      else if(t.kind==='settle')f=t.dir==='in'?v:-v;}
+    if(f)m[t.date]=(m[t.date]||0)+f;
+  });
+  return m;
+}
+function saveBalBefore(a,flows,d){let x=Number(a.opening)||0;Object.keys(flows).forEach(k=>{if(k<d)x+=flows[k];});return x;}
+function saveMonthAcc(a,flows,from,to){
+  let bal=saveBalBefore(a,flows,from),acc=0,d=from,g=0;
+  while(d<=to&&g++<400){
+    bal+=flows[d]||0;
+    const r=saveRateOn(a,d)/100/365;
+    if(bal+acc>0)acc+=(bal+acc)*r;
+    d=isoAdd(d,1);
+  }
+  return acc;
+}
+function saveAccrued(a){
+  if(!isSave(a)||(a.saveFreq&&a.saveFreq!=='day')||!a.saveStart)return 0;
+  const td=today(),y=isoAdd(td,-1),cur=monthOf(td);
+  const from=(a.saveStart>cur+'-01')?a.saveStart:cur+'-01';
+  if(from>y)return 0;
+  return Math.round(saveMonthAcc(a,saveFlows(a),from,y)*100)/100;
+}
+function saveEarned(a){
+  const booked=D.txns.filter(t=>t.kind==='yield'&&t.account===a.id).reduce((x,t)=>x+(Number(t.amount)||0),0);
+  return Math.round((booked+saveAccrued(a))*100)/100;
+}
+function saveAccrueAll(){
+  let changed=false;const td=today();
+  (D.accounts||[]).filter(isSave).forEach(a=>{
+    if(!a.saveStart)return;
+    const push=(amt,date,lbl)=>{if(amt>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'yield',amount:amt,
+      account:a.id,date:date,saveInt:true,note:'عايد '+a.name+' — '+lbl});};
+    if(a.saveFreq==='month'||a.saveFreq==='year'){
+      const pays=[];
+      if(a.saveFreq==='month'){
+        const day=clampDay(Number(a.saveDay)||1);
+        let ym=monthOf(a.saveStart),g=0;
+        while(g++<600){const pd=ym+'-'+pad2(Math.min(day,Number(monthEnd(ym).slice(8))));
+          if(pd>td)break;if(pd>a.saveStart)pays.push({pd:pd,lbl:mLabel(ym)});ym=nextMonth(ym);}
+      }else{
+        let y=Number(a.saveStart.slice(0,4)),g=0;
+        while(g++<100){const pd=yearDate(y,a.saveYearDay||a.saveStart.slice(5));
+          if(pd>td)break;if(pd>a.saveStart)pays.push({pd:pd,lbl:'سنة '+y});y++;}
+      }
+      let prev=a.saveStart;
+      pays.forEach(p=>{
+        if(!a.saveLast||p.pd>a.saveLast){
+          const bal=saveBalBefore(a,saveFlows(a),p.pd);
+          const avg=saveAvgRate(a,prev,isoAdd(p.pd,-1));
+          const amt=Math.round(bal*avg/(a.saveFreq==='month'?12:1))/100;
+          push(amt,p.pd,p.lbl);a.saveLast=p.pd;changed=true;
+        }
+        prev=p.pd;
+      });
+    }else{
+      const cur=monthOf(td);
+      let ym=a.saveBooked?nextMonth(a.saveBooked):monthOf(a.saveStart),g=0;
+      while(ym<cur&&g++<600){
+        const from=(a.saveStart>ym+'-01')?a.saveStart:ym+'-01';
+        push(Math.round(saveMonthAcc(a,saveFlows(a),from,monthEnd(ym))*100)/100,monthEnd(ym),mLabel(ym));
+        a.saveBooked=ym;changed=true;ym=nextMonth(ym);
+      }
+    }
+  });
+  if(changed){sortTxns();save();}
+}
+let _svDay='';
+function saveLine(a){
+  const r=saveRateOn(a,today()), earned=saveEarned(a), acc=saveAccrued(a);
+  const parts=[r?('عايد '+fmt(r)+'٪ سنوي'):'من غير عايد'];
+  parts.push(a.saveFreq==='month'?('شهري يوم '+(a.saveDay||1))
+    :a.saveFreq==='year'?('سنوي يوم '+String(a.saveYearDay||'').split('-').reverse().join('/'))
+    :'يومي');
+  if(acc>0)parts.push('اتضاف الشهر ده '+fmt(acc));
+  if(earned>0)parts.push('إجمالي العايد '+fmt(earned));
+  if(a.saveWithdraw)parts.push('سحب '+dLabel(a.saveWithdraw));
+  return parts.join(' · ');
+}
+/* الخانات — بتتعرض في إضافة حساب جديد وفي تعديل وعاء موجود */
+function saveFieldsHtml(o,sc){
+  const isEdit=sc==='edit';
+  const freqChanged=isEdit&&o.saveFreq!==o._freq0;
+  const rateChanged=isEdit&&!freqChanged&&String(o.saveRate||'')!==''&&Number(onlyNum(o.saveRate))!==Number(o._rate0);
+  const F=[['day','يومي'],['month','شهري'],['year','سنوي']];
+  return `
+    <label class="f">العايد بيتضاف</label>
+    <div class="chips">${F.map(x=>`<button class="chip sm${(o.saveFreq||'day')===x[0]?' on':''}" onclick="app.svSet('${sc}','saveFreq','${x[0]}',1)">${x[1]}</button>`).join('')}</div>
+    <div class="hint">${o.saveFreq==='month'?'بيتضاف مرة في الشهر على الرصيد في اليوم اللي تحدده.'
+      :o.saveFreq==='year'?'بيتضاف مرة في السنة على الرصيد في التاريخ اللي تحدده.'
+      :'بيتحسب كل يوم تراكمي ويبان في رصيد الوعاء على طول، وبيتقيّد في السجل سطر واحد آخر كل شهر.'}</div>
+    ${freqChanged?'<div class="hint" style="color:#EFCA6A">الطريقة اتغيرت — هتبدأ فترة جديدة من النهارده، فاكتب النسبة الجديدة.</div>':''}
+    <label class="f">العايد السنوي ٪</label>
+    <input class="f" type="text" inputmode="decimal" value="${esc(o.saveRate||'')}" oninput="app.svSet('${sc}','saveRate',numFix(this,1))" onchange="app.svSet('${sc}','saveRate',this.value,1)">
+    ${rateChanged?`<label class="f">النسبة الجديدة من إمتى؟</label>
+      <input class="f" type="date" value="${esc(o.rateFrom||today())}" onchange="app.svSet('${sc}','rateFrom',this.value,1)">
+      <div class="hint">الأيام قبله بالنسبة القديمة، واللي بعده بالجديدة.</div>`:''}
+    ${o.saveFreq==='month'?`<label class="f">يوم الإضافة</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(o.saveDay||'')}" oninput="app.svSet('${sc}','saveDay',numFix(this,0))">`:''}
+    ${o.saveFreq==='year'?`<label class="f">تاريخ الإضافة كل سنة</label>
+      <input class="f" type="date" value="${esc(o.saveYearDate||today())}" onchange="app.svSet('${sc}','saveYearDate',this.value,1)">
+      <div class="hint">اليوم والشهر بس اللي بيفرقوا.</div>`:''}
+    ${!isEdit?`<label class="f">بيبدأ من</label>
+      <input class="f" type="date" value="${esc(o.saveStart||today())}" onchange="app.svSet('${sc}','saveStart',this.value,1)">`:''}
+    <label class="f">ميعاد سحب (اختياري)</label>
+    <div class="drow">
+      <input class="f" type="date" value="${esc(o.saveWithdraw||'')}" onchange="app.svSet('${sc}','saveWithdraw',this.value,1)">
+      ${o.saveWithdraw?`<button class="chip sm" onclick="app.svSet('${sc}','saveWithdraw','',1)">شيله</button>`:''}
+    </div>
+    <div class="hint">لو حطيته، هيجيلك تنبيه قبله بأسبوع.</div>`;
+}
+function saveDraftOf(a){
+  const r=saveRateOn(a,today());
+  return {id:a.id,saveRate:r?String(r):'',saveFreq:a.saveFreq||'day',_freq0:a.saveFreq||'day',_rate0:r,
+    saveDay:String(a.saveDay||1),saveYearDate:today().slice(0,5)+(a.saveYearDay||today().slice(5)),
+    saveStart:a.saveStart||today(),saveWithdraw:a.saveWithdraw||'',rateFrom:today()};
+}
+function applySaveCfg(a,o){
+  const isNew=!a.saveStart, td=today();
+  const newFreq=o.saveFreq==='month'?'month':o.saveFreq==='year'?'year':'day';
+  const newRate=Number(onlyNum(o.saveRate))||0;
+  if(isNew){
+    a.saveStart=o.saveStart||td;
+    a.saveRates=[{from:a.saveStart,rate:newRate}];
+  }else if(newFreq!==(a.saveFreq||'day')){
+    /* طريقة جديدة = فترة جديدة من النهارده. اليومي بيقيّد اللي اتجمع لحد إمبارح الأول */
+    if((a.saveFreq||'day')==='day'){
+      saveAccrueAll();
+      const acc=saveAccrued(a);
+      if(acc>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'yield',amount:acc,account:a.id,
+        date:isoAdd(td,-1),saveInt:true,note:'عايد '+a.name+' — لحد تغيير الطريقة'});
+    }
+    a.saveStart=td;delete a.saveBooked;delete a.saveLast;
+    a.saveRates=[{from:td,rate:newRate}];
+  }else if(newRate!==saveRateOn(a,td)||(o.rateFrom&&newRate!==saveRateOn(a,o.rateFrom))){
+    let from=o.rateFrom||td;
+    /* الفترات اللي اتقيّدت خلاص ما بتتحسبش تاني */
+    const lock=a.saveBooked?isoAdd(monthEnd(a.saveBooked),1):(a.saveLast?isoAdd(a.saveLast,1):a.saveStart);
+    if(from<lock)from=lock;
+    a.saveRates=(a.saveRates||[{from:a.saveStart,rate:Number(a.saveRate)||0}]).filter(x=>x.from<from);
+    a.saveRates.push({from:from,rate:newRate});
+  }
+  a.saveRate=newRate;
+  a.saveFreq=newFreq;
+  a.saveDay=clampDay(Number(onlyNum(o.saveDay))||1);
+  a.saveYearDay=String(o.saveYearDate||(a.saveStart||td)).slice(5);
+  a.saveWithdraw=o.saveWithdraw||undefined;
+  delete a.saveFeeIn;delete a.saveFeeOut;
+  _svDay='';
+}
+/* العمولة وقت التحويل: بتظهر لو التحويل من أو إلى وعاء */
+function saveXferRole(){
+  if(draft.kind!=='transfer')return null;
+  const inA=saveAcc(draft.to), outA=saveAcc(draft.account);
+  if(inA)return {a:inA,lbl:'عمولة إيداع'};
+  if(outA)return {a:outA,lbl:'عمولة سحب'};
+  return null;
+}
+
+/* اسم الحركة في التنبيهات: المكان هو الاسم، والملاحظة تنزل في السطر الصغير.
+   لو مفيش مكان، الملاحظة تبقى الاسم؛ ولو الاتنين فاضيين، التصنيف. */
+function txnTitle(t){
+  const place=String(t.place||t.merchant||'').trim();
+  const note=String(t.note||'').trim();
+  if(place)return {title:place,extra:(note&&note!==place)?note:''};
+  if(note)return {title:note,extra:''};
+  return {title:catOf(t.cat).label||'—',extra:''};
+}
 const dayShift=(ds,n)=>{const p=ds.split('-').map(Number);
   const d=new Date(p[0],p[1]-1,p[2]+n);
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
@@ -1194,8 +1408,9 @@ function pickRow(key,items,sel,fn,sm,raw){
 function yesNo(key,on,fn,noLbl,yesLbl){
   return pickRow(key,[{id:false,label:noLbl||'لأ'},{id:true,label:yesLbl||'أيوه'}],!!on,fn,1,1);
 }
-function payChips(sel,fn,exclude,bk,key){
-  return pickRow(key,accountsFor(bk||'me').filter(a=>a.id!==exclude).map(a=>({id:a.id,label:esc(a.name)})),sel,fn);
+/* الوعاء بيتشال من كل صفوف الحسابات، إلا لو allowSave (التحويلات بس) */
+function payChips(sel,fn,exclude,bk,key,allowSave){
+  return pickRow(key,accountsFor(bk||'me').filter(a=>a.id!==exclude&&(allowSave||!isSave(a))).map(a=>({id:a.id,label:esc(a.name)})),sel,fn);
 }
 function dateField(val,fn){
   return `<div class="drow">
@@ -1205,7 +1420,7 @@ function dateField(val,fn){
     </div>`;
 }
 function acctRow(a,b,extra,attrs){
-  const lim=Number(a.limit)||0,v=b[a.id]||0,left=Math.max(0,Math.min(v,lim));
+  const lim=Number(a.limit)||0,v=(b[a.id]||0)+(isSave(a)&&book==='me'?saveAccrued(a):0),left=Math.max(0,Math.min(v,lim));
   let split='';
   if(a.scope==='both'){
     const bm=balances('me')[a.id]||0, bo=balances('office')[a.id]||0;
@@ -1215,6 +1430,7 @@ function acctRow(a,b,extra,attrs){
   return `<div class="arow" ${attrs||''}>
     <span class="rail" style="background:${aColor(a.id)}"></span>
     <span class="nm">${esc(a.name)}${split}
+      ${isSave(a)?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">${saveLine(a)}</span>`:''}
       ${lim?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">عليك <span class="n">${fmt(Math.max(0,lim-v))}</span> من <span class="n">${fmt(lim)}</span></span>
       <span class="track" style="display:block;margin-top:6px;height:4px"><span class="fill" style="display:block;width:${lim?left/lim*100:0}%;background:${aColor(a.id)}"></span></span>`:''}
     </span>
@@ -1452,11 +1668,12 @@ function vHome(){
 
 function alertsPanel(){
   const rows=[];
-  if(book==='me')D.txns.filter(t=>t.pending).forEach(t=>rows.push(`
+  if(book==='me')D.txns.filter(t=>t.pending).forEach(t=>{const T=txnTitle(t);rows.push(`
     <div class="alert">
       <span class="rail" style="background:#EFCA6A"></span>
-      <span class="g"><span class="t">${esc(t.note||catOf(t.cat).label)}</span>
-        <span class="s" style="display:block">${t.arrFee?'مصاريف تدبير':money(t.usd,'USD')} · ${t.hold?'محجوز':'تقديري'} ${money(t.amount,'EGP')} · ${dLabel(t.date)}</span></span>
+      <span class="g"><span class="t">${esc(T.title)}</span>
+        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
+      <span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
       <button class="chip sm" onclick="app.startFix('${t.id}')">ظبّط</button>
     </div>
     ${fixFor===t.id?`<div class="inline">
@@ -1464,16 +1681,16 @@ function alertsPanel(){
       <input class="f" id="fixin" type="text" inputmode="decimal" value="${t.amount}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFix('${t.id}')">ظبّط المبلغ</button>
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
-    </div>`:''}`));
+    </div>`:''}`);});
 
   if(book==='me')D.txns.filter(t=>t.refundSince&&!t.refundDone).forEach(t=>{
     const w=Math.max(0,-daysTo(t.refundSince));
-    const lbl=String(t.note||t.merchant||catOf(t.cat).label||'مرتجع').trim();
+    const T=txnTitle(t);
     rows.push(`
     <div class="alert">
       <span class="rail" style="background:#5FB8A0"></span>
-      <span class="g"><span class="t">${esc(lbl)}</span>
-        <span class="s" style="display:block">مستني مرتجع · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}${t.usd?' · '+money(t.usd,'USD'):''}</span></span>
+      <span class="g"><span class="t">${esc(T.title)}</span>
+        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}مستني مرتجع · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}${t.usd?' · '+money(t.usd,'USD'):''}</span></span>
       <span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
       <button class="chip sm" onclick="app.startRefundBack('${t.id}')">رجع</button>
     </div>
@@ -1484,6 +1701,18 @@ function alertsPanel(){
       <button class="btn" onclick="app.confirmRefundBack('${t.id}')">سجّل الاسترداد</button>
       <button class="btn ghost" onclick="app.cancelRefundBack()">إلغاء</button>
     </div>`:''}`);});
+
+  if(book==='me'){const bs=balances('me');(D.accounts||[]).filter(a=>isSave(a)&&a.saveWithdraw&&daysTo(a.saveWithdraw)<=7).forEach(a=>{
+    const d=daysTo(a.saveWithdraw);
+    rows.push(`
+    <div class="alert">
+      <span class="rail" style="background:${aColor(a.id)}"></span>
+      <span class="g"><span class="t">سحب من ${esc(a.name)}</span>
+        <span class="s" style="display:block">${d>0?'باقي '+d+' يوم':d===0?'النهارده':'فات '+(-d)+' يوم'} · ${dLabel(a.saveWithdraw)}</span></span>
+      <span class="vl" style="white-space:nowrap">${money((bs[a.id]||0)+saveAccrued(a),'EGP')}</span>
+      <button class="chip sm" onclick="app.saveWithdrawGo('${a.id}')">حوّل</button>
+      <button class="chip sm" onclick="app.saveWithdrawDone('${a.id}')">خلاص</button>
+    </div>`);});}
 
   if(book==='me')(D.installments||[]).filter(insDue).forEach(i=>rows.push(`
     <div class="alert">
@@ -1557,7 +1786,7 @@ ${s.cycle==='trial'
       ${refundFor===a.id?`<div class="inline">
         <label class="f">تاخدها من أنهي حساب عهدة؟ <b>*</b></label>
         ${(function(){const ob=balances('office');
-          const opts=D.accounts.filter(x=>x.id!==a.id&&!x.credit&&(ob[x.id]||0)>0.01);
+          const opts=D.accounts.filter(x=>x.id!==a.id&&!x.credit&&!isSave(x)&&(ob[x.id]||0)>0.01);
           if(!opts.length)return '<div class="hint">مفيش رصيد عهدة في أي حساب دلوقتي — استناها لحد ما توصل عهدة جديدة.</div>';
           return '<div class="chips">'+opts.map(x=>`<button class="chip sm${refundParts[x.id]!==undefined?' on':''}" onclick="app.toggleRefundPart('${x.id}',${Math.abs(v)})">${esc(x.name)} · <span class="n">${fmt(ob[x.id])}</span></button>`).join('')+'</div>'
             +opts.filter(x=>refundParts[x.id]!==undefined).map(x=>`
@@ -1837,15 +2066,28 @@ ${s.cycle==='trial'
     </div>`);
 
   if(!rows.length)return '';
+  /* الصندوق مقفول افتراضيًا، وبيتفتح لوحده لو فيه تنبيه ماكانش موجود المرة اللي فاتت.
+     هوية التنبيه = أول زرار فيه بالـ id بتاعه، ولو مفيش = عنوانه. */
+  const akey=r=>{
+    const m=r.match(/app\.(\w+)\('([^']*)'/);
+    if(m)return m[1]+':'+m[2];
+    const tt=r.match(/<span class="t">([\s\S]*?)<\/span>/);
+    return tt?'t:'+tt[1].trim():r.slice(0,80);
+  };
+  const keys=rows.map(akey);
+  let seen=null;
+  try{seen=JSON.parse(localStorage.getItem(ASEEN+book)||'null');}catch(e){}
+  if(!Array.isArray(seen)||keys.some(k=>seen.indexOf(k)<0))alertsOpen=true;
+  try{localStorage.setItem(ASEEN+book,JSON.stringify(keys));}catch(e){}
   return `<div class="sec" style="margin-top:24px">
-    <div class="sec-h"><h3>محتاج انتباهك</h3><span>${rows.length}</span></div>
-    <div class="panel">${rows.join('')}</div>
+    <div class="sec-h" onclick="app.toggleAlerts()" style="cursor:pointer${alertsOpen?'':';margin-bottom:0'}"><h3>محتاج انتباهك</h3><span>${rows.length} · ${alertsOpen?'▲':'▼'}</span></div>
+    ${alertsOpen?`<div class="panel">${rows.join('')}</div>`:''}
   </div>`;
 }
 
 function txnRow(t){
   const c=catOf(t.items&&t.items.length?t.items[0].cat:t.cat);
-  const inc=t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in'),tr=t.kind==='transfer';
+  const inc=t.kind==='income'||t.kind==='float'||t.kind==='yield'||(t.kind==='settle'&&t.dir==='in'),tr=t.kind==='transfer';
   const color=inc?'var(--mint)':tr?'var(--muted)':'var(--clay)';
   const glyph=inc?'↑':tr?'⇄':'↓';
   const bg=inc?'rgba(79,208,141,.15)':tr?'rgba(141,150,162,.15)':'rgba(255,111,96,.14)';
@@ -1854,7 +2096,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -1894,10 +2136,10 @@ function vAddOffice(){
     </div>
     ${k==='xfer'?`
       <label class="f">من أنهي حساب؟ <b>*</b></label>
-      ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit);
+      ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit&&!isSave(x));
         return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)} · <span class="n">${fmt(ob[x.id]||0)}</span></button>`).join('')+'</div>';})()}
       <label class="f">لأنهي حساب؟ <b>*</b></label>
-      ${(function(){const opts=D.accounts.filter(x=>!x.credit&&x.id!==draftO.account);
+      ${(function(){const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&x.id!==draftO.account);
         return pickRow('oto',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.to,'app.oTo');})()}
       <div class="hint">بينقل فلوس العهدة من حساب لحساب — إجمالي العهدة مش هيتغير.</div>
       <label class="f">ملاحظة (اختياري)</label>
@@ -1908,7 +2150,7 @@ function vAddOffice(){
 
 
     ${(k==='loan'||k==='xfer')?'':`<label class="f">${k==='float'?'دخلت فين؟':'اتدفعت من إيه؟'} <b>*</b></label>
-    ${(function(){const opts=D.accounts.filter(x=>k==='expense'?true:!x.credit);
+    ${(function(){const opts=D.accounts.filter(x=>!isSave(x)&&(k==='expense'?true:!x.credit));
       return pickRow('oacct',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.account,'app.oAccount');})()}`}
 
     ${k==='xfer'?'':k==='loan'?`
@@ -2064,7 +2306,7 @@ function txnEditForm(t){
       <div class="hint">${t.litersEst?'الرقم ده تقريبي — اكتب اللي في الفاتورة والكلمة هتختفي.':'لو سبتها فاضية هتترجع لحساب تقريبي من السعر.'}</div>`:''}
 
     ${isTransfer?'':`<label class="f">الحساب</label>
-      ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me')}`}
+      ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me','',t.kind==='transfer')}`}
 
     <label class="f">التاريخ</label>
     ${dateField(eTxn.date,'app.eTxnDate')}
@@ -2094,7 +2336,7 @@ function vAdd(){
     </div>
 
     <label class="f">${k==='income'?'يتضاف على أنهي حساب؟':k==='transfer'?'من أنهي حساب؟':'دافع من إيه؟'} <b>*</b></label>
-    ${payChips(draft.account,'app.setAccount','','me','acct')}
+    ${payChips(draft.account,'app.setAccount','','me','acct',k==='transfer')}
 
     ${draft.account==='vcash'&&k==='expense'?`<label class="f">العملية دي إيه؟</label>
       ${pickRow('vc',[{id:'pay',label:'دفعت حاجة'},{id:'withdraw',label:'سحبت من المكنة'}],draft.vc,'app.setVc',1)}
@@ -2118,7 +2360,12 @@ function vAdd(){
       ${yesNo('arr',draft.arr,'app.setArr')}
     ${draft.arr?`<div class="hint">هتتسجل مصروف لوحدها بحوالي <span class="n" id="arrprev">${fmt(arrEst(Number(onlyNum(draft.amount))||0))}</span> جنيه (<span class="n">${ARRRATE}%</span>)، وتظبّطها من التنبيهات أول ما تعرف اللي اتخصم فعلًا.</div>`:''}`:''}
 
-    ${k==='transfer'?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to')}`:''}
+    ${k==='transfer'?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to',1)}
+      ${saveXferRole()?(function(){const R=saveXferRole();return `<label class="f">فيه ${R.lbl}؟</label>
+        ${yesNo('svfee',draft.svFee,'app.setSvFee')}
+        ${draft.svFee?`<input class="f" style="margin-top:8px" type="text" inputmode="decimal" placeholder="المبلغ اللي اتخصم"
+          value="${esc(draft.svFeeAmt)}" oninput="app.dset('svFeeAmt',numFix(this,1))">
+          <div class="hint">هتتخصم من ${esc(R.a.name)}.</div>`:''}`;})():''}`:''}
 
     ${k==='income'?`<label class="f">نوع الدخل</label>
       ${pickRow('salary',[{id:true,label:'مرتب'},{id:false,label:'دخل تاني'}],!!draft.salary,'app.setSalary',1,1)}
@@ -2482,6 +2729,9 @@ function wAccounts(){
       ${editAcct===a.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
         ${a.credit&&(a.secured||[]).length?`<div class="hint" style="margin-top:12px">مضمون بـ <span class="n">${securedCerts(a).length}</span> شهادة · <span class="n">${fmt(securedTotal(a))}</span> جنيه${securedTotal(a)?` · ٨٤٪ = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span>`:''}</div>`:''}
         ${a.credit&&due>0.01?`<button class="btn" style="margin-top:14px" onclick="app.startPayCard('${a.id}')">سدد الكارت — عليك <span class="n">${fmt(due)}</span></button>`:''}
+        ${isSave(a)?`${(function(){if(!svEdit||svEdit.id!==a.id)svEdit=saveDraftOf(a);return '';})()}
+          ${saveFieldsHtml(svEdit,'edit')}
+          <button class="btn" style="margin-top:14px" onclick="app.saveSaveCfg('${a.id}')">احفظ إعدادات الادخار</button>`:''}
         <label class="f" style="margin-top:12px">الرصيد الحالي</label>
         <input class="f" id="balin" type="text" inputmode="decimal" value="${b[a.id]}" oninput="numFix(this,1)">
         <button class="btn ghost" style="margin-top:14px" onclick="app.setBalance('${a.id}',${b[a.id]})">ظبّط الرصيد</button>
@@ -2510,9 +2760,11 @@ function wAccounts(){
       <input class="f" id="newacc" placeholder="اسم الحساب" value="${esc(accDraft.name)}" oninput="app.accSet('name',this.value)">
       <label class="f">نوع الحساب</label>
       <div class="chips">
-        ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني']]
+        ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']]
           .map(k=>`<button class="chip sm${accDraft.atype===k[0]?' on':''}" onclick="app.accType('${k[0]}')">${k[1]}</button>`).join('')}
       </div>
+      ${accDraft.atype==='save'?`<div class="hint">مكان بتحوّش فيه — تحوّل له ومنه بس، ومش هيظهر كحساب تصرف منه.</div>
+        ${saveFieldsHtml(accDraft,'new')}`:''}
 
       ${accDraft.atype==='bank'?`<label class="f">رقم الحساب (اختياري)</label>
         <input class="f" type="text" inputmode="numeric" value="${esc(accDraft.accNo)}" oninput="app.accSet('accNo',numFix(this,0))">`:''}
@@ -3131,11 +3383,16 @@ function vLog(){
     <div id="loglist" style="margin-top:18px">${logList()}</div>
   </div>`;
 }
+/* تطبيع النص للبحث: من غير فرق بين كابيتال وسمول، ولا أشكال الألف والتاء والياء، ولا تشكيل */
+const normTxt=x=>String(x||'').toLowerCase()
+  .replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
+  .replace(/[\u064B-\u0652\u0640]/g,'');
 const txnIn=t=>t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in');
 function logList(){
   const list=D.txns.filter(t=>(t.book||'me')===book)
    .filter(t=>{
      if(!fDir)return true;
+     if(t.kind==='yield')return false;
      const tr=t.kind==='transfer';
      if(fDir==='tr')return tr;
      if(tr)return false;
@@ -3145,9 +3402,10 @@ function logList(){
    .filter(t=>!fAcct||t.account===fAcct||t.to===fAcct)
    .filter(t=>!fCat||(book==='office'?t.ocat===fCat:(t.cat===fCat||(t.items||[]).some(i=>i.cat===fCat))))
    .filter(t=>{
-    if(!q.trim())return true;
-    const hay=[t.note,t.merchant,t.item,t.place,t.date,catOf(t.cat).label,ocatOf(t.ocat).label].concat((t.items||[]).map(i=>i.name)).join(' ');
-    return hay.indexOf(q.trim())>-1;});
+    const nq=normTxt(q).trim();
+    if(!nq)return true;
+    const hay=normTxt([t.note,t.merchant,t.item,t.place,t.date,catOf(t.cat).label,ocatOf(t.ocat).label].concat((t.items||[]).map(i=>i.name)).join(' '));
+    return hay.indexOf(nq)>-1;});
   const sumLabel=fDir==='in'?'داخل':fDir==='tr'?'محوّل':'منصرف';
   const sum=list.reduce((a,t)=>{
     const v=Number(t.amount)||0;
@@ -3242,7 +3500,7 @@ function vSettings(){
         <div>
           <label class="f">نوع الحساب</label>
           <div class="chips">
-            ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني']]
+            ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']]
               .map(k=>`<button class="chip sm${(c.atype||a.atype||'cash')===k[0]?' on':''}" onclick="app.accCfgType('${a.id}','${k[0]}')">${k[1]}</button>`).join('')}
           </div>
           ${(c.atype||a.atype)==='bank'?`<label class="f">رقم الحساب (اختياري)</label>
@@ -3439,8 +3697,9 @@ function render(){
   if(bb)bb.classList.add('on');
   const lb=document.querySelector('header .lbl');
   if(lb)lb.textContent=book==='me'?'إجمالي اللي معاك':'رصيد العهدة';
+  if(_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}}
   const b=balances(book);
-  const own=accountsFor(book).filter(a=>!a.credit);
+  const own=accountsFor(book).filter(a=>!a.credit&&!isSave(a));
   const vals=own.map(a=>Math.max(0,b[a.id]||0));
   const sum=vals.reduce((x,y)=>x+y,0);
   document.getElementById('total').textContent=fmt(own.reduce((x,a)=>x+(b[a.id]||0),0));
@@ -3472,7 +3731,7 @@ function refundVoucher(t){
 }
 
 const app={
-  setBook(bk){book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();window.scrollTo(0,0);},
+  setBook(bk){book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();window.scrollTo(0,0);},
   goClose(){tab='wallet';wtab='close';closeTo=today();render();window.scrollTo(0,0);},
   oSet(k,v){draftO[k]=v;setDisabled('osave',oOk());
     const el=document.getElementById('ominehint');
@@ -3796,6 +4055,7 @@ const app={
     if(box)box.innerHTML=(draft.kind==='expense'&&draft.cur==='EGP')?vchPicker(draft.voucherId,total,'app.setVch'):'';
   },
   setArr(v){draft.arr=!!v;render();},
+  setSvFee(v){draft.svFee=!!v;render();},
   setCur(c){draft.cur=c;render();},
   setDate(v){draft.date=v;render();},
   setKind(k){draft.kind=k;if(k==='transfer')draft.cur='EGP';render();},
@@ -3896,9 +4156,10 @@ const app={
       if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
         account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
       sortTxns();save();
-      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:''};
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
       render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
     }
+    if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
     const usd=draft.cur==='USD'?amt:0;
     let disc=(draft.kind==='expense'&&draft.hasDisc&&!usd)?(Number(onlyNum(draft.discAmt))||0):0;
     if(disc>amt)disc=amt;
@@ -3943,6 +4204,11 @@ const app={
         note:'مصاريف تدبير'+(draft.note?' — '+String(draft.note).trim()
           :(draft.place?' — '+String(draft.place).trim():''))});
     }
+    if(draft.kind==='transfer'&&draft.svFee){
+      const R=saveXferRole(), f=Math.round((Number(onlyNum(draft.svFeeAmt))||0)*100)/100;
+      if(R&&f>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:f,
+        cat:'fees',account:R.a.id,date:draft.date,note:R.lbl+' — '+R.a.name});
+    }
     if(fromFloat>0){
       if(!D.floatLoans)D.floatLoans=[];
       D.floatLoans.push({id:uid(),dir:'take',amount:fromFloat,date:draft.date,srcTxn:srcTxnId,
@@ -3962,7 +4228,7 @@ const app={
       });
     }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:''};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   toggleRefundWait(e,id){
@@ -4265,7 +4531,9 @@ const app={
     editAcct=null;accCfg=null;confirmKey='';payCard.id=null;save();render();
   },
   accSet(k,v){accDraft[k]=v;},
-  accType(t){accDraft.atype=t;accDraft.credit=(t==='credit');if(t!=='bank')accDraft.accNo='';if(t==='cash'||t==='wallet')accDraft.last4='';render();},
+  accType(t){accDraft.atype=t;accDraft.credit=(t==='credit');
+    if(t==='save'&&!accDraft.saveStart){Object.assign(accDraft,{saveRate:'',saveFreq:'day',saveDay:'1',saveStart:today(),
+      saveYearDate:today(),saveWithdraw:''});}if(t!=='bank')accDraft.accNo='';if(t==='cash'||t==='wallet')accDraft.last4='';render();},
   accPick(c){accDraft.credit=c;render();},
   accPickSec(v){accDraft.sec=v;if(!v)accDraft.secured=[];render();},
   accPickIns(v){accDraft.insure=v;render();},
@@ -4291,6 +4559,7 @@ const app={
       insure:accDraft.credit?!!accDraft.insure:undefined,
       insureRate:accDraft.credit?(accDraft.insure?(Number(onlyNum(accDraft.insureRate))||0):0):undefined,
       secured:accDraft.credit&&accDraft.sec?accDraft.secured.slice():[]});
+    if(accDraft.atype==='save'){const na=D.accounts[D.accounts.length-1];na.scope='me';applySaveCfg(na,accDraft);}
     accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',sec:false,secured:[],
       secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
     accCfg=null;
@@ -5126,6 +5395,17 @@ const app={
     save();msg='اتحفظ.';render();
   },
   toggleSet(k){setsOpen[k]=!setsOpen[k];render();},
+  toggleAlerts(){alertsOpen=!alertsOpen;render();},
+  svSet(sc,k,v,rr){const o=sc==='new'?accDraft:svEdit;if(!o)return;
+    /* لو الطريقة اتغيرت في التعديل، النسبة تتمسح عشان تتكتب الجديدة */
+    if(sc==='edit'&&k==='saveFreq'&&v!==o.saveFreq){o.saveRate=(v===o._freq0)?(o._rate0?String(o._rate0):''):'';}
+    o[k]=v;if(rr)render();},
+  saveSaveCfg(id){const a=saveAcc(id);if(!a||!svEdit)return;applySaveCfg(a,svEdit);svEdit=null;save();msg='اتحفظ.';render();},
+  saveWithdrawGo(id){
+    tab='add';openRow={};draft.kind='transfer';draft.account=id;draft.to='';draft.cur='EGP';
+    render();window.scrollTo(0,0);
+  },
+  saveWithdrawDone(id){const a=saveAcc(id);if(!a)return;delete a.saveWithdraw;save();render();},
   openRow(k){if(k)openRow[k]='open';render();},
   shutRow(k){if(k)openRow[k]='shut';},
   toggleGhHelp(){showGhHelp=!showGhHelp;render();},
