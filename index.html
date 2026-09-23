@@ -123,6 +123,8 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .frow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:12px;}
 .frow .btn{width:auto;margin-top:0;padding:12px 20px;font-size:14px;border-radius:14px;}
 .f2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.grid4 .chip{width:100%;text-align:center;padding-left:4px;padding-right:4px;}
 .drow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 .drow input.f{flex:1 1 130px;width:auto;min-width:120px;}
 .seg{display:flex;background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:5px;gap:5px;}
@@ -779,6 +781,99 @@ function saveEarned(a){
   const booked=D.txns.filter(t=>t.kind==='yield'&&t.account===a.id).reduce((x,t)=>x+(Number(t.amount)||0),0);
   return Math.round((booked+saveAccrued(a))*100)/100;
 }
+/* ديون الكارت في التاريخ ده من الدفترين — الكارت واحد عند البنك */
+function cardDebtAt(id,d){
+  let x=0;
+  D.txns.forEach(t=>{
+    if(t.date>d)return;
+    const v=Number(t.amount)||0;
+    if(t.kind==='transfer'){if(t.account===id)x+=v;if(t.to===id)x-=v;return;}
+    if(t.account!==id)return;
+    if(t.kind==='expense')x+=v;
+    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')x-=v;
+    else if(t.kind==='settle')x+=(t.dir==='in'?-v:v);
+  });
+  return Math.round(x*100)/100;
+}
+/* --------------------------------------------------------------------------
+   أقساط الكارت (mode:'bank') — زي البنك بالظبط:
+   - يوم الشراء: الأصل كله بيتسجل مصروف على الكارت.
+   - كل كشف: الفايدة = الأصل الفاضل × النسبة الشهرية، مقطوعة لقرشين،
+     بتتسجل على الكارت وبتستنى تأكيدك.
+   - القسط نفسه بيتسدد مع كشف الكارت، مش لوحده.
+   - أقساط السلفة ما بتتأثرش بأي حاجة هنا.
+   -------------------------------------------------------------------------- */
+function insPmt(P,n,r){
+  if(!(P>0)||!(n>0))return 0;
+  if(!(r>0))return Math.round(P/n*100)/100;
+  return Math.round(P*r/(1-Math.pow(1+r,-n))*100)/100;
+}
+function insRateFrom(P,n,pmt){
+  if(!(P>0)||!(n>0)||!(pmt>0))return null;
+  if(pmt*n<=P+0.005)return 0;
+  let lo=0,hi=1;
+  for(let g=0;g<200;g++){const m=(lo+hi)/2;const v=P*m/(1-Math.pow(1+m,-n));if(v>pmt)hi=m;else lo=m;}
+  return (lo+hi)/2;
+}
+function insSchedule(i){
+  const a=(D.accounts||[]).find(x=>x.id===i.src);if(!a)return [];
+  const n=Number(i.months)||0,r=Number(i.rate)||0,pmt=Number(i.monthly)||0,out=[];
+  let rem=Number(i.principal)||0;
+  for(let k=1;k<=n;k++){
+    const key=mAdd(i.firstKey,k-1);
+    const it=Math.floor(rem*r*100+1e-6)/100;
+    const prin=k===n?rem:Math.round((pmt-it)*100)/100;
+    out.push({k:k,key:key,date:dayShift(stmtDate(key,a),-1),int:it,prin:prin});
+    rem=Math.round((rem-prin)*100)/100;
+  }
+  return out;
+}
+function insBankLeft(i){
+  const sc=insSchedule(i),p=Number(i.paid)||0;
+  return Math.round(sc.slice(p).reduce((x,e)=>x+e.prin,0)*100)/100;
+}
+function cardInsAll(){
+  let changed=false;const td=today();
+  (D.installments||[]).filter(i=>i.mode==='bank').forEach(i=>{
+    insSchedule(i).forEach(e=>{
+      if(e.k<=(Number(i.intPosted)||0)||e.date>td)return;
+      if(e.int>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:e.int,cat:'fees',
+        account:i.src,date:e.date,insInt:true,insId:i.id,pending:true,
+        note:'فايدة قسط '+i.name+' ('+e.k+'/'+i.months+')'});
+      i.intPosted=e.k;i.paid=e.k;changed=true;
+    });
+  });
+  if(changed){sortTxns();save();}
+}
+/* تلميح شاشة إضافة قسط على كارت */
+function insCalcHint(){
+  const P=Number(onlyNum(insDraft.total))||0,n=Number(onlyNum(insDraft.months))||0;
+  const pmt=Number(onlyNum(insDraft.monthly))||0;
+  if(!(P>0)||!(n>0)||!(pmt>0))return '';
+  const tot=Math.round((pmt*n-P)*100)/100;
+  return tot<=0.005?'من غير فايدة.'
+    :'الفايدة على المدة كلها حوالي <span class="n">'+fmt(tot)+'</span> جنيه.';
+}
+
+/* تأمين الكارت: يوم ١ من كل شهر، نسبة من رصيد الكارت يوم آخر كشف، والكسور بتتقطع */
+function insuranceAll(){
+  let changed=false;const td=today(),cur=monthOf(td);
+  (D.accounts||[]).filter(a=>a.credit&&acctRate(a)>0).forEach(a=>{
+    if(!a.insLast){a.insLast=cur;changed=true;return;}
+    let m=nextMonth(a.insLast),g=0;
+    while(m<=cur&&g++<120){
+      const prev=(function(){const p=m.split('-').map(Number);
+        return p[1]===1?(p[0]-1)+'-12':p[0]+'-'+pad2(p[1]-1);})();
+      const sd=prev+'-'+pad2(Math.min(clampDay(Number(a.stmtDay)||20),Number(monthEnd(prev).slice(8))));
+      const debt=cardDebtAt(a.id,sd);
+      const fee=Math.floor(Math.max(0,debt)*acctRate(a))/100;
+      if(fee>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
+        account:a.id,date:m+'-01',insFee:true,pending:true,note:'تأمين '+a.name+' — '+mLabel(m)});
+      a.insLast=m;changed=true;m=nextMonth(m);
+    }
+  });
+  if(changed){sortTxns();save();}
+}
 function saveAccrueAll(){
   let changed=false;const td=today();
   (D.accounts||[]).filter(isSave).forEach(a=>{
@@ -820,6 +915,7 @@ function saveAccrueAll(){
   if(changed){sortTxns();save();}
 }
 let _svDay='';
+let _toastT=0;
 function saveLine(a){
   const r=saveRateOn(a,today()), earned=saveEarned(a), acc=saveAccrued(a);
   const parts=[r?('عايد '+fmt(r)+'٪ سنوي'):'من غير عايد'];
@@ -979,6 +1075,7 @@ const breakdown=t=>{
 
 /* --- أقساط --- */
 const insLeft=i=>{
+  if(i.mode==='bank')return insBankLeft(i);
   const base=Math.max(0,(Number(i.months)||0)-(Number(i.paid)||0))*(Number(i.monthly)||0);
   const rest=((Number(i.paid)||0)<=(Number(i.months)||0))?insRest(i):0;
   return Math.round((base+rest)*100)/100;
@@ -1016,11 +1113,11 @@ function stmtKey(d,a){
 function stmtDate(key,a){return key+'-'+dayInMonth(key,acctStmtDay(a));}
 function stmtDue(key,a){const m=mAdd(key,1);return m+'-'+dayInMonth(m,acctGraceDay(a));}
 function insDueThisStmt(accId){
-  return Math.round((D.installments||[]).filter(i=>i.src===accId&&!insDone(i))
+  return Math.round((D.installments||[]).filter(i=>i.src===accId&&i.mode!=='bank'&&!insDone(i))
     .reduce((a,i)=>a+insNextAmount(i),0)*100)/100;
 }
 function insRemainOn(accId){
-  const all=(D.installments||[]).filter(i=>i.src===accId&&!insDone(i))
+  const all=(D.installments||[]).filter(i=>i.src===accId&&i.mode!=='bank'&&!insDone(i))
     .reduce((a,i)=>a+insLeft(i),0);
   return Math.round(Math.max(0,all-insDueThisStmt(accId))*100)/100;
 }
@@ -1044,17 +1141,21 @@ function buildStmt(a,key){
   });
   spent=Math.round(Math.max(0,spent)*100)/100;
   // الأقساط اللي على الكارت: قسط الشهر بس، والباقي مش مستحق دلوقتي
-  const carry=Math.round((D.installments||[]).filter(i=>i.src===a.id&&!insDone(i))
+  const carry=Math.round((D.installments||[]).filter(i=>i.src===a.id&&i.mode!=='bank'&&!insDone(i))
     .reduce((x,i)=>x+Math.max(0,insLeft(i)-insNextAmount(i)),0)*100)/100;
   const monthly=insDueThisStmt(a.id);
-  const base=Math.round(Math.max(0,spent-carry)*100)/100;
-  const fee=Math.round(base*acctRate(a)/100*100)/100;
+  const bankAdj=(D.installments||[]).filter(i=>i.mode==='bank'&&i.src===a.id).reduce((x,i)=>{
+    const e=insSchedule(i).find(s=>s.key===key);if(!e)return x;
+    return e.k===1?x-((Number(i.principal)||0)-e.prin):x+e.prin;},0);
+  const base=Math.round(Math.max(0,spent-carry+bankAdj)*100)/100;
+  /* التأمين بقى حركة لوحده يوم ١ (insuranceAll)، فبيدخل في «spent» جوه الدورة */
+  const fee=0;
   return {owed:spent,carry:carry,monthly:monthly,base:base,fee:fee,
     from:r.from,to:r.to,
     total:Math.round((base+fee)*100)/100};
 }
 const isCardIns=i=>!!(D.accounts.find(a=>a.id===i.src&&a.credit));
-const insOnAccount=id=>(D.installments||[]).filter(i=>i.src===id&&!insDone(i)).reduce((a,i)=>a+insLeft(i),0);
+const insOnAccount=id=>(D.installments||[]).filter(i=>i.src===id&&i.mode!=='bank'&&!insDone(i)).reduce((a,i)=>a+insLeft(i),0);
 function salaryDatesAll(){
   return [...new Set(D.txns.filter(t=>(t.book||'me')==='me'&&t.kind==='income'&&t.salary).map(t=>t.date))].sort();
 }
@@ -1067,10 +1168,11 @@ const insCov=i=>i.covered||'';
 const insRest=i=>{const t=Number(i.total)||0;if(!t)return 0;
   const r=Math.round((t-(Number(i.monthly)||0)*(Number(i.months)||0))*100)/100;return r>0.005?r:0;};
 const insDone=i=>(Number(i.paid)||0)>=((Number(i.months)||0)+(insRest(i)>0?1:0));
-const insDue=i=>!insDone(i)&&salaryThisPeriod()&&(!insCov(i)||insCov(i)<curPeriodMonth());
+const insDue=i=>i.mode!=='bank'&&!insDone(i)&&salaryThisPeriod()&&(!insCov(i)||insCov(i)<curPeriodMonth());
 const insLast=i=>(i.payments&&i.payments.length)?i.payments[i.payments.length-1]:null;
 function insWhen(i){
   if(insDone(i))return 'خلص';
+  if(i.mode==='bank'){const e=insSchedule(i)[Number(i.paid)||0];return e?('الجاي مع كشف '+mLabel(e.key)):'';}
   if(!salaryThisPeriod())return 'مستني المرتب';
   if(!insDue(i))return 'مغطي لشهر '+mLabel(insCov(i)||insFirst(i));
   const n=new Date(), m=n.getFullYear()+'-'+pad(n.getMonth()+1);
@@ -1672,7 +1774,7 @@ function alertsPanel(){
     <div class="alert">
       <span class="rail" style="background:#EFCA6A"></span>
       <span class="g"><span class="t">${esc(T.title)}</span>
-        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
+        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':t.insFee?'تأمين · تقديري':t.insInt?'فايدة قسط · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
       <span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
       <button class="chip sm" onclick="app.startFix('${t.id}')">ظبّط</button>
     </div>
@@ -1992,12 +2094,6 @@ ${s.cycle==='trial'
       st={id:uid(),acct:a.id,key:key,owed:s.owed,carry:s.carry,monthly:s.monthly,
         base:s.base,fee:s.fee,total:s.total,from:s.from,to:s.to,
         paid:0,hidden:false,insDone:false};
-      if(s.fee>0){
-        const ft={id:uid(),book:'me',kind:'expense',amount:s.fee,cat:'fees',account:a.id,
-          date:stmtDate(key,a),note:'تأمين '+a.name+' — '+mLabel(key)};
-        D.txns.unshift(ft);st.feeTxn=ft.id;
-        sortTxns();
-      }
       D.stmts.push(st);save();
     }
     const left=Math.round((Number(st.total)-Number(st.paid||0))*100)/100;
@@ -2096,7 +2192,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -2121,7 +2217,10 @@ function subOk(){
   if(!subDraft.name.trim()||!subDraft.next)return false;
   if(subDraft.cycle==='trial')return subDraft.willRenew?Number(onlyNum(subDraft.amount))>0:true;
   return Number(onlyNum(subDraft.amount))>0;}
-function insOk(){return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
+function insOk(){
+  if(isCreditAcc(insDraft.src))return !!(insDraft.name.trim()&&(Number(onlyNum(insDraft.total))||0)>0
+    &&(Number(onlyNum(insDraft.months))||0)>0&&(Number(onlyNum(insDraft.monthly))||0)>0);
+  return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
 function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account);}
 function vAddOffice(){
   const k=draftO.kind;
@@ -3138,6 +3237,28 @@ function wIns(){
     ${showIns?`
       <label class="f">القسط ده إيه؟</label>
       <input class="f" value="${esc(insDraft.name)}" oninput="app.insSet('name',this.value)">
+      <label class="f">مقسط على إيه؟ <b>*</b></label>
+      <div class="chips">
+        ${accountsFor('me').filter(a=>a.credit).map(a=>`<button class="chip sm${insDraft.src===a.id?' on':''}" onclick="app.insSrc('${a.id}')">${esc(a.name)}</button>`).join('')}
+        <button class="chip sm${insDraft.src==='office'?' on':''}" onclick="app.insSrc('office')">سلفة</button>
+      </div>
+      ${isCreditAcc(insDraft.src)?`
+      <label class="f">تاريخ الشراء</label>
+      ${dateField(insDraft.buyDate||today(),'app.insBuyDate')}
+      <label class="f">التصنيف</label>
+      ${pickRow('inscat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),insDraft.cat,'app.insCat')}
+      <label class="f">المبلغ الأصلي</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(insDraft.total)}" oninput="app.insSet('total',numFix(this,1))">
+      <label class="f">عدد الشهور</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(insDraft.months)}" oninput="app.insSet('months',numFix(this,0))">
+      <label class="f">القسط الشهري</label>
+      <input class="f" id="insmonthly" type="text" inputmode="decimal" value="${esc(insDraft.monthly)}" oninput="app.insSet('monthly',numFix(this,1))">
+      <label class="f">النسبة الشهرية ٪</label>
+      <input class="f" id="insrate" type="text" inputmode="decimal" value="${esc(insDraft.rate||'')}" oninput="app.insSet('rate',numFix(this,1))">
+      <div class="hint">اكتب واحدة والتانية بتتحسب. لو القسط مكتوب قدامك اكتبه هو — النسبة اللي البنك بيعرضها متقرّبة. ونسبة صفر يعني من غير فايدة.</div>
+      <div class="hint" id="inscalc">${insCalcHint()}</div>
+      <div class="hint">الأصل كله هيتسجل على الكارت يوم الشراء، والفايدة بتتسجل لوحدها كل كشف وتأكدها من التنبيهات، والقسط بيتسدد مع الكارت.</div>
+      `:`
       <label class="f">المبلغ الكامل</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(insDraft.total)}" oninput="app.insSet('total',numFix(this,1))">
       <label class="f">قيمة القسط الشهري</label>
@@ -3157,13 +3278,9 @@ function wIns(){
           ?`<div class="hint">فاضل <span class="n">${fmt(rest)}</span> هيتدفعوا في شهر زيادة بعد آخر قسط.</div>`
           :`<div class="hint">الأقساط أكبر من المبلغ بـ<span class="n">${fmt(-rest)}</span> — راجع الأرقام.</div>`;})()}
 
-      <label class="f">مقسط على إيه؟ <b>*</b></label>
-      <div class="chips">
-        ${accountsFor('me').filter(a=>a.credit).map(a=>`<button class="chip sm${insDraft.src===a.id?' on':''}" onclick="app.insSrc('${a.id}')">${esc(a.name)}</button>`).join('')}
-        <button class="chip sm${insDraft.src==='office'?' on':''}" onclick="app.insSrc('office')">سلفة</button>
-      </div>
       <label class="f">القسط بيتدفع من أنهي حساب؟ <b>*</b></label>
       ${payChips(insDraft.account,'app.insAccount')}
+      `}
       <button class="btn" id="inssave" ${ok?'':'disabled'} onclick="app.addIns()">احفظ القسط</button>
     `:''}
     ${list.length?`<div class="sec-h"><h3 style="font-size:14px">باقي عليك</h3><span class="n" style="font-size:15px">${fmt(left)}</span></div>`:''}
@@ -3361,25 +3478,28 @@ function vLog(){
   const ms=[...new Set(mine.map(t=>monthOf(t.date)))].filter(Boolean).sort().reverse();
   const cats=book==='office'?D.ocats:D.cats;
   return `<div style="padding-top:20px">
-    <input class="f" placeholder="دوّر على صنف أو محل أو تاريخ" value="${esc(q)}" oninput="app.search(this.value)">
-    ${ms.length?`<div class="mpills" style="margin-top:12px">
+    ${ms.length?`<div class="mpills">
       <button class="mpill${fMonth?'':' on'}" onclick="app.setF('month','')">كل الشهور</button>
       ${ms.map(m=>`<button class="mpill${fMonth===m?' on':''}" onclick="app.setF('month','${m}')">${mLabel(m)}</button>`).join('')}
     </div>`:''}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-      <select class="f" style="padding:10px;font-size:13px" onchange="app.setF('cat',this.value)">
+    ${(function(){
+      /* التصنيفات كلها بتاعة مصاريف، فمالهاش معنى مع «داخل» أو «تحويلات» */
+      const showCats=(fDir===''||fDir==='out');
+      return `<div style="display:grid;grid-template-columns:${showCats?'1fr 1fr':'1fr'};gap:8px;margin-top:10px">
+      ${showCats?`<select class="f" style="padding:10px;font-size:13px" onchange="app.setF('cat',this.value)">
         <option value="">كل التصنيفات</option>
         ${cats.map(c=>`<option value="${c.id}"${fCat===c.id?' selected':''}>${esc(c.label)}</option>`).join('')}
-      </select>
+      </select>`:''}
       <select class="f" style="padding:10px;font-size:13px" onchange="app.setF('acct',this.value)">
         <option value="">كل الحسابات</option>
         ${accountsFor(book).map(a=>`<option value="${a.id}"${fAcct===a.id?' selected':''}>${esc(a.name)}</option>`).join('')}
       </select>
-    </div>
-    <div class="chips" style="margin-top:10px">
+    </div>`;})()}
+    <div class="grid4" style="margin-top:10px">
       ${[['','الكل'],['in','داخل'],['out','خارج'],['tr','تحويلات']]
         .map(d=>`<button class="chip sm${fDir===d[0]?' on':''}" onclick="app.setF('dir','${d[0]}')">${d[1]}</button>`).join('')}
     </div>
+    <input class="f" style="margin-top:10px" placeholder="دوّر على صنف أو محل أو تاريخ" value="${esc(q)}" oninput="app.search(this.value)">
     <div id="loglist" style="margin-top:18px">${logList()}</div>
   </div>`;
 }
@@ -3431,7 +3551,6 @@ function setSec(key,title,badge,body,mt){
 
 function vSettings(){
   return `<div style="padding-top:20px">
-    ${msg?`<div class="note ok">${esc(msg)}</div>`:''}
 
     ${setSec('sync','المزامنة التلقائية','',()=>`
     <p class="hint" style="margin-top:-4px">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
@@ -3607,7 +3726,7 @@ function vSettings(){
     </div>
     <div class="frow">
       <input class="f" id="newgrp" placeholder="اسم مجموعة جديدة">
-      <button class="btn" onclick="app.addGroup()">زوّد</button>
+      <button class="btn" onclick="app.addGroup()">ضيف</button>
     </div>
     `):''}
     ${officeOn()?setSec('ofee','حد الرسوم','',()=>`
@@ -3697,7 +3816,7 @@ function render(){
   if(bb)bb.classList.add('on');
   const lb=document.querySelector('header .lbl');
   if(lb)lb.textContent=book==='me'?'إجمالي اللي معاك':'رصيد العهدة';
-  if(_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}}
+  if(_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}try{insuranceAll();}catch(e){}try{cardInsAll();}catch(e){}}
   const b=balances(book);
   const own=accountsFor(book).filter(a=>!a.credit&&!isSave(a));
   const vals=own.map(a=>Math.max(0,b[a.id]||0));
@@ -3884,7 +4003,7 @@ const app={
   ocatAdd(){
     const el=document.getElementById('newocat'),n=el?el.value.trim():'';
     if(!n)return;
-    D.ocats.push({id:uid(),label:n});save();render();
+    D.ocats.push({id:uid(),label:n});save();render();app.toast('اتضاف');
   },
   ocatDel(id){D.ocats=D.ocats.filter(c=>c.id!==id);confirmKey='';save();render();},
   toast(m){
@@ -3893,7 +4012,9 @@ const app={
     const s=t.querySelector?t.querySelector('span'):null;
     if(s)s.textContent=m; else t.textContent=m;
     t.classList.add('on');
-    setTimeout(()=>t.classList.remove('on'),1600);
+    /* الإشعار الجديد بيلغي مؤقت اللي قبله عشان ما يتقفلش بدري */
+    if(_toastT)clearTimeout(_toastT);
+    _toastT=setTimeout(()=>{t.classList.remove('on');_toastT=0;},1600);
   },
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
@@ -3902,7 +4023,9 @@ const app={
   setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();},
-  setF(k,v){if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;if(k==='dir')fDir=v;render();},
+  setF(k,v){if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;
+    if(k==='dir'){fDir=v;if(v!==''&&v!=='out')fCat='';}
+    render();},
   toggleTxn(id){openTxn=openTxn===id?null:id;render();},
   startTxnEdit(e,id){
     e.stopPropagation();
@@ -4718,7 +4841,7 @@ const app={
     st.paid=Math.round((Number(st.paid||0)+amt)*100)/100;
     // لو المديونية اتسددت بالكامل، الأقساط اللي على الكارت تتحرك شهر
     if(st.paid>=Number(st.total)-0.01&&!st.insDone){
-      (D.installments||[]).filter(i=>i.src===st.acct&&!insDone(i)).forEach(i=>{
+      (D.installments||[]).filter(i=>i.src===st.acct&&i.mode!=='bank'&&!insDone(i)).forEach(i=>{
         const m=insNextMonth(i);
         i.paid=(Number(i.paid)||0)+1;i.covered=m;
         if(!i.payments)i.payments=[];
@@ -5116,10 +5239,44 @@ const app={
 
   /* --- أقساط --- */
   toggleIns(){showIns=!showIns;payFor=null;render();},
-  insSet(k,v){insDraft[k]=v;setDisabled('inssave',insOk());},
+  insSet(k,v){insDraft[k]=v;
+    if(isCreditAcc(insDraft.src)){
+      const P=Number(onlyNum(insDraft.total))||0,n=Number(onlyNum(insDraft.months))||0;
+      if(k==='monthly'||k==='rate')insDraft._last=k;
+      const by=insDraft._last||'monthly';
+      if(by==='monthly'){
+        const r=insRateFrom(P,n,Number(onlyNum(insDraft.monthly))||0);
+        insDraft._r=r;insDraft.rate=r===null?'':String(Math.round(r*1e6)/1e4);
+        const el=document.getElementById('insrate');if(el&&k!=='rate')el.value=insDraft.rate;
+      }else{
+        const r=(Number(onlyNum(insDraft.rate))||0)/100;insDraft._r=r;
+        const m=insPmt(P,n,r);insDraft.monthly=m?String(m):'';
+        const el=document.getElementById('insmonthly');if(el&&k!=='monthly')el.value=insDraft.monthly;
+      }
+      const h=document.getElementById('inscalc');if(h)h.innerHTML=insCalcHint();
+    }
+    setDisabled('inssave',insOk());},
+  insBuyDate(v){insDraft.buyDate=v;render();},
+  insCat(v){insDraft.cat=v;render();},
   insAccount(id){insDraft.account=id;render();},
   insSrc(v){insDraft.src=v;render();},
   addIns(){
+    if(isCreditAcc(insDraft.src)){
+      const a=D.accounts.find(x=>x.id===insDraft.src);
+      const P=Number(onlyNum(insDraft.total))||0,n=Number(onlyNum(insDraft.months))||0;
+      const pmt=Number(onlyNum(insDraft.monthly))||0;
+      let r=(insDraft._r!==undefined&&insDraft._r!==null)?insDraft._r:insRateFrom(P,n,pmt);
+      if(r===null)r=0;
+      const bd=insDraft.buyDate||today(),nm=insDraft.name.trim(),id=uid();
+      const fk=mAdd(stmtKey(bd,a),1);
+      D.installments.push({id:id,name:nm,mode:'bank',src:a.id,account:a.id,principal:P,rate:r,monthly:pmt,
+        months:n,paid:0,intPosted:0,buyDate:bd,firstKey:fk,firstMonth:fk,day:acctStmtDay(a),total:0,tail:0,payments:[]});
+      D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:P,cat:insDraft.cat||'other',account:a.id,
+        date:bd,note:nm,insBuy:id});
+      insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};showIns=false;
+      _svDay='';sortTxns();save();render();app.toast('اتحفظ القسط');
+      return;
+    }
     D.installments.push({id:uid(),name:insDraft.name.trim(),monthly:Number(onlyNum(insDraft.monthly))||0,
       months:Number(onlyNum(insDraft.months))||0,paid:Number(onlyNum(insDraft.paid))||0,
       day:clampDay(Number(onlyNum(insDraft.day))||1),account:insDraft.account,
@@ -5146,6 +5303,7 @@ const app={
   saveInsEdit(id){
     const i=D.installments.find(x=>x.id===id);if(!i)return;
     const nm=String(iDraft.name||'').trim();if(nm)i.name=nm;
+    if(i.mode==='bank'){insEdit=null;save();render();app.toast('اتعدل');return;}
     i.total=Number(onlyNum(iDraft.total))||0;
     const mo=Number(onlyNum(iDraft.monthly))||0;if(mo>0)i.monthly=mo;
     const ms=Number(onlyNum(iDraft.months))||0;if(ms>0)i.months=ms;
@@ -5258,7 +5416,7 @@ const app={
     const el=document.getElementById('newcat'),n=el.value.trim();
     if(!n)return;
     D.cats.push({id:uid(),label:n,color:NEWCOLORS[D.cats.length%NEWCOLORS.length]});
-    save();render();
+    save();render();app.toast('اتضاف');
   },
   delCat(id){
     if(LOCKED.indexOf(id)>-1)return;
@@ -5303,14 +5461,14 @@ const app={
         if(a.insure===undefined)a.insure=true;
         a.insureRate=a.insure?(Number(onlyNum(c.insureRate))||0):0;
       }});
-    accCfgInit();save();msg='اتحفظ.';render();
+    accCfgInit();save();app.toast('اتحفظ');render();
   },
   addGroup(){
     const el=document.getElementById('newgrp');
     const n=el?String(el.value||'').trim():'';
     if(!n)return;
     if(!D.groups)D.groups=[];
-    D.groups.push({id:uid(),name:n,items:[]});
+    D.groups.push({id:uid(),name:n,items:[]});app.toast('اتضافت');
     if(el)el.value='';
     grpEdit=D.groups[D.groups.length-1].id;
     save();render();
@@ -5376,23 +5534,23 @@ const app={
   setMonthMode(m){D.monthMode=m;month='';save();render();},
   saveOfeeLimit(){
     const v=numVal('ofeelim');
-    if(v>0){D.ofeeLimit=v;save();msg='اتحفظ.';}
+    if(v>0){D.ofeeLimit=v;save();app.toast('اتحفظ');}
     render();
   },
   saveBookName(){
     const el=document.getElementById('bknamein');
     D.bookName=el?String(el.value||'').trim().slice(0,24):'';
-    save();msg='اتحفظ.';render();
+    save();app.toast('اتحفظ');render();
   },
   saveRate(){
     const v=numVal('ratein');
-    if(v>0){D.rate=v;save();msg='اتحفظ.';}
+    if(v>0){D.rate=v;save();app.toast('اتحفظ');}
     render();
   },
   saveFuelPrices(){
     D.p92=numVal('p92in')||0;
     D.p95=numVal('p95in')||0;
-    save();msg='اتحفظ.';render();
+    save();app.toast('اتحفظ');render();
   },
   toggleSet(k){setsOpen[k]=!setsOpen[k];render();},
   toggleAlerts(){alertsOpen=!alertsOpen;render();},
@@ -5400,7 +5558,7 @@ const app={
     /* لو الطريقة اتغيرت في التعديل، النسبة تتمسح عشان تتكتب الجديدة */
     if(sc==='edit'&&k==='saveFreq'&&v!==o.saveFreq){o.saveRate=(v===o._freq0)?(o._rate0?String(o._rate0):''):'';}
     o[k]=v;if(rr)render();},
-  saveSaveCfg(id){const a=saveAcc(id);if(!a||!svEdit)return;applySaveCfg(a,svEdit);svEdit=null;save();msg='اتحفظ.';render();},
+  saveSaveCfg(id){const a=saveAcc(id);if(!a||!svEdit)return;applySaveCfg(a,svEdit);svEdit=null;save();app.toast('اتحفظ');render();},
   saveWithdrawGo(id){
     tab='add';openRow={};draft.kind='transfer';draft.account=id;draft.to='';draft.cur='EGP';
     render();window.scrollTo(0,0);
@@ -5426,7 +5584,7 @@ const app={
     const el=document.getElementById('keyin');
     const v=el?el.value.trim():'';
     if(!v){msg='';render();return;}
-    try{localStorage.setItem(AKEY,v);msg='اتحفظ.';}
+    try{localStorage.setItem(AKEY,v);app.toast('اتحفظ');}
     catch(e){msg='مقدرتش أحفظ المفتاح.';}
     showKeyEdit=false;render();
   },
