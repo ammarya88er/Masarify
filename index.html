@@ -86,7 +86,9 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
 .tx .ic{width:36px;height:36px;border-radius:12px;flex:none;display:grid;place-items:center;
         font-size:15px;font-family:var(--f-disp);font-weight:600;}
 .tx .g{flex:1;min-width:0;}
-.tx .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tx .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  font-size:14px;line-height:1.45;white-space:normal;word-break:break-word;}
+.tx .a{flex:none;}
 .tx .s{font-size:11px;color:var(--muted);margin-top:3px;}
 .tx .a{font-family:var(--f-num);font-size:14.5px;font-weight:600;white-space:nowrap;direction:ltr;}
 .detail{margin:-3px 0 12px;padding:2px 14px 0;}
@@ -428,7 +430,7 @@ let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='
 let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, payDate=today(), fixFor=null, convFor=null;
 let insEdit=null, iDraft={};
 let showIns=false, showCert=false, showSub=false;
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
@@ -462,6 +464,7 @@ let owedOpen=false, catsOpen=false;
 let setsOpen={};
 let openRow={};
 let rbackFor=null;
+let flPay={from:'',to:''};
 let alertsOpen=false;
 let svEdit=null;
 const ASEEN='masareef:alertsSeen:';
@@ -557,6 +560,17 @@ function normalizeData(){
   }
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
+  /* مصاريف قديمة فيها جزء من العهدة: تظهر بمبلغها الكامل، والرصيد ما يتغيرش */
+  (D.floatLoans||[]).forEach(l=>{
+    if(l.dir!=='take'||!l.srcTxn||l.mig)return;
+    l.mig=1;
+    const t=(D.txns||[]).find(x=>x.id===l.srcTxn);if(!t)return;
+    const v=Number(l.amount)||0;if(!(v>0))return;
+    const L=t.link||('fl'+t.id);t.link=L;
+    t.amount=Math.round(((Number(t.amount)||0)+v)*100)/100;
+    D.txns.push({id:'fl'+l.id,book:'me',kind:'settle',dir:'in',amount:v,account:t.account,date:t.date,
+      flIn:true,link:L,note:'من العهدة — '+(t.note||t.place||'')});
+  });
   (D.txns||[]).forEach(t=>{if(t.saveInt&&t.kind==='income')t.kind='yield';});
   (D.accounts||[]).forEach(a=>{if(a.atype==='save'&&a.saveStart&&!a.saveRates)a.saveRates=[{from:a.saveStart,rate:Number(a.saveRate)||0}];});
   if(D.p92===undefined)D.p92=0;
@@ -873,6 +887,43 @@ function insuranceAll(){
     }
   });
   if(changed){sortTxns();save();}
+}
+/* حسابات العهدة: الخاصة بيها بس، والمشتركة (زي البنك) */
+const officeOnly=()=>D.accounts.filter(a=>a.scope==='office'&&!a.credit&&!isSave(a));
+const officeAccs=()=>accountsFor('office').filter(a=>!a.credit&&!isSave(a));
+const sharedAccs=()=>D.accounts.filter(a=>a.scope==='both'&&!a.credit&&!isSave(a));
+const myOnly=()=>D.accounts.filter(a=>a.scope!=='office'&&!a.credit&&!isSave(a));
+function officeCashId(){
+  const l=officeAccs();
+  const c=l.find(a=>a.scope==='office'&&a.atype==='cash')||l.find(a=>a.scope==='office')||l[0];
+  return c?c.id:'';
+}
+/* اللي لسه عليك للعهدة، مقسم على الحسابات اللي خدت منها — الأقدم يتسدد الأول */
+function takesOutstanding(){
+  const takes=(D.floatLoans||[]).filter(l=>l.dir==='take')
+    .map(l=>({acct:l.acct||officeCashId(),rem:Number(l.amount)||0,date:l.date||''}))
+    .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  let backs=(D.floatLoans||[]).filter(l=>l.dir==='back').reduce((x,l)=>x+(Number(l.amount)||0),0);
+  takes.forEach(t=>{const u=Math.min(t.rem,backs);t.rem=Math.round((t.rem-u)*100)/100;backs-=u;});
+  return takes.filter(t=>t.rem>0.005);
+}
+/* تبديل بيني وبين العهدة: حركتين مربوطين في الدفترين والتعويض في الحساب المشترك */
+function doSwap(dir,offAcc,myAcc,shared,amt,dt){
+  const L=uid(),nt='تبديل مع العهدة';
+  if(dir==='put'){
+    D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:myAcc,to:shared,date:dt,link:L,swap:true,note:nt});
+    D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,account:shared,to:offAcc,date:dt,link:L,swap:true,note:nt});
+  }else{
+    D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,account:offAcc,to:shared,date:dt,link:L,swap:true,note:nt});
+    D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:shared,to:myAcc,date:dt,link:L,swap:true,note:nt});
+  }
+  sortTxns();
+}
+function swapHint(dir,sh){
+  const n=esc((sharedAccs().find(x=>x.id===sh)||{name:'الحساب المشترك'}).name);
+  return dir==='put'
+    ?'الكاش بيطلع من جيبك للعهدة، وبيتعوض من نصيب العهدة في '+n+' لنصيبك.'
+    :'الكاش بيطلع من العهدة لجيبك، وبيتعوض من نصيبك في '+n+' لنصيب العهدة.';
 }
 function saveAccrueAll(){
   let changed=false;const td=today();
@@ -1511,8 +1562,14 @@ function yesNo(key,on,fn,noLbl,yesLbl){
   return pickRow(key,[{id:false,label:noLbl||'لأ'},{id:true,label:yesLbl||'أيوه'}],!!on,fn,1,1);
 }
 /* الوعاء بيتشال من كل صفوف الحسابات، إلا لو allowSave (التحويلات بس) */
-function payChips(sel,fn,exclude,bk,key,allowSave){
-  return pickRow(key,accountsFor(bk||'me').filter(a=>a.id!==exclude&&(allowSave||!isSave(a))).map(a=>({id:a.id,label:esc(a.name)})),sel,fn);
+/* opt.src: الصف ده مصدر فلوس (تحويل/سداد) — الكارت الائتماني مش مصدر، بيتصرف منه بس.
+   opt.bal: يوري الرصيد جنب الاسم. */
+function payChips(sel,fn,exclude,bk,key,allowSave,opt){
+  opt=opt||{};
+  const b=opt.bal?balances(bk||'me'):null;
+  return pickRow(key,accountsFor(bk||'me')
+    .filter(a=>a.id!==exclude&&(allowSave||!isSave(a))&&!(opt.src&&a.credit))
+    .map(a=>({id:a.id,label:esc(a.name)+(b?` · <span class="n">${fmt(b[a.id]||0)}</span>`:'')})),sel,fn);
 }
 function dateField(val,fn){
   return `<div class="drow">
@@ -1869,6 +1926,11 @@ ${s.cycle==='trial'
     ${loanFor?`<div class="inline">
       <label class="f">${loanBalance()>0?'رجّعت كام للعهدة؟':'أخدت كام من العهدة؟'}</label>
       <input class="f" id="loanin" type="text" inputmode="decimal" value="${Math.abs(loanBalance())}" oninput="numFix(this,1)">
+      ${loanBalance()>0?`<label class="f">سددت من أنهي حساب؟</label>
+        ${pickRow('flfrom',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.from||(myOnly()[0]||{}).id,'app.flPaySet_from',1)}
+        <label class="f">على أنهي حساب في العهدة؟</label>
+        ${pickRow('flto',officeAccs().map(a=>({id:a.id,label:esc(a.name)})),flPay.to||officeCashId(),'app.flPaySet_to',1)}
+        <div class="hint">المبلغ هيتخصم من حسابك، ولو سددت على حساب غير اللي خدت منه، فلوس العهدة هتتنقل بينهم.</div>`:''}
       <button class="btn" onclick="app.settleLoan()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelLoan()">إلغاء</button>
     </div>`:''}`);
@@ -2122,7 +2184,7 @@ ${s.cycle==='trial'
       </div>
       ${stmtMode==='part'?`<input class="f" id="stmtin" style="margin-top:10px" type="text" inputmode="decimal" value="${left}" oninput="numFix(this,1)">`:''}
       <label class="f">من أنهي حساب؟</label>
-      ${payChips(stmtAcct||'bank','app.setStmtAcct',a.id,'me')}
+      ${payChips(stmtAcct||'bank','app.setStmtAcct',a.id,'me','',0,{src:1})}
       ${st.monthly>0.01?`<div class="hint">المبلغ ده شامل قسط الشهر (<span class="n">${fmt(st.monthly)}</span>)، فالأقساط هتتحرك لوحدها.</div>`:''}
       <button class="btn" ${stmtAcct||true?'':'disabled'} onclick="app.payStmt('${st.id}')">سجّل السداد</button>
       <button class="btn ghost" onclick="app.cancelStmtPay()">إلغاء</button>
@@ -2145,7 +2207,7 @@ ${s.cycle==='trial'
       </div>
       ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${ofeeBalance()}" oninput="numFix(this,1)">`:''}
       <label class="f">من أنهي حساب عهدة؟ <b>*</b></label>
-      ${payChips(ofeeAcct,'app.setOfeeAcct','','office')}
+      ${payChips(ofeeAcct,'app.setOfeeAcct','','office','',0,{src:1})}
       <label class="f">دخلت على أنهي حساب عندك؟ <b>*</b></label>
       ${payChips(ofeeTo,'app.setOfeeTo','','me')}
       <div class="hint">هتتسجل مصروف مكتب${defOcat()?' بتصنيف '+esc(ocatOf(defOcat()).label):' من غير تصنيف'}، وأي فرق هيترحّل للمرة الجاية.</div>
@@ -2183,7 +2245,8 @@ ${s.cycle==='trial'
 
 function txnRow(t){
   const c=catOf(t.items&&t.items.length?t.items[0].cat:t.cat);
-  const inc=t.kind==='income'||t.kind==='float'||t.kind==='yield'||(t.kind==='settle'&&t.dir==='in'),tr=t.kind==='transfer';
+  const tr=t.kind==='transfer'||!!t.flIn||!!t.flOut;
+  const inc=!tr&&(t.kind==='income'||t.kind==='float'||t.kind==='yield'||(t.kind==='settle'&&t.dir==='in'));
   const color=inc?'var(--mint)':tr?'var(--muted)':'var(--clay)';
   const glyph=inc?'↑':tr?'⇄':'↓';
   const bg=inc?'rgba(79,208,141,.15)':tr?'rgba(141,150,162,.15)':'rgba(255,111,96,.14)';
@@ -2192,7 +2255,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -2209,6 +2272,8 @@ function txnRow(t){
 }
 
 function entryOk(){const k=draft.kind;
+  if(k==='transfer'&&draft.swap)return !!(Number(onlyNum(draft.amount))>0&&draft.sMy&&draft.sOff
+    &&(draft.sShared||sharedAccs().length===1));
   if(k==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw')
     return !!(Number(onlyNum(draft.amount))>0&&draft.to2&&draft.to2!=='vcash');
   const lent=k==='expense'&&draft.owed&&draft.owedKind==='lent';
@@ -2234,6 +2299,21 @@ function vAddOffice(){
       <button class="${k==='xfer'?'on':''}" onclick="app.oKind('xfer')">تحويل</button>
     </div>
     ${k==='xfer'?`
+      <label class="f">التحويل ده بيني وبين العهدة؟</label>
+      ${yesNo('oswap',draftO.swap,'app.oSwap')}
+      ${draftO.swap?`
+        ${pickRow('osdir',[{id:'take',label:'أخدت من العهدة'},{id:'put',label:'حطيت في العهدة'}],draftO.sdir||'take','app.oSdir',1)}
+        <label class="f">حساب العهدة <b>*</b></label>
+        ${pickRow('osacc',officeOnly().map(x=>({id:x.id,label:esc(x.name)})),draftO.account,'app.oAccount')}
+        <label class="f">حسابي <b>*</b></label>
+        ${pickRow('osmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draftO.myAcc,'app.oMyAcc')}
+        ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
+          ${pickRow('osshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draftO.shared,'app.oShared')}`:''}
+        <div class="hint">${(draftO.sdir||'take')==='take'
+          ?'الكاش بيطلع من العهدة لجيبك، وبيتعوض من نصيبك في '+esc((sharedAccs().find(x=>x.id===(draftO.shared||(sharedAccs()[0]||{}).id))||{name:'الحساب المشترك'}).name)+' لنصيب العهدة.'
+          :'الكاش بيطلع من جيبك للعهدة، وبيتعوض من نصيب العهدة في '+esc((sharedAccs().find(x=>x.id===(draftO.shared||(sharedAccs()[0]||{}).id))||{name:'الحساب المشترك'}).name)+' لنصيبك.'}</div>
+        ${sharedAccs().length?'':'<div class="hint" style="color:#FF9C90">مفيش حساب مشترك بين الدفترين — اعمل حساب نطاقه «الاتنين» من الإعدادات.</div>'}
+      `:`
       <label class="f">من أنهي حساب؟ <b>*</b></label>
       ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit&&!isSave(x));
         return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)} · <span class="n">${fmt(ob[x.id]||0)}</span></button>`).join('')+'</div>';})()}
@@ -2241,6 +2321,7 @@ function vAddOffice(){
       ${(function(){const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&x.id!==draftO.account);
         return pickRow('oto',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.to,'app.oTo');})()}
       <div class="hint">بينقل فلوس العهدة من حساب لحساب — إجمالي العهدة مش هيتغير.</div>
+      `}
       <label class="f">ملاحظة (اختياري)</label>
       <input class="f" placeholder="سحب من ATM مثلاً" value="${esc(draftO.note)}" oninput="app.oSet('note',this.value)">
     `:''}
@@ -2344,6 +2425,8 @@ function itemSuggestions(fn){
 }
 function oOk(){const k=draftO.kind;
   if(k==='loan')return Number(onlyNum(draftO.amount))>0;
+  if(k==='xfer'&&draftO.swap)return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.myAcc
+    &&(draftO.shared||sharedAccs().length===1));
   if(k==='xfer')return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.to&&draftO.to!==draftO.account);
   return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&(k==='float'||(draftO.item.trim()&&draftO.ocat))&&(!draftO.toMe||draftO.to));}
 
@@ -2369,7 +2452,7 @@ function txnEditForm(t){
         <span class="n" style="text-align:end;font-size:13px;color:var(--muted)">${fmt(i.amount)}</span>
         ${i.returned
           ?`<span style="grid-column:span 2;font-size:11px;color:var(--mint);text-align:center">مرتجع ${dLabel(i.returnedOn||t.date)}</span>`
-          :`<button class="chip sm" style="padding:8px 0" onclick="app.eItemOffice('${t.id}',${ix})">${i.off?'مكتب':'ليا'}</button>
+          :`${officeOn()?`<button class="chip sm" style="padding:8px 0" onclick="app.eItemOffice('${t.id}',${ix})">${i.off?esc(bookName()):'ليا'}</button>`:'<span></span>'}
             <button class="chip sm" style="padding:8px 0" onclick="app.startReturn('${t.id}',${ix})">رجّعته</button>`}
       </div>
       ${retFor===(t.id+':'+ix)?`<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px">
@@ -2405,7 +2488,7 @@ function txnEditForm(t){
       <div class="hint">${t.litersEst?'الرقم ده تقريبي — اكتب اللي في الفاتورة والكلمة هتختفي.':'لو سبتها فاضية هتترجع لحساب تقريبي من السعر.'}</div>`:''}
 
     ${isTransfer?'':`<label class="f">الحساب</label>
-      ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me','',t.kind==='transfer')}`}
+      ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me','',t.kind==='transfer',t.kind==='transfer'?{src:1}:null)}`}
 
     <label class="f">التاريخ</label>
     ${dateField(eTxn.date,'app.eTxnDate')}
@@ -2434,8 +2517,20 @@ function vAdd(){
       <button class="${k==='transfer'?'on':''}" onclick="app.setKind('transfer')">تحويل</button>
     </div>
 
+    ${(k==='transfer'&&officeOn()&&sharedAccs().length)?`<label class="f">التحويل ده بيني وبين العهدة؟</label>
+      ${yesNo('pswap',draft.swap,'app.setPSwap')}`:''}
+    ${(k==='transfer'&&draft.swap)?(function(){
+      const sh=draft.sShared||(sharedAccs()[0]||{}).id;
+      return `${pickRow('psdir',[{id:'take',label:'أخدت من العهدة'},{id:'put',label:'حطيت في العهدة'}],draft.sdir||'take','app.setPSdir',1)}
+        <label class="f">حسابي <b>*</b></label>
+        ${pickRow('psmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
+        <label class="f">حساب العهدة <b>*</b></label>
+        ${pickRow('psoff',officeOnly().map(x=>({id:x.id,label:esc(x.name)})),draft.sOff,'app.setPSoff')}
+        ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
+          ${pickRow('psshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draft.sShared,'app.setPSshared')}`:''}
+        <div class="hint">${swapHint(draft.sdir||'take',sh)}</div>`;})():`
     <label class="f">${k==='income'?'يتضاف على أنهي حساب؟':k==='transfer'?'من أنهي حساب؟':'دافع من إيه؟'} <b>*</b></label>
-    ${payChips(draft.account,'app.setAccount','','me','acct',k==='transfer')}
+    ${payChips(draft.account,'app.setAccount','','me','acct',k==='transfer',k==='transfer'?{src:1,bal:1}:null)}`}
 
     ${draft.account==='vcash'&&k==='expense'?`<label class="f">العملية دي إيه؟</label>
       ${pickRow('vc',[{id:'pay',label:'دفعت حاجة'},{id:'withdraw',label:'سحبت من المكنة'}],draft.vc,'app.setVc',1)}
@@ -2459,7 +2554,7 @@ function vAdd(){
       ${yesNo('arr',draft.arr,'app.setArr')}
     ${draft.arr?`<div class="hint">هتتسجل مصروف لوحدها بحوالي <span class="n" id="arrprev">${fmt(arrEst(Number(onlyNum(draft.amount))||0))}</span> جنيه (<span class="n">${ARRRATE}%</span>)، وتظبّطها من التنبيهات أول ما تعرف اللي اتخصم فعلًا.</div>`:''}`:''}
 
-    ${k==='transfer'?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to',1)}
+    ${(k==='transfer'&&!draft.swap)?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to',1)}
       ${saveXferRole()?(function(){const R=saveXferRole();return `<label class="f">فيه ${R.lbl}؟</label>
         ${yesNo('svfee',draft.svFee,'app.setSvFee')}
         ${draft.svFee?`<input class="f" style="margin-top:8px" type="text" inputmode="decimal" placeholder="المبلغ اللي اتخصم"
@@ -2480,6 +2575,8 @@ function vAdd(){
     ${(k==='expense'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
       ${officeOn()?`<label class="f">فيه جزء من كاش العهدة؟</label>
       ${yesNo('fromFloat',draft.fromFloat,'app.setFromFloat')}
+      ${draft.fromFloat&&officeAccs().length>1?`<label class="f">خدته من أنهي حساب في العهدة؟</label>
+        ${pickRow('floatAcct',officeAccs().map(a=>({id:a.id,label:esc(a.name)})),draft.floatAcct||officeCashId(),'app.setFloatAcct',1)}`:''}
       ${draft.fromFloat?`<label class="f">كام منها من العهدة؟</label>
         <input class="f" type="text" inputmode="decimal" value="${esc(draft.floatAmt)}" oninput="app.dset('floatAmt',numFix(this,1))">
         <div class="hint">هيتخصم من حسابك <span class="n" id="floathint">${fmt(Math.max(0,(Number(onlyNum(draft.amount))||0)-(Number(onlyNum(draft.floatAmt))||0)))}</span> جنيه، والباقي هيتسجل إنه عليك للعهدة.</div>`:''}`:''}
@@ -2570,7 +2667,7 @@ function vScan(){
           <select onchange="app.iset(${k},'cat',this.value)">
             ${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${c.label}</option>`).join('')}
           </select>
-          <input class="vl" type="text" inputmode="decimal" value="${it.amount}" oninput="app.iset(${k},'amount',numFix(this,1))">
+          <input class="vl" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${Number(it.amount)?it.amount:''}" onfocus="this.select()" oninput="app.iset(${k},'amount',numFix(this,1))">
           <button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?'مكتب':(it.who?esc(it.who):'ليا')}</button>
           <button class="x" onclick="app.delItem(${k})">×</button>
         </div>
@@ -3279,7 +3376,7 @@ function wIns(){
           :`<div class="hint">الأقساط أكبر من المبلغ بـ<span class="n">${fmt(-rest)}</span> — راجع الأرقام.</div>`;})()}
 
       <label class="f">القسط بيتدفع من أنهي حساب؟ <b>*</b></label>
-      ${payChips(insDraft.account,'app.insAccount')}
+      ${payChips(insDraft.account,'app.insAccount','','me','',0,{src:1})}
       `}
       <button class="btn" id="inssave" ${ok?'':'disabled'} onclick="app.addIns()">احفظ القسط</button>
     `:''}
@@ -3324,7 +3421,7 @@ function wIns(){
             ${officeOn()?`<button class="chip sm${iDraft.src==='office'?' on':''}" onclick="app.iDraftPick('src','office')">سلفة</button>`:''}
           </div>
           <label class="f">بيتدفع من أنهي حساب؟</label>
-          ${payChips(iDraft.account,'app.iDraftAcct','','me')}
+          ${payChips(iDraft.account,'app.iDraftAcct','','me','',0,{src:1})}
           <div class="hint">الدفعات اللي اتسجلت قبل كده هتفضل زي ما هي.</div>
           <button class="btn" onclick="app.saveInsEdit('${i.id}')">احفظ التعديل</button>
           <button class="btn ghost" onclick="app.cancelInsEdit()">إلغاء</button>
@@ -3499,7 +3596,12 @@ function vLog(){
       ${[['','الكل'],['in','داخل'],['out','خارج'],['tr','تحويلات']]
         .map(d=>`<button class="chip sm${fDir===d[0]?' on':''}" onclick="app.setF('dir','${d[0]}')">${d[1]}</button>`).join('')}
     </div>
-    <input class="f" style="margin-top:10px" placeholder="دوّر على صنف أو محل أو تاريخ" value="${esc(q)}" oninput="app.search(this.value)">
+    <div style="position:relative;margin-top:10px">
+      <input class="f" id="qin" style="padding-left:42px" placeholder="دوّر على صنف أو محل أو تاريخ" value="${esc(q)}" oninput="app.search(this.value)">
+      <button id="qx" onclick="app.clearQ()" aria-label="امسح"
+        style="position:absolute;left:6px;top:50%;transform:translateY(-50%);display:${q?'block':'none'};
+        background:none;border:0;color:var(--muted);font-size:20px;line-height:1;padding:8px;cursor:pointer">×</button>
+    </div>
     <div id="loglist" style="margin-top:18px">${logList()}</div>
   </div>`;
 }
@@ -3507,13 +3609,13 @@ function vLog(){
 const normTxt=x=>String(x||'').toLowerCase()
   .replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
   .replace(/[\u064B-\u0652\u0640]/g,'');
-const txnIn=t=>t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in');
+const txnIn=t=>!t.flIn&&!t.flOut&&(t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in'));
 function logList(){
   const list=D.txns.filter(t=>(t.book||'me')===book)
    .filter(t=>{
      if(!fDir)return true;
      if(t.kind==='yield')return false;
-     const tr=t.kind==='transfer';
+     const tr=t.kind==='transfer'||!!t.flIn||!!t.flOut;
      if(fDir==='tr')return tr;
      if(tr)return false;
      return fDir==='in'?txnIn(t):!txnIn(t);
@@ -3627,12 +3729,12 @@ function vSettings(){
           ${((c.atype||a.atype)==='bank'||(c.atype||a.atype)==='credit')?`<label class="f">آخر ٤ أرقام من الكارت (اختياري)</label>
             <input class="f" type="text" inputmode="numeric" maxlength="4" value="${esc(c.last4!==undefined?c.last4:(a.last4||''))}" oninput="app.accCfgSet('${a.id}','last4',numFix(this,0))">`:''}
         </div>
-        <label class="f" style="margin:14px 0 8px">بيظهر في</label>
+        ${officeOn()?`<label class="f" style="margin:14px 0 8px">بيظهر في</label>
         <div class="chips">
           <button class="chip sm${a.scope==='me'?' on':''}" onclick="app.setScope('${a.id}','me')">فلوسي</button>
           <button class="chip sm${a.scope==='office'?' on':''}" onclick="app.setScope('${a.id}','office')">${esc(bookName())}</button>
           <button class="chip sm${a.scope==='both'?' on':''}" onclick="app.setScope('${a.id}','both')">الاتنين</button>
-        </div>
+        </div>`:''}
 
         ${c.credit?`<label class="f">الحد الائتماني</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(c.limit)}" oninput="app.accCfgSet('${a.id}','limit',numFix(this,1))">
@@ -3880,10 +3982,30 @@ const app={
   oItemPick(v){draftO.item=v;render();},
   oDate(v){draftO.date=v;render();},
   oTo(id){draftO.to=id;render();},
+  oSwap(v){draftO.swap=!!v;draftO.account='';render();},
+  oSdir(v){draftO.sdir=v;render();},
+  oMyAcc(v){draftO.myAcc=v;render();},
+  oShared(v){draftO.shared=v;render();},
   oSave(){
     const amt=Number(onlyNum(draftO.amount))||0;
     if(amt<=0)return;
     if(draftO.kind!=='loan'&&!draftO.account)return;
+    if(draftO.kind==='xfer'&&draftO.swap){
+      const sh=draftO.shared||(sharedAccs().length===1?sharedAccs()[0].id:'');
+      if(!sh||!draftO.myAcc)return;
+      const L=uid(),dt=draftO.date,nt='تبديل مع العهدة';
+      if((draftO.sdir||'take')==='put'){
+        D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:draftO.myAcc,to:sh,date:dt,link:L,swap:true,note:nt});
+        D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,account:sh,to:draftO.account,date:dt,link:L,swap:true,note:nt});
+      }else{
+        D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:amt,account:draftO.account,to:sh,date:dt,link:L,swap:true,note:nt});
+        D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:sh,to:draftO.myAcc,date:dt,link:L,swap:true,note:nt});
+      }
+      sortTxns();save();
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',
+        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+      render();window.scrollTo(0,0);app.toast('اتسجل');return;
+    }
     if(draftO.kind==='xfer'&&(!draftO.to||draftO.to===draftO.account))return;
     const it=normItem(draftO.item);
     if(draftO.kind==='xfer'){
@@ -4022,7 +4144,9 @@ const app={
   go(t){renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};openRow={};if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
   setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
   setMonth(m){month=m;render();},
-  search(v){q=v;document.getElementById('loglist').innerHTML=logList();},
+  search(v){q=v;document.getElementById('loglist').innerHTML=logList();
+    const x=document.getElementById('qx');if(x&&x.style)x.style.display=v?'block':'none';},
+  clearQ(){q='';render();},
   setF(k,v){if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;
     if(k==='dir'){fDir=v;if(v!==''&&v!=='out')fCat='';}
     render();},
@@ -4151,7 +4275,8 @@ const app={
     const t=D.txns.find(x=>x.id===id);
     refundVoucher(t);
     D.owed=(D.owed||[]).filter(o=>o.srcTxn!==id||o.got);
-    D.floatLoans=(D.floatLoans||[]).filter(l=>l.srcTxn!==id);
+    const ids=(t&&t.link)?D.txns.filter(x=>x.link===t.link).map(x=>x.id):[id];
+    D.floatLoans=(D.floatLoans||[]).filter(l=>ids.indexOf(l.srcTxn)<0);
     D.ofees=(D.ofees||[]).filter(fx=>fx.srcTxn!==id);
     (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>d.srcTxn!==id||d.got);});
     D.txns=(t&&t.link)?D.txns.filter(x=>x.link!==t.link):D.txns.filter(x=>x.id!==id);
@@ -4178,6 +4303,12 @@ const app={
     if(box)box.innerHTML=(draft.kind==='expense'&&draft.cur==='EGP')?vchPicker(draft.voucherId,total,'app.setVch'):'';
   },
   setArr(v){draft.arr=!!v;render();},
+  setPSwap(v){draft.swap=!!v;render();},
+  setPSdir(v){draft.sdir=v;render();},
+  setPSmy(v){draft.sMy=v;render();},
+  setPSoff(v){draft.sOff=v;render();},
+  setPSshared(v){draft.sShared=v;render();},
+  setFloatAcct(v){draft.floatAcct=v;render();},
   setSvFee(v){draft.svFee=!!v;render();},
   setCur(c){draft.cur=c;render();},
   setDate(v){draft.date=v;render();},
@@ -4279,10 +4410,18 @@ const app={
       if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
         account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
       sortTxns();save();
-      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
       render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
     }
     if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
+    if(draft.kind==='transfer'&&!draft.swap&&isCreditAcc(draft.account)){app.toast('الكارت مش بيتحوّل منه');return;}
+    if(draft.kind==='transfer'&&draft.swap){
+      const a=Number(onlyNum(draft.amount))||0,sh=draft.sShared||(sharedAccs().length===1?sharedAccs()[0].id:'');
+      if(!(a>0)||!draft.sMy||!draft.sOff||!sh)return;
+      doSwap(draft.sdir||'take',draft.sOff,draft.sMy,sh,Math.round(a*100)/100,draft.date);save();
+      draft=Object.assign(draft,{amount:'',note:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''});
+      openRow={};render();window.scrollTo(0,0);app.toast('اتسجل');return;
+    }
     const usd=draft.cur==='USD'?amt:0;
     let disc=(draft.kind==='expense'&&draft.hasDisc&&!usd)?(Number(onlyNum(draft.discAmt))||0):0;
     if(disc>amt)disc=amt;
@@ -4290,7 +4429,8 @@ const app={
     let fromFloat=(draft.kind==='expense'&&draft.fromFloat&&!usd)?(Number(onlyNum(draft.floatAmt))||0):0;
     if(fromFloat>net)fromFloat=net;
     const hold=usd?(Number(onlyNum(draft.hold))||0):0;
-    const gross=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):(net-fromFloat);
+    /* المصروف بيتسجل بمبلغه الكامل؛ جزء العهدة بيتسجل لوحده إنه فلوس جاتلك منها */
+    const gross=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):net;
     const vch=useVoucher(draft.kind==='expense'&&!usd?draft.voucherId:'',gross,draft.date);
     const isLent=draft.kind==='expense'&&draft.owed&&draft.owedKind==='lent';
     const srcTxnId=uid();
@@ -4335,7 +4475,13 @@ const app={
     if(fromFloat>0){
       if(!D.floatLoans)D.floatLoans=[];
       D.floatLoans.push({id:uid(),dir:'take',amount:fromFloat,date:draft.date,srcTxn:srcTxnId,
-        note:draft.note||catOf(draft.cat).label});
+        acct:draft.floatAcct||officeCashId(),mig:1,note:draft.note||catOf(draft.cat).label});
+      const m=D.txns.find(x=>x.id===srcTxnId);
+      if(m){
+        const L=m.link||uid();m.link=L;
+        D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:fromFloat,account:m.account,
+          date:m.date,flIn:true,link:L,note:'من العهدة — '+(m.note||m.place||catOf(m.cat).label||'')});
+      }
     }
     if(draft.kind==='expense'&&draft.owed){
       if(!D.owed)D.owed=[];
@@ -4351,7 +4497,7 @@ const app={
       });
     }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:''};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   toggleRefundWait(e,id){
@@ -4853,14 +4999,32 @@ const app={
   },
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
+  flPaySet_from(v){flPay.from=v;render();},
+  flPaySet_to(v){flPay.to=v;render();},
   settleLoan(){
     const v=numVal('loanin');
     if(v>0){
       if(!D.floatLoans)D.floatLoans=[];
-      D.floatLoans.push({id:uid(),dir:loanBalance()>0?'back':'take',amount:v,date:today(),note:'تسوية'});
+      if(loanBalance()>0){
+        const from=flPay.from||(myOnly()[0]||{}).id, to=flPay.to||officeCashId(), td=today();
+        /* فلوس العهدة: اللي اتاخد من حساب واتسدد على حساب تاني بيتنقل بينهم */
+        let left=Math.min(v,loanBalance());
+        takesOutstanding().forEach(t=>{
+          if(left<=0.005)return;
+          const u=Math.round(Math.min(left,t.rem)*100)/100;left-=u;
+          if(t.acct&&to&&t.acct!==to)D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:u,
+            account:t.acct,to:to,date:td,note:'سداد للعهدة'});
+        });
+        D.floatLoans.push({id:uid(),dir:'back',amount:v,date:td,note:'تسوية',acct:to});
+        if(from)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:v,account:from,
+          date:td,flOut:true,note:'سداد للعهدة'});
+        sortTxns();
+      }else{
+        D.floatLoans.push({id:uid(),dir:'take',amount:v,date:today(),note:'تسوية',mig:1});
+      }
       save();
     }
-    loanFor=false;render();app.toast('اتسجلت');
+    flPay={from:'',to:''};loanFor=false;render();app.toast('اتسجلت');
   },
   startRefund(id){refundFor=refundFor===id?null:id;refundParts={};refundTo='';render();},
   toggleRefundPart(accId,need){
