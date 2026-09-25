@@ -430,7 +430,7 @@ let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='
 let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, payDate=today(), fixFor=null, convFor=null;
 let insEdit=null, iDraft={};
 let showIns=false, showCert=false, showSub=false;
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
@@ -446,7 +446,7 @@ function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   accNo:a.accNo||'',last4:a.last4||'',
   stmtDay:String(a.stmtDay||20),graceDay:String(a.graceDay||15),
   insureRate:String(a.insureRate!==undefined?a.insureRate:0.9)});}
-let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'bank',type:'cert'};
+let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:'cert'};
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
@@ -465,12 +465,15 @@ let setsOpen={};
 let openRow={};
 let rbackFor=null;
 let flPay={from:'',to:''};
+let feeDate='';
+let stmtPayDate='';
+let paySubBal='', repBal='', upBal='';
 let alertsOpen=false;
 let svEdit=null;
 const ASEEN='masareef:alertsSeen:';
 let welSkipped=false;
 let wel={accs:[],salary:'',salaryDate:today(),salaryAcc:0,office:false,monthMode:'salary',veh:false,vehKind:'سكوتر',vehName:''};
-let stmtFor=null, stmtMode='full', stmtAcct='bank';
+let stmtFor=null, stmtMode='full', stmtAcct='';
 let needsFor=null, nd={mode:'one',name:'',cat:'',acct:'',items:[{name:'',amount:'',cat:''}],keep:'txn'};
 const ndSum=()=>Math.round(nd.items.reduce((a,i)=>a+(Number(onlyNum(i.amount))||0),0)*100)/100;
 let refundParts={};
@@ -490,8 +493,7 @@ function hasOfficeData(){
     ||(D.closings||[]).length
     ||(D.floatLoans||[]).length
     ||(D.ofees||[]).length
-    ||(D.accounts||[]).some(a=>Number(a.openingOffice)||0)
-    ||(D.installments||[]).some(i=>i.src==='office'));
+    ||(D.accounts||[]).some(a=>Number(a.openingOffice)||0));
 }
 const officeOn=()=>D.officeOn!==false;
 function normalizeData(){
@@ -560,6 +562,26 @@ function normalizeData(){
   }
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
+  if(!D._autoSince)D._autoSince=today();
+  (D.certs||[]).forEach(c=>{
+    if(c.bank===undefined){const a=(D.accounts||[]).find(x=>x.id===c.account);
+      c.bank=(a&&a.atype==='bank'&&!a.credit)?a.id:'';c.legacy=true;}
+  });
+  (function(){const banks=(D.accounts||[]).filter(a=>a.atype==='bank'&&!a.credit&&a.scope!=='office');
+    (D.accounts||[]).forEach(a=>{if(a.credit&&a.payFrom===undefined)a.payFrom=banks.length===1?banks[0].id:'';});})();
+  if(!D.autoNote)D.autoNote=[];
+  if(!D.arrPend)D.arrPend=[];
+  (D.txns||[]).filter(t=>t.arrFee&&t.pending).forEach(t=>{
+    D.arrPend.push({id:'m'+t.id,src:'',acct:t.account,amount:Number(t.amount)||0,date:t.date,
+      note:String(t.note||'').replace(/^مصاريف تدبير( — )?/,'')});
+  });
+  D.txns=(D.txns||[]).filter(t=>!(t.arrFee&&t.pending));
+  /* مرتجعات اتسجلت دخل قبل كده */
+  (D.txns||[]).forEach(t=>{
+    if(t.refundOf&&t.kind==='income'){const o=D.txns.find(x=>x.id===t.refundOf);
+      t.kind='expense';t.amount=-(Number(t.amount)||0);t.cat=o?refundCat(o):'other';}
+    else if(t.fxDiff&&t.kind==='income'){t.kind='expense';t.amount=-(Number(t.amount)||0);}
+  });
   /* مصاريف قديمة فيها جزء من العهدة: تظهر بمبلغها الكامل، والرصيد ما يتغيرش */
   (D.floatLoans||[]).forEach(l=>{
     if(l.dir!=='take'||!l.srcTxn||l.mig)return;
@@ -718,7 +740,7 @@ function balances(bk){
   Object.keys(m).forEach(k=>{m[k]=Math.round((m[k]+Number.EPSILON)*100)/100;});
   return m;
 }
-const accountsFor=bk=>D.accounts.filter(a=>a.scope==='both'||a.scope===(bk||book));
+const accountsFor=bk=>D.accounts.filter(a=>!a.closed&&(a.scope==='both'||a.scope===(bk||book)));
 const bookName=()=>String(D.bookName||'').trim()||'المكتب';
 const ocatOf=id=>(D.ocats||[]).find(c=>c.id===id)||{id:'',label:'—'};
 const defOcat=()=>{const l=D.ocats||[];const c=l.find(x=>x.id==='shared')||l[0];return (c&&c.id)||'';};
@@ -872,7 +894,7 @@ function insCalcHint(){
 /* تأمين الكارت: يوم ١ من كل شهر، نسبة من رصيد الكارت يوم آخر كشف، والكسور بتتقطع */
 function insuranceAll(){
   let changed=false;const td=today(),cur=monthOf(td);
-  (D.accounts||[]).filter(a=>a.credit&&acctRate(a)>0).forEach(a=>{
+  (D.accounts||[]).filter(a=>a.credit&&!a.closed&&acctRate(a)>0).forEach(a=>{
     if(!a.insLast){a.insLast=cur;changed=true;return;}
     let m=nextMonth(a.insLast),g=0;
     while(m<=cur&&g++<120){
@@ -986,7 +1008,7 @@ function saveFieldsHtml(o,sc){
   const F=[['day','يومي'],['month','شهري'],['year','سنوي']];
   return `
     <label class="f">العايد بيتضاف</label>
-    <div class="chips">${F.map(x=>`<button class="chip sm${(o.saveFreq||'day')===x[0]?' on':''}" onclick="app.svSet('${sc}','saveFreq','${x[0]}',1)">${x[1]}</button>`).join('')}</div>
+    ${pickRow('svfreq'+sc,F.map(x=>({id:x[0],label:x[1]})),o.saveFreq||'day',"((v)=>app.svSet('"+sc+"','saveFreq',v,1))",1)}
     <div class="hint">${o.saveFreq==='month'?'بيتضاف مرة في الشهر على الرصيد في اليوم اللي تحدده.'
       :o.saveFreq==='year'?'بيتضاف مرة في السنة على الرصيد في التاريخ اللي تحدده.'
       :'بيتحسب كل يوم تراكمي ويبان في رصيد الوعاء على طول، وبيتقيّد في السجل سطر واحد آخر كل شهر.'}</div>
@@ -994,7 +1016,7 @@ function saveFieldsHtml(o,sc){
     <label class="f">العايد السنوي ٪</label>
     <input class="f" type="text" inputmode="decimal" value="${esc(o.saveRate||'')}" oninput="app.svSet('${sc}','saveRate',numFix(this,1))" onchange="app.svSet('${sc}','saveRate',this.value,1)">
     ${rateChanged?`<label class="f">النسبة الجديدة من إمتى؟</label>
-      <input class="f" type="date" value="${esc(o.rateFrom||today())}" onchange="app.svSet('${sc}','rateFrom',this.value,1)">
+      ${dateField(esc(o.rateFrom||today()),'app.svSet',"'"+sc+"','rateFrom'",'1')}
       <div class="hint">الأيام قبله بالنسبة القديمة، واللي بعده بالجديدة.</div>`:''}
     ${o.saveFreq==='month'?`<label class="f">يوم الإضافة</label>
       <input class="f" type="text" inputmode="numeric" value="${esc(o.saveDay||'')}" oninput="app.svSet('${sc}','saveDay',numFix(this,0))">`:''}
@@ -1002,7 +1024,7 @@ function saveFieldsHtml(o,sc){
       <input class="f" type="date" value="${esc(o.saveYearDate||today())}" onchange="app.svSet('${sc}','saveYearDate',this.value,1)">
       <div class="hint">اليوم والشهر بس اللي بيفرقوا.</div>`:''}
     ${!isEdit?`<label class="f">بيبدأ من</label>
-      <input class="f" type="date" value="${esc(o.saveStart||today())}" onchange="app.svSet('${sc}','saveStart',this.value,1)">`:''}
+      ${dateField(esc(o.saveStart||today()),'app.svSet',"'"+sc+"','saveStart'",'1')}`:''}
     <label class="f">ميعاد سحب (اختياري)</label>
     <div class="drow">
       <input class="f" type="date" value="${esc(o.saveWithdraw||'')}" onchange="app.svSet('${sc}','saveWithdraw',this.value,1)">
@@ -1056,6 +1078,148 @@ function saveXferRole(){
   if(inA)return {a:inA,lbl:'عمولة إيداع'};
   if(outA)return {a:outA,lbl:'عمولة سحب'};
   return null;
+}
+
+/* ---------- المحجوز من رصيد الكارت ----------
+   بتكتب الرصيد المتاح زي ما ظاهر في تطبيق البنك بعد السحب،
+   والمحجوز = رصيد الكارت في البرنامج قبل الحركة − الرقم اللي كتبته.
+   back: مبلغ حركة متسجلة خلاص ومحسوب في الرصيد، بنرجّعه عشان نوصل للرصيد قبلها. */
+function availOf(id){
+  const a=(D.accounts||[]).find(x=>x.id===id);if(!a)return 0;
+  let v=balances('me')[id]||0;
+  if(a.scope==='both')v+=(balances('office')[id]||0)-(Number(a.openingOffice)||0);
+  return Math.round(v*100)/100;
+}
+function holdFromBal(acc,bal,back){
+  if(String(bal==null?'':bal).trim()==='')return 0;
+  const b=Number(onlyNum(bal))||0;
+  const h=Math.round((availOf(acc)+(Number(back)||0)-b)*100)/100;
+  return h>0?h:0;
+}
+function holdHint(acc,bal,back){
+  if(String(bal==null?'':bal).trim()==='')return 'اكتب الرصيد المتاح زي ما ظاهر في تطبيق البنك، والفرق هيبقى المبلغ المحجوز.';
+  const h=holdFromBal(acc,bal,back);
+  return h>0?'يعني المحجوز <span class="n">'+fmt(h)+'</span> جنيه.'
+    :'الرقم ده مش أقل من رصيد الكارت في البرنامج (<span class="n">'+fmt(availOf(acc)+(Number(back)||0))+'</span>) — راجعه.';
+}
+function holdField(id,val,onin,acc,back){
+  return `<label class="f">رصيد الكارت بعد السحب (اختياري)</label>
+    <input class="f" id="${id}" type="text" inputmode="decimal" dir="ltr" value="${esc(val||'')}" oninput="${onin}">
+    <div class="hint" id="${id}h">${holdHint(acc,val,back)}</div>`;
+}
+/* ---------- سعر الاشتراك: المخفض لحد ما دفعاته تخلص ---------- */
+function promoStep(s,pay){
+  if(!s.promo)return;
+  if(Number(s.promo.left)>0){s.promo.left=Number(s.promo.left)-1;pay.promo=true;}
+  else if(!s.promo.done){s.promo.done=true;pay.promoEnd=true;}
+}
+const subPrice=s=>(s.promo&&Number(s.promo.left)>0)?Number(s.promo.amount)||0:Number(s.amount)||0;
+function promoEndDate(next,cycle,n){
+  n=Number(onlyNum(n))||0;if(!n||!next)return '';
+  return dAdd(next,(cycle==='yearly'?12:1)*n);
+}
+function promoFields(o,setFn,pickFn,key){
+  return `<label class="f">فيه سعر مخفض لفترة؟</label>
+    ${yesNo(key,o.promo,pickFn+"_on")}
+    ${o.promo?`<label class="f">السعر المخفض</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(o.promoAmt||'')}" oninput="${setFn}('promoAmt',numFix(this,1))">
+      <label class="f">${o.cycle==='yearly'?'لمدة كام سنة؟':'لمدة كام شهر؟'}</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(o.promoN||'')}" oninput="numFix(this,0)" onchange="${pickFn}('promoN',this.value)">
+      ${promoEndDate(o.next,o.cycle,o.promoN)?`<div class="hint">السعر العادي هيبدأ من دفعة ${dayLabel(promoEndDate(o.next,o.cycle,o.promoN))}.</div>`:''}`:''}`;
+}
+/* ---------- إشعار التسجيل التلقائي ---------- */
+function autoNoteHtml(){
+  const L=D.autoNote||[];if(!L.length)return '';
+  return `<div class="note ok" style="margin-top:18px">
+    ${L.map(n=>{
+      const s=n.sid?(D.subs||[]).find(x=>x.id===n.sid):null;
+      const last=s&&s.payments&&s.payments.length?s.payments[s.payments.length-1]:null;
+      const canUndo=!!(last&&last.t===n.t);
+      return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="flex:1">${n.text}</span>
+        ${canUndo?`<button class="chip sm" onclick="app.undoAuto('${n.id}')">تراجع</button>`:''}
+      </div>`;}).join('')}
+    <button class="chip sm" onclick="app.clearAutoNote()">تمام</button>
+  </div>`;
+}
+function pushNote(text,sid,t){
+  if(!D.autoNote)D.autoNote=[];
+  D.autoNote.push({id:uid(),text:text,sid:sid||undefined,t:t||undefined});
+}
+function runAuto(){
+  const ac=autoCharge();
+  ac.forEach(r=>pushNote('اتسجل اشتراك '+esc(r.name)+' بـ<span class="n">'+fmt(r.amount)+'</span> جنيه'+(r.usd?' (تقديري)':'')+' · '+dLabel(r.date)+'.',r.sid,r.t));
+  const cu=catchUp();
+  if(cu.n)pushNote('اتقيد '+cu.n+' دفعة عوائد بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');
+  const tr=autoTrials();
+  if(tr.length)pushNote('خلصت تجربة '+tr.map(esc).join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
+  if(ac.length||cu.n||tr.length)save();
+}
+/* حركات بتنقل فلوسك من مكان لمكان — مش دخل ولا مصروف */
+const isXferLike=t=>t.kind==='transfer'||!!t.flIn||!!t.flOut||!!t.certBuy||!!t.certBack;
+/* حسابات البنك (للربط والشهادات) */
+const bankAccs=()=>(D.accounts||[]).filter(a=>a.atype==='bank'&&!a.credit&&!a.closed&&a.scope!=='office');
+/* ---------- ٤٧: الكارت بيتسدد من حساب مربوط ---------- */
+function cardSrc(a){
+  const f=a&&a.payFrom?(D.accounts||[]).find(x=>x.id===a.payFrom&&!x.closed):null;
+  return f?f.id:'';
+}
+function cardPaySrcHtml(a,sel,fn){
+  const f=cardSrc(a);
+  return f?`<div class="hint" style="margin-top:12px">هيتخصم من ${esc(accName(f))}.</div>`
+    :`<label class="f">من أنهي حساب؟ <b>*</b></label>${payChips(sel,fn,a.id,'me','',0,{src:1})}`;
+}
+/* اللي اتسدد على كشف: أي فلوس دخلت الكارت من يوم الكشف لحد الكشف اللي بعده، بأي طريقة */
+function stmtPaidOf(a,key){
+  const from=stmtDate(key,a), to=stmtDate(mAdd(key,1),a);
+  return Math.round(D.txns.filter(t=>t.kind==='transfer'&&t.to===a.id&&t.date>=from&&t.date<to)
+    .reduce((x,t)=>x+(Number(t.amount)||0),0)*100)/100;
+}
+function stmtSettleIns(st){
+  if(st.insDone)return;
+  (D.installments||[]).filter(i=>i.src===st.acct&&i.mode!=='bank'&&!insDone(i)).forEach(i=>{
+    const m=insNextMonth(i);
+    i.paid=(Number(i.paid)||0)+1;i.covered=m;
+    if(!i.payments)i.payments=[];
+    i.payments.push({d:today(),m:m,amount:Number(i.monthly)||0,type:'front',viaStmt:true});
+  });
+  st.insDone=true;
+}
+function cardLinkHtml(a,sel,fn){
+  const banks=bankAccs();
+  return `<label class="f">بيتسدد من</label>
+    ${pickRow('pf'+(a?a.id:'new'),banks.map(b=>({id:b.id,label:esc(b.name)})).concat([{id:'none',label:'هختار وقت السداد'}]),sel||'none',fn,1)}
+    <div class="hint">لو ربطته بحساب، السداد هيتخصم منه على طول من غير ما يسأل.</div>`;
+}
+const cardDebt=a=>Math.round(Math.max(0,(Number(a.limit)||0)-availOf(a.id))*100)/100;
+/* ---------- ٥٩: الشهادات ---------- */
+const certSecuredBy=c=>(D.accounts||[]).find(a=>!a.closed&&(a.secured||[]).indexOf(c.id)>-1);
+const certRetAccs=()=>accountsFor('me').filter(a=>(a.atype==='bank'&&!a.credit)||isSave(a));
+function monthsBetween(a,b){
+  const pa=String(a).split('-').map(Number),pb=String(b).split('-').map(Number);
+  return (pb[0]-pa[0])*12+(pb[1]-pa[1]);
+}
+function redeemCert(c,pen,date){
+  const d=date||today(), to=c.bank||c.account;
+  if(to)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:Number(c.amount)||0,account:to,
+    date:d,certBack:c.id,note:'صرف '+c.name});
+  if(pen>0&&to)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:pen,cat:'fees',account:to,
+    date:d,certFee:c.id,note:'غرامة كسر '+c.name});
+  c.redeemed=true;c.redeemedOn=d;
+}
+/* setPayFrom_<id> بتتعمل وقت الطلب */
+const refundCat=t=>t.cat||(t.items&&t.items[0]&&t.items[0].cat)||'other';
+/* شاشة تأكيد مصاريف التدبير — نفسها للاشتراكات ومشتريات الكارت */
+function feeConfirmHtml(val,okFn,noFn){
+  return `<div class="inline">
+    <label class="f">اتخصم كام بالظبط؟</label>
+    <input class="f" id="feein" type="text" inputmode="decimal" value="${val}" oninput="numFix(this,1)">
+    <label class="f">اتخصم إمتى؟</label>
+    ${dateField(feeDate||today(),'app.setFeeDate')}
+    <button class="btn" onclick="${okFn}">أكد</button>
+    <button class="btn ghost" onclick="${noFn}">مفيش تدبير</button>
+    <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
+  </div>`;
 }
 
 /* اسم الحركة في التنبيهات: المكان هو الاسم، والملاحظة تنزل في السطر الصغير.
@@ -1146,7 +1310,7 @@ function insAhead(i){
 }
 const canPostpone=i=>!isCardIns(i)&&(insAhead(i)>0||i.src==='office');
 function insSrcLabel(i){
-  if(i.src==='office')return 'سلفة';
+  if(i.src==='office')return 'سلفة'+(i.from?' من '+i.from:'');
   const a=D.accounts.find(x=>x.id===i.src);
   return a?('مقسط على '+a.name):'قسط';
 }
@@ -1266,8 +1430,8 @@ function chargedAlready(s){
   return (n.getHours()*60+n.getMinutes())>=((Number(p[0])||0)*60+(Number(p[1])||0));
 }
 function chargeSub(s,d){
-  const usd=s.cur==='USD'?Number(s.amount):0;
-  const full=usd?Math.round(usd*D.rate*100)/100:Number(s.amount);
+  const usd=s.cur==='USD'?subPrice(s):0;
+  const full=usd?Math.round(usd*D.rate*100)/100:subPrice(s);
   if(!(full>0))return null;
   const t={id:uid(),book:'me',kind:'expense',amount:full,
     cat:s.cat||'subs',account:s.account||'card',date:d,note:s.name,
@@ -1275,8 +1439,9 @@ function chargeSub(s,d){
   D.txns.unshift(t);
   if(!s.payments)s.payments=[];
   const pay={d:d,t:t.id,paid:full,auto:true};
-  if(s.cur!=='USD'){
-    const est=Math.round(full*0.03*100)/100;
+  promoStep(s,pay);
+  if(s.cur!=='USD'&&isCreditAcc(s.account||'card')){
+    const est=arrEst(full);
     if(est>0){pay.fee=est;pay.feePending=true;}
   }
   s.payments.push(pay);
@@ -1295,12 +1460,15 @@ function chargeSub(s,d){
     }
   }
   s.next=dAdd(s.next,s.cycle==='yearly'?12:1);
-  return {name:s.name,amount:full};
+  return {name:s.name,amount:full,usd:!!usd,sid:s.id,t:t.id,date:d};
 }
 function autoCharge(){
   const done=[];
   (D.subs||[]).forEach(s=>{
     if(s.cycle==='trial'||subEnded(s))return;
+    /* بيتسجل لوحده بس لو محدد ساعة، ومن غير ما يرجع لدفعات فاتت قبل ما الميزة تشتغل */
+    if(!s.at)return;
+    if(String(s.next||'')<D._autoSince)return;
     let guard=0;
     while(guard++<24&&chargedAlready(s)){
       const d=s.next;
@@ -1315,12 +1483,14 @@ function autoCharge(){
 function catchUp(){
   let n=0,tot=0;
   (D.certs||[]).forEach(c=>{
+    if(c.redeemed)return;
     let guard=0;
     while(guard++<200){
       const d=certNext(c);
       if(d>today())break;
       if(c.end&&d>c.end)break;
-      const t={id:uid(),book:'me',kind:'income',amount:Number(c.monthly),account:c.account,date:d,note:c.name+' — عائد'};
+      const t={id:uid(),book:'me',kind:isSave((D.accounts||[]).find(a=>a.id===c.account))?'yield':'income',
+        amount:Number(c.monthly),account:c.account,date:d,note:c.name+' — عائد'};
       D.txns.unshift(t);
       c.covered=monthOf(d);
       if(!c.payments)c.payments=[];
@@ -1334,15 +1504,15 @@ function catchUp(){
 
 /* --- اشتراكات --- */
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
-const subCost=s=>s.cur==='USD'?Number(s.amount)*D.rate:Number(s.amount);
+const subCost=s=>s.cur==='USD'?subPrice(s)*D.rate:subPrice(s);
 const subPeople=s=>(s.people&&s.people.length)?s.people:[];
 const subOthers=s=>subPeople(s).reduce((a,p)=>a+(Number(p.amount)||0),0);
 const subMine=s=>{
-  if(subPeople(s).length)return Math.max(0,Number(s.amount)-subOthers(s));
+  if(subPeople(s).length)return Math.max(0,subPrice(s)-subOthers(s));
   return (s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
 };
 const subMineCost=s=>s.cur==='USD'?subMine(s)*D.rate:subMine(s);
-const subShared=s=>subMine(s)<Number(s.amount)-0.001;
+const subShared=s=>subMine(s)<subPrice(s)-0.001;
 const subLastPay=s=>{
   const ps=(s.payments||[]).filter(p=>!p.dup);
   return ps.length?ps[ps.length-1]:null;
@@ -1571,11 +1741,13 @@ function payChips(sel,fn,exclude,bk,key,allowSave,opt){
     .filter(a=>a.id!==exclude&&(allowSave||!isSave(a))&&!(opt.src&&a.credit))
     .map(a=>({id:a.id,label:esc(a.name)+(b?` · <span class="n">${fmt(b[a.id]||0)}</span>`:'')})),sel,fn);
 }
-function dateField(val,fn){
+/* pre/post: باراميترات قبل وبعد التاريخ لو الدالة محتاجاها */
+function dateField(val,fn,pre,post){
+  const a=pre?pre+',':'', z=post?','+post:'';
   return `<div class="drow">
-      <button class="chip sm${val===today()?' on':''}" onclick="${fn}('${today()}')">النهارده</button>
-      <button class="chip sm${val===yesterday()?' on':''}" onclick="${fn}('${yesterday()}')">إمبارح</button>
-      <input class="f" type="date" value="${val}" onchange="${fn}(this.value)">
+      <button class="chip sm${val===today()?' on':''}" onclick="${fn}(${a}'${today()}'${z})">النهارده</button>
+      <button class="chip sm${val===yesterday()?' on':''}" onclick="${fn}(${a}'${yesterday()}'${z})">إمبارح</button>
+      <input class="f" type="date" value="${val}" onchange="${fn}(${a}this.value${z})">
     </div>`;
 }
 function acctRow(a,b,extra,attrs){
@@ -1700,40 +1872,29 @@ function vWelcome(){
 
     <div class="sec-h" style="margin-top:26px"><h3>٢ · بداية الشهر عندك</h3></div>
     <p class="hint" style="margin-top:-4px">لو بتقبض في يوم ثابت، الأنسب تحسب شهرك من يوم القبض.</p>
-    <div class="chips" style="margin-top:12px">
-      <button class="chip sm${wel.monthMode==='cal'?'':' on'}" onclick="app.welMonthMode('salary')">من المرتب</button>
-      <button class="chip sm${wel.monthMode==='cal'?' on':''}" onclick="app.welMonthMode('cal')">من أول الشهر</button>
-    </div>
+    ${pickRow('welmm',[{id:'salary',label:'من المرتب'},{id:'cal',label:'من أول الشهر'}],wel.monthMode==='cal'?'cal':'salary','app.welMonthMode',1)}
 
     ${wel.monthMode==='cal'?'':`<p class="hint" style="margin-top:14px">اكتب مرتبك وآخر مرة قبضت فيها. سيبها فاضية لو مش محتاجها.</p>
     <label class="f">المرتب</label>
     <input class="f" type="text" inputmode="decimal" value="${esc(wel.salary)}" oninput="app.welSalary('salary',numFix(this,1))">
     <label class="f">آخر مرة قبضت فيها</label>
-    <input class="f" type="date" value="${wel.salaryDate}" onchange="app.welSalary('salaryDate',this.value)">
+    ${dateField(wel.salaryDate||'','app.welSalary',"'salaryDate'")}
     ${wel.accs.length?`<label class="f">دخلت على أنهي حساب؟</label>
-      <div class="chips">${wel.accs.map((x,i)=>`<button class="chip sm${wel.salaryAcc===i?' on':''}" onclick="app.welSalary('salaryAcc',${i})">${esc(x.name||x.kindLabel)}</button>`).join('')}</div>`:''}`}
+      ${pickRow('welsacc',wel.accs.map((x,i)=>({id:i,label:esc(x.name||x.kindLabel)})),wel.salaryAcc,"((v)=>app.welSalary('salaryAcc',v))",1,1)}`:''}`}
 
     <div class="sec-h" style="margin-top:26px"><h3>٣ · بتتعامل بعهدة شغل؟</h3></div>
     <p class="hint" style="margin-top:-4px">لو بتستلم فلوس من شغلك وتصرف منها وتقفّلها، هفتحلك دفتر منفصل ليها.</p>
-    <div class="chips" style="margin-top:12px">
-      <button class="chip sm${wel.office?' on':''}" onclick="app.welOffice(true)">أيوه</button>
-      <button class="chip sm${wel.office?'':' on'}" onclick="app.welOffice(false)">لأ</button>
-    </div>
+    ${yesNo('weloff',wel.office,'app.welOffice')}
 
     <div class="sec-h" style="margin-top:26px"><h3>٤ · عندك مركبة؟</h3></div>
     <p class="hint" style="margin-top:-4px">سكوتر أو موتوسيكل أو عربية — عشان أتابعلك بنزينها وصيانتها ورخصتها.</p>
-    <div class="chips" style="margin-top:12px">
-      <button class="chip sm${wel.veh?' on':''}" onclick="app.welVeh(true)">أيوه</button>
-      <button class="chip sm${wel.veh?'':' on'}" onclick="app.welVeh(false)">لأ</button>
-    </div>
+    ${yesNo('welveh',wel.veh,'app.welVeh')}
     ${wel.veh?`
       <label class="f">النوع</label>
-      <div class="chips">
-        ${['سكوتر','موتوسيكل','عربية'].map(k=>`<button class="chip sm${wel.vehKind===k?' on':''}" onclick="app.welVehKind('${k}')">${k}</button>`).join('')}
-      </div>
+      ${pickRow('welvk',['سكوتر','موتوسيكل','عربية'].map(k=>({id:k,label:k})),wel.vehKind,'app.welVehKind',1)}
       <label class="f">الاسم</label>
       <input class="f" placeholder="${esc(wel.vehKind)}" value="${esc(wel.vehName)}" oninput="app.welVehName(this.value)">
-      <div class="hint">تقدر تزوّد مركبات تانية بعدين من المحفظة.</div>
+      <div class="hint">تقدر تضيف مركبات تانية بعدين من المحفظة.</div>
     `:''}
 
     <div class="sec-h" style="margin-top:26px"><h3>٥ · التصنيفات</h3></div>
@@ -1780,11 +1941,7 @@ function vHome(){
   const max=byCat.length?byCat[0][1]:1;
 
   return `
-  ${autoMsg?`<div class="note ok" style="margin-top:18px;display:flex;align-items:flex-start;gap:10px">
-    <span style="flex:1">${esc(autoMsg)}</span>
-    <button onclick="app.closeAutoMsg()" aria-label="إغلاق"
-      style="background:none;border:0;color:inherit;opacity:.6;font:inherit;font-size:17px;line-height:1;cursor:pointer;padding:0 2px">×</button>
-  </div>`:''}
+  ${autoNoteHtml()}
   ${alertsPanel()}
 
   <div class="sec" style="margin-top:24px">
@@ -1827,7 +1984,8 @@ function vHome(){
 
 function alertsPanel(){
   const rows=[];
-  if(book==='me')D.txns.filter(t=>t.pending).forEach(t=>{const T=txnTitle(t);rows.push(`
+  const _dupT={};(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{_dupT[p.t]=1;}));
+  if(book==='me')D.txns.filter(t=>t.pending&&!_dupT[t.id]).forEach(t=>{const T=txnTitle(t);rows.push(`
     <div class="alert">
       <span class="rail" style="background:#EFCA6A"></span>
       <span class="g"><span class="t">${esc(T.title)}</span>
@@ -1839,8 +1997,39 @@ function alertsPanel(){
       <label class="f">المبلغ الحقيقي اللي اتخصم بالجنيه</label>
       <input class="f" id="fixin" type="text" inputmode="decimal" value="${t.amount}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFix('${t.id}')">ظبّط المبلغ</button>
+      ${(t.usd&&!t.hold&&isCreditAcc(t.account))?`<div class="hint" style="margin-top:16px">ولو لسه محجوز ومش نهائي:</div>
+        ${holdField('fixbal','',"app.holdLive('fixbal','"+t.account+"',"+t.amount+")",t.account,t.amount)}
+        <button class="btn ghost" onclick="app.fixHold('${t.id}')">سجّل المحجوز</button>`:''}
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
     </div>`:''}`);});
+
+  if(book==='me')(D.certs||[]).filter(c=>!c.redeemed&&c.end&&daysTo(c.end)<=0).forEach(c=>{
+    const sec=certSecuredBy(c);
+    rows.push(`<div class="alert" style="flex-wrap:wrap">
+      <span class="rail" style="background:#46C2A8"></span>
+      <span class="g"><span class="t">${esc(c.name)}</span>
+        <span class="s" style="display:block">ميعاد التجديد ${dLabel(c.end)}${sec?' · ضامنة '+esc(sec.name):''}</span></span>
+      <span class="vl" style="white-space:nowrap">${money(c.amount,'EGP')}</span>
+      <div class="chips" style="flex-basis:100%;margin:10px 0 0">
+        <button class="chip sm" onclick="app.renewCert('${c.id}')">جددتها</button>
+        ${sec?'':`<button class="chip sm" onclick="app.cashCert('${c.id}')">صرفتها</button>`}
+      </div>
+    </div>`);
+  });
+
+  if(book==='me')(D.arrPend||[]).forEach(e=>{
+    const src=e.src?D.txns.find(x=>x.id===e.src):null;
+    const T=src?txnTitle(src):{title:e.note||'مصاريف تدبير',extra:''};
+    const key='arr|'+e.id;
+    rows.push(`<div class="alert">
+      <span class="rail" style="background:#C4A484"></span>
+      <span class="g"><span class="t">${esc(T.title)}</span>
+        <span class="s" style="display:block">مصاريف تدبير · تقديري · دفعة ${dLabel(e.date)}</span></span>
+      <span class="vl" style="white-space:nowrap">${money(e.amount,'EGP')}</span>
+      <button class="chip sm" onclick="app.startFeeFix('${key}')">${feeFor===key?'إخفاء':'ظبّط'}</button>
+    </div>
+    ${feeFor===key?feeConfirmHtml(e.amount,`app.confirmArr('${e.id}')`,`app.noArr('${e.id}')`):''}`);
+  });
 
   if(book==='me')D.txns.filter(t=>t.refundSince&&!t.refundDone).forEach(t=>{
     const w=Math.max(0,-daysTo(t.refundSince));
@@ -1886,11 +2075,11 @@ function alertsPanel(){
     <div class="alert">
       <span class="rail" style="background:${s.cycle==='trial'?'#F58F52':catOf(s.cat).color}"></span>
       <span class="g"><span class="t">${esc(s.name)}</span>
-        <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):cycleLabel(s)} · ${whenLabel(s.next)}</span></span>
-      ${s.cycle==='trial'?'':`<span class="vl" style="white-space:nowrap">${money(s.amount,s.cur)}</span>`}
+        <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):cycleLabel(s)} · ${whenLabel(s.next)}${(s.promo&&Number(s.promo.left)===0&&!s.promo.done)?' · الدفعة دي بالسعر العادي':''}</span></span>
+      ${s.cycle==='trial'?'':`<span class="vl" style="white-space:nowrap">${money(subPrice(s),s.cur)}</span>`}
 ${s.cycle==='trial'
         ?`<button class="chip sm" onclick="app.${(s.willRenew&&daysTo(s.next)<=0)?'convertNow':'goSubs'}('${s.id}')">${(s.willRenew&&daysTo(s.next)<=0)?'حوّلها':'شوفها'}</button>`
-        :(daysTo(s.next)<=0?`<button class="chip sm" onclick="app.paySub('${s.id}')">سجّل</button>`:'')}
+        :(daysTo(s.next)<=0?`<button class="chip sm" onclick="app.paySub('${s.id}')">سجّل الدفع</button>`:'')}
       ${daysTo(s.next)>0?`<button class="chip sm" onclick="app.hideSubAlert('${s.id}')">شفتها</button>`:''}
     </div>`));
 
@@ -1993,7 +2182,7 @@ ${s.cycle==='trial'
       <div class="alert">
         <span class="rail" style="background:var(--mint)"></span>
         <span class="g"><span class="t">فلوس ليك${who?' عند '+esc(who):''}</span>
-          ${list.map(o=>`<span class="s" style="display:block">${esc(o.label||'')}${o.src==='owed'?' · '+dLabel(o.date):''} · <span class="n">${fmt(o.amount)}</span></span>`).join('')}</span>
+          ${list.map(o=>`<span class="s" style="display:block">${esc(o.label||'')}${o.src==='owed'?' · '+dLabel(o.date):''} · <span class="n">${fmt(o.amount)}</span>${o.ref&&o.ref.orig!==undefined?` فاضل من <span class="n">${fmt(o.ref.orig)}</span>`:''}</span>`).join('')}</span>
         <span class="vl" style="color:var(--mint);white-space:nowrap">${money(total,'EGP')}</span>
         <button class="chip sm" onclick="app.startOwedGet('${esc(gid)}')">${owedFor===gid?'إخفاء':'استلمت'}</button>
       </div>
@@ -2025,20 +2214,23 @@ ${s.cycle==='trial'
       <span class="rail" style="background:var(--clay)"></span>
       <span class="g"><span class="t">سحب متكرر — ${esc(s.name)}</span>
         <span class="s" style="display:block">اتسحب تاني ${dLabel(p.d)}${
-          usd?` · <span class="n">${fmt(p.paid)}</span> تقديري`:(p.feePending?` · تدبير تقديري <span class="n">${fmt(p.fee)}</span>`:'')}</span></span>
+          usd?` · <span class="n">${fmt(p.paid)}</span> ${((D.txns.find(x=>x.id===p.t)||{}).hold)?'محجوز':'تقديري'}`:(p.feePending?` · تدبير تقديري <span class="n">${fmt(p.fee)}</span>`:'')}</span></span>
       <span class="vl" style="white-space:nowrap">${usd?money(s.amount,'USD'):money(p.paid,'EGP')}</span>
       <div class="chips" style="flex-basis:100%;margin:10px 0 0">
         <button class="chip sm" onclick="app.undoDup('${s.id}','${p.t}')">رجعت</button>
         <button class="chip sm" onclick="app.startFeeFix('${esc(key)}')">${feeFor===key?'إخفاء':'ظبّط'}</button>
       </div>
     </div>
-    ${feeFor===key?`<div class="inline">
-      <label class="f">${usd?'اتخصم كام بالجنيه؟':'التدبير اتخصم كام؟'}</label>
-      <input class="f" id="feein" type="text" inputmode="decimal" value="${usd?p.paid:(p.fee||0)}" oninput="numFix(this,1)">
+    ${feeFor===key?(usd?`<div class="inline">
+      <label class="f">اتخصم كام بالجنيه؟</label>
+      <input class="f" id="feein" type="text" inputmode="decimal" value="${p.paid}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFee('${esc(key)}')">أكد</button>
-      ${usd?'':`<button class="btn ghost" onclick="app.noFee('${esc(key)}')">مفيش تدبير</button>`}
+      ${(function(){const tx=D.txns.find(x=>x.id===p.t);
+        return (tx&&!tx.hold&&isCreditAcc(tx.account))?`<div class="hint" style="margin-top:16px">ولو لسه محجوز ومش نهائي:</div>
+          ${holdField('fixbal','',"app.holdLive('fixbal','"+tx.account+"',"+tx.amount+")",tx.account,tx.amount)}
+          <button class="btn ghost" onclick="app.fixHold('${tx.id}')">سجّل المحجوز</button>`:'';})()}
       <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
-    </div>`:''}`);
+    </div>`:feeConfirmHtml(p.fee||0,`app.confirmFee('${esc(key)}')`,`app.noFee('${esc(key)}')`)):''}`);
   }));
 
   if(book==='me')(D.subs||[]).forEach(s=>{
@@ -2047,18 +2239,12 @@ ${s.cycle==='trial'
       const key=s.id+'|'+p.t;
       rows.push(`<div class="alert">
         <span class="rail" style="background:#C4A484"></span>
-        <span class="g"><span class="t">تدبير عملة — ${esc(s.name)}${p.dup?' (سحب متكرر)':''}</span>
-          <span class="s" style="display:block">دفعة ${dLabel(p.d)} · تقديري ٣٪ · لسه ماتخصمش</span></span>
+        <span class="g"><span class="t">${esc(s.name)}</span>
+          <span class="s" style="display:block">مصاريف تدبير · تقديري · دفعة ${dLabel(p.d)}</span></span>
         <span class="vl" style="white-space:nowrap">${money(p.fee,'EGP')}</span>
         <button class="chip sm" onclick="app.startFeeFix('${esc(key)}')">${feeFor===key?'إخفاء':'ظبّط'}</button>
       </div>
-      ${feeFor===key?`<div class="inline">
-        <label class="f">اتخصم كام بالظبط؟</label>
-        <input class="f" id="feein" type="text" inputmode="decimal" value="${p.fee}" oninput="numFix(this,1)">
-        <button class="btn" onclick="app.confirmFee('${esc(key)}')">أكد</button>
-        <button class="btn ghost" onclick="app.noFee('${esc(key)}')">مفيش تدبير خالص</button>
-        <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
-      </div>`:''}`);
+      ${feeFor===key?feeConfirmHtml(p.fee,`app.confirmFee('${esc(key)}')`,`app.noFee('${esc(key)}')`):''}`);
     });
   });
 
@@ -2089,7 +2275,7 @@ ${s.cycle==='trial'
       <span class="g"><span class="t">فرق في فاتورة ${esc(t.place||t.merchant||'')}</span>
         <span class="s" style="display:block">الأصناف <span class="n">${fmt(s)}</span> والمخصوم <span class="n">${fmt(t.amount)}</span> · الفرق <span class="n">${fmt(Math.abs(d))}</span></span></span>
       <button class="chip sm" onclick="app.fixDiff('${t.id}','txn')">المخصوم صح</button>
-      <button class="chip sm" onclick="app.fixDiff('${t.id}','items')">الفاتورة صح</button>
+      <button class="chip sm" onclick="app.fixDiff('${t.id}','items')">الأصناف صح</button>
     </div>`);
   });
 
@@ -2109,16 +2295,12 @@ ${s.cycle==='trial'
           ${payChips(nd.acct,'app.ndAcct','','me')}`:''}
         ${t.kind==='expense'?`
           <label class="f">تسجلها إزاي؟</label>
-          <div class="chips">
-            <button class="chip sm${nd.mode==='one'?' on':''}" onclick="app.ndMode('one')">حاجة واحدة</button>
-            <button class="chip sm${nd.mode==='items'?' on':''}" onclick="app.ndMode('items')">أصناف</button>
-            <button class="chip sm${nd.mode==='bill'?' on':''}" onclick="app.ndMode('bill')">ارفع الفاتورة</button>
-          </div>
+          ${pickRow('ndmode',[{id:'one',label:'حاجة واحدة'},{id:'items',label:'أصناف'},{id:'bill',label:'ارفع الفاتورة'}],nd.mode,'app.ndMode',1)}
           ${nd.mode==='one'?`
             <label class="f">اسمها إيه؟ <b>*</b></label>
             <input class="f" value="${esc(nd.name)}" oninput="app.ndSet('name',this.value)">
             <label class="f">التصنيف <b>*</b></label>
-            <div class="chips">${D.cats.filter(c=>LOCKED.indexOf(c.id)<0).map(c=>`<button class="chip sm${nd.cat===c.id?' on':''}" onclick="app.ndPick('cat','${c.id}')">${esc(c.label)}</button>`).join('')}</div>
+            ${pickRow('ndcat',D.cats.filter(c=>LOCKED.indexOf(c.id)<0).map(c=>({id:c.id,label:esc(c.label)})),nd.cat,"((v)=>app.ndPick('cat',v))",1)}
           `:''}
           ${nd.mode==='items'?`
             ${nd.items.map((it,ix)=>`<div style="display:grid;grid-template-columns:1fr 82px 34px;gap:8px;margin-bottom:8px">
@@ -2126,16 +2308,13 @@ ${s.cycle==='trial'
               <input class="f" type="text" inputmode="decimal" value="${esc(it.amount)}" oninput="app.ndItem(${ix},'amount',numFix(this,1))">
               <button class="chip sm" style="padding:0" onclick="app.ndItemDel(${ix})">×</button>
             </div>
-            <div class="chips" style="margin-bottom:10px">${D.cats.filter(c=>LOCKED.indexOf(c.id)<0).map(c=>`<button class="chip sm${it.cat===c.id?' on':''}" onclick="app.ndItem(${ix},'cat','${c.id}')">${esc(c.label)}</button>`).join('')}</div>`).join('')}
-            <button class="btn ghost" style="margin-top:0" onclick="app.ndItemAdd()">زوّد صنف</button>
+            ${pickRow('nditc'+ix,D.cats.filter(c=>LOCKED.indexOf(c.id)<0).map(c=>({id:c.id,label:esc(c.label)})),it.cat,"((v)=>app.ndItem("+ix+",'cat',v))",1)}`).join('')}
+            <button class="btn ghost" style="margin-top:0" onclick="app.ndItemAdd()">ضيف صنف</button>
             ${(function(){const s=ndSum(),d=Math.round((s-Number(t.amount))*100)/100;
               if(!s)return '';
               if(Math.abs(d)<0.005)return '<div class="hint">مطابق للمبلغ المخصوم.</div>';
               return `<div class="hint" style="color:#FF9C90">الأصناف <span class="n">${fmt(s)}</span> والمخصوم <span class="n">${fmt(t.amount)}</span> · الفرق <span class="n">${fmt(Math.abs(d))}</span></div>
-              <div class="chips">
-                <button class="chip sm${nd.keep==='txn'?' on':''}" onclick="app.ndKeep('txn')">المخصوم هو الصح</button>
-                <button class="chip sm${nd.keep==='items'?' on':''}" onclick="app.ndKeep('items')">الأصناف هي الصح</button>
-              </div>`;})()}
+              ${pickRow('ndkeep',[{id:'txn',label:'المخصوم صح'},{id:'items',label:'الأصناف صح'}],nd.keep,'app.ndKeep',1)}`;})()}
           `:''}
           ${nd.mode==='bill'?`<div class="hint">هتفتحلك شاشة الفاتورة، صوّرها أو الصقها، والمبلغ هيتظبط على المخصوم.</div>
             <button class="btn ghost" onclick="app.ndGoBill('${t.id}')">افتح شاشة الفاتورة</button>`:''}
@@ -2146,7 +2325,7 @@ ${s.cycle==='trial'
     });
   }
 
-  if(book==='me')D.accounts.filter(a=>a.credit).forEach(a=>{
+  if(book==='me')D.accounts.filter(a=>a.credit&&!a.closed).forEach(a=>{
     const key=stmtKey(today(),a);
     if(today()<stmtDate(key,a))return;
     let st=stmtRecord(a.id,key);
@@ -2158,8 +2337,9 @@ ${s.cycle==='trial'
         paid:0,hidden:false,insDone:false};
       D.stmts.push(st);save();
     }
-    const left=Math.round((Number(st.total)-Number(st.paid||0))*100)/100;
-    if(left<=0.01)return;
+    const paidNow=stmtPaidOf(a,key);
+    const left=Math.round((Number(st.total)-paidNow)*100)/100;
+    if(left<=0.01){if(!st.insDone){stmtSettleIns(st);save();}return;}
     if(st.hidden&&!salaryAfter(st.hiddenQ))return;
     const due=stmtDue(key,a);
     const late=daysTo(dayShift(due,-1))<=0;
@@ -2171,22 +2351,20 @@ ${s.cycle==='trial'
         <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}${
           st.carry>0.01?` · متبقي مقسط <span class="n">${fmt(st.carry)}</span>`:''}</span>
         <span class="s" style="display:block">أصل <span class="n">${fmt(st.base)}</span> + تأمين <span class="n">${fmt(st.fee)}</span>${
-          Number(st.paid)>0.01?` · سددت <span class="n">${fmt(st.paid)}</span>`:''}</span></span>
+          paidNow>0.01?` · سددت <span class="n">${fmt(paidNow)}</span>`:''}</span></span>
       <span class="vl" style="color:${late?'var(--clay)':'inherit'};white-space:nowrap">${money(left,'EGP')}</span>
       <button class="chip sm" onclick="app.startStmtPay('${st.id}')">${stmtFor===st.id?'إخفاء':'سدد'}</button>
       ${(!st.hidden&&!late)?`<button class="chip sm" onclick="app.hideStmt('${st.id}')">شفتها</button>`:''}
     </div>
     ${stmtFor===st.id?`<div class="inline">
       <label class="f">تسدد كام؟</label>
-      <div class="chips">
-        <button class="chip sm${stmtMode==='full'?' on':''}" onclick="app.stmtMode('full')">الكل (<span class="n">${fmt(left)}</span>)</button>
-        <button class="chip sm${stmtMode==='part'?' on':''}" onclick="app.stmtMode('part')">مبلغ تاني</button>
-      </div>
+      ${pickRow('stmtmode'+st.id,[{id:'full',label:`الكل (<span class="n">${fmt(left)}</span>)`},{id:'part',label:'مبلغ تاني'}],stmtMode,'app.stmtMode',1)}
       ${stmtMode==='part'?`<input class="f" id="stmtin" style="margin-top:10px" type="text" inputmode="decimal" value="${left}" oninput="numFix(this,1)">`:''}
-      <label class="f">من أنهي حساب؟</label>
-      ${payChips(stmtAcct||'bank','app.setStmtAcct',a.id,'me','',0,{src:1})}
+      ${cardPaySrcHtml(a,stmtAcct,'app.setStmtAcct')}
+      <label class="f">التاريخ</label>
+      ${dateField(stmtPayDate||today(),'app.setStmtPayDate')}
       ${st.monthly>0.01?`<div class="hint">المبلغ ده شامل قسط الشهر (<span class="n">${fmt(st.monthly)}</span>)، فالأقساط هتتحرك لوحدها.</div>`:''}
-      <button class="btn" ${stmtAcct||true?'':'disabled'} onclick="app.payStmt('${st.id}')">سجّل السداد</button>
+      <button class="btn" ${(cardSrc(a)||stmtAcct)?'':'disabled'} onclick="app.payStmt('${st.id}')">سجّل السداد</button>
       <button class="btn ghost" onclick="app.cancelStmtPay()">إلغاء</button>
     </div>`:''}`);
   });
@@ -2201,10 +2379,7 @@ ${s.cycle==='trial'
     </div>
     ${ofeeFor?`<div class="inline">
       <label class="f">أخدت كام؟</label>
-      <div class="chips">
-        <button class="chip sm${ofeeMode==='full'?' on':''}" onclick="app.setOfeeMode('full')">المبلغ بالظبط (<span class="n">${fmt(ofeeBalance())}</span>)</button>
-        <button class="chip sm${ofeeMode==='part'?' on':''}" onclick="app.setOfeeMode('part')">مبلغ تاني</button>
-      </div>
+      ${pickRow('ofeemode',[{id:'full',label:`المبلغ بالظبط (<span class="n">${fmt(ofeeBalance())}</span>)`},{id:'part',label:'مبلغ تاني'}],ofeeMode,'app.setOfeeMode',1)}
       ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${ofeeBalance()}" oninput="numFix(this,1)">`:''}
       <label class="f">من أنهي حساب عهدة؟ <b>*</b></label>
       ${payChips(ofeeAcct,'app.setOfeeAcct','','office','',0,{src:1})}
@@ -2245,7 +2420,7 @@ ${s.cycle==='trial'
 
 function txnRow(t){
   const c=catOf(t.items&&t.items.length?t.items[0].cat:t.cat);
-  const tr=t.kind==='transfer'||!!t.flIn||!!t.flOut;
+  const tr=isXferLike(t);
   const inc=!tr&&(t.kind==='income'||t.kind==='float'||t.kind==='yield'||(t.kind==='settle'&&t.dir==='in'));
   const color=inc?'var(--mint)':tr?'var(--muted)':'var(--clay)';
   const glyph=inc?'↑':tr?'⇄':'↓';
@@ -2255,7 +2430,7 @@ function txnRow(t){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block;color:#9AA4B2">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${dLabel(t.date)} · ${esc(accName(t.account))}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.certBuy?' · شراء شهادة':''}${t.certBack?' · صرف شهادة':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -2286,7 +2461,7 @@ function insOk(){
   if(isCreditAcc(insDraft.src))return !!(insDraft.name.trim()&&(Number(onlyNum(insDraft.total))||0)>0
     &&(Number(onlyNum(insDraft.months))||0)>0&&(Number(onlyNum(insDraft.monthly))||0)>0);
   return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
-function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account);}
+function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account&&certDraft.bank);}
 function vAddOffice(){
   const k=draftO.kind;
   const ok=oOk();
@@ -2316,7 +2491,7 @@ function vAddOffice(){
       `:`
       <label class="f">من أنهي حساب؟ <b>*</b></label>
       ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit&&!isSave(x));
-        return '<div class="chips">'+opts.map(x=>`<button class="chip${draftO.account===x.id?' on':''}" onclick="app.oAccount('${x.id}')">${esc(x.name)} · <span class="n">${fmt(ob[x.id]||0)}</span></button>`).join('')+'</div>';})()}
+        return pickRow('oxfrom',opts.map(x=>({id:x.id,label:esc(x.name)+` · <span class="n">${fmt(ob[x.id]||0)}</span>`})),draftO.account,'app.oAccount');})()}
       <label class="f">لأنهي حساب؟ <b>*</b></label>
       ${(function(){const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&x.id!==draftO.account);
         return pickRow('oto',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.to,'app.oTo');})()}
@@ -2478,10 +2653,10 @@ function txnEditForm(t){
       ${isOffice&&t.kind==='expense'?itemSuggestions('app.eTxnItem'):''}`}
 
     ${isOffice&&t.kind==='expense'?`<label class="f">التصنيف</label>
-      <div class="chips">${D.ocats.map(c=>`<button class="chip sm${eTxn.ocat===c.id?' on':''}" onclick="app.eTxnPick('ocat','${c.id}')">${esc(c.label)}</button>`).join('')}</div>`:''}
+      ${pickRow('etocat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),eTxn.ocat,"((v)=>app.eTxnPick('ocat',v))",1)}`:''}
 
     ${!isOffice&&t.kind==='expense'&&!hasItems?`<label class="f">التصنيف</label>
-      <div class="chips">${D.cats.map(c=>`<button class="chip sm${eTxn.cat===c.id?' on':''}" onclick="app.eTxnPick('cat','${c.id}')">${c.label}</button>`).join('')}</div>`:''}
+      ${pickRow('etcat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),eTxn.cat,"((v)=>app.eTxnPick('cat',v))",1)}`:''}
 
     ${!isOffice&&!hasItems&&t.cat==='fuel'&&t.veh?`<label class="f">كام لتر؟</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.liters)}" oninput="app.eTxnSet('liters',numFix(this,1))">
@@ -2500,7 +2675,7 @@ function txnEditForm(t){
 
 /* تلميح الدولار: بيقول المحجوز لو مكتوب، وإلا التقدير بسعر الصرف */
 function usdHint(){
-  const h=Number(onlyNum(draft.hold))||0, a=Number(onlyNum(draft.amount))||0;
+  const h=holdFromBal(draft.account,draft.balAfter,0), a=Number(onlyNum(draft.amount))||0;
   return h>0
     ?'هيتسجل بالمبلغ المحجوز <span class="n">'+fmt(h)+'</span> جنيه، وتظبطه أول ما يوصلك المبلغ النهائي.'
     :'هيتسجل مبدئيًا بحوالي <span class="n">'+fmt(a*D.rate)+'</span> جنيه بسعر <span class="n">'+D.rate+'</span>، وتظبطه أول ما يوصلك المبلغ الحقيقي.';
@@ -2522,10 +2697,10 @@ function vAdd(){
     ${(k==='transfer'&&draft.swap)?(function(){
       const sh=draft.sShared||(sharedAccs()[0]||{}).id;
       return `${pickRow('psdir',[{id:'take',label:'أخدت من العهدة'},{id:'put',label:'حطيت في العهدة'}],draft.sdir||'take','app.setPSdir',1)}
-        <label class="f">حسابي <b>*</b></label>
-        ${pickRow('psmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
         <label class="f">حساب العهدة <b>*</b></label>
         ${pickRow('psoff',officeOnly().map(x=>({id:x.id,label:esc(x.name)})),draft.sOff,'app.setPSoff')}
+        <label class="f">حسابي <b>*</b></label>
+        ${pickRow('psmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
         ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
           ${pickRow('psshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draft.sShared,'app.setPSshared')}`:''}
         <div class="hint">${swapHint(draft.sdir||'take',sh)}</div>`;})():`
@@ -2545,14 +2720,10 @@ function vAdd(){
     ${draft.account==='card'&&k!=='transfer'?`<label class="f">العملة</label>
       ${pickRow('cur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],draft.cur,'app.setCur',1)}`:''}
 
-    ${(draft.cur==='USD'&&k!=='transfer'&&isCreditAcc(draft.account))?`<label class="f">المبلغ المحجوز بالمصري (اختياري)</label>
-      <input class="f" type="text" inputmode="decimal" placeholder="سيبها فاضية لو مش عارفه"
-        value="${esc(draft.hold)}" oninput="app.dset('hold',numFix(this,1))">
-      <div class="hint">لو البنك حجز مبلغ مصري معروف، اكتبه هنا وهيتسجل بيه بدل التقدير بسعر الصرف. الدولار بيتسجل زي ما هو، وتظبط النهائي من التنبيهات.</div>`:''}
 
     ${(k==='expense'&&draft.cur!=='USD'&&isCreditAcc(draft.account))?`<label class="f">فيها مصاريف تدبير؟</label>
       ${yesNo('arr',draft.arr,'app.setArr')}
-    ${draft.arr?`<div class="hint">هتتسجل مصروف لوحدها بحوالي <span class="n" id="arrprev">${fmt(arrEst(Number(onlyNum(draft.amount))||0))}</span> جنيه (<span class="n">${ARRRATE}%</span>)، وتظبّطها من التنبيهات أول ما تعرف اللي اتخصم فعلًا.</div>`:''}`:''}
+    ${draft.arr?`<div class="hint">مش هتتخصم دلوقتي. هتظهر في التنبيهات بحوالي <span class="n" id="arrprev">${fmt(arrEst(Number(onlyNum(draft.amount))||0))}</span> جنيه (<span class="n">${ARRRATE}%</span>)، وتأكدها لما تتخصم فعلًا.</div>`:''}`:''}
 
     ${(k==='transfer'&&!draft.swap)?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to',1)}
       ${saveXferRole()?(function(){const R=saveXferRole();return `<label class="f">فيه ${R.lbl}؟</label>
@@ -2568,9 +2739,6 @@ function vAdd(){
 
     ${(k==='expense'&&!(draft.owed&&draft.owedKind==='lent')&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`<label class="f">التصنيف <b>*</b></label>
       ${pickRow('cat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),draft.cat,'app.setCat')}`:''}
-
-    <label class="f">التاريخ</label>
-    ${dateField(draft.date,'app.setDate')}
 
     ${(k==='expense'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
       ${officeOn()?`<label class="f">فيه جزء من كاش العهدة؟</label>
@@ -2594,7 +2762,7 @@ function vAdd(){
           <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.owedPerson(${i},'amount',numFix(this,1))">
           <button class="chip sm" style="padding:0" onclick="app.owedPersonDel(${i})">×</button>
         </div>`).join('')}
-        <button class="btn ghost" style="margin-top:0" onclick="app.owedPersonAdd()">زوّد شخص</button>
+        <button class="btn ghost" style="margin-top:0" onclick="app.owedPersonAdd()">ضيف شخص</button>
         ${draft.owedKind==='lent'?'<div class="hint">لو حد بعتلك أكتر من اللي عليه، الزيادة هتتسجل دخل.</div>':`<div class="hint">لو حد بعت أكتر أو أقل، الفرق بيتظبط على نصيبك أنت. نصيبك المتوقع <span class="n" id="owedhint">${fmt(Math.max(0,(Number(onlyNum(draft.amount))||0)-(draft.owedPeople||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> جنيه.</div>`}`:''}
     `:''}
 
@@ -2632,6 +2800,12 @@ function vAdd(){
 
     <label class="f">ملاحظة (اختياري)</label>
     <input class="f" value="${esc(draft.note)}" oninput="app.dset('note',this.value)">
+
+    <label class="f">التاريخ</label>
+    ${dateField(draft.date,'app.setDate')}
+
+    ${(draft.cur==='USD'&&k==='expense'&&isCreditAcc(draft.account))
+      ?holdField('balafter',draft.balAfter,"app.dset('balAfter',app.holdLive('balafter','"+draft.account+"',0))",draft.account,0):''}
 
     <div class="money" style="margin-top:24px">
       <input type="text" inputmode="decimal" placeholder="0" value="${esc(draft.amount)}" oninput="app.dset('amount',numFix(this,1))">
@@ -2680,20 +2854,17 @@ function vScan(){
         <div class="rt"><span>الإجمالي${(Number(onlyNum(scan.disc||''))||0)>0?' بعد الخصم':''}</span><span id="rtot">${fmt(Math.max(0,total-(Number(onlyNum(scan.disc||''))||0)))}</span></div>
       </div>
 
-      <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">زوّد صنف ناقص</button>
+      <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">ضيف صنف ناقص</button>
       ${book!=='office'?`
         <label class="f">قسّم المبلغ مع ناس؟</label>
-        <div class="chips">
-          <button class="chip sm${scan.split?'':' on'}" onclick="app.scanSplit(false)">لأ</button>
-          <button class="chip sm${scan.split?' on':''}" onclick="app.scanSplit(true)">أيوه</button>
-        </div>
+        ${yesNo('scansplit',scan.split,'app.scanSplit')}
         ${scan.split?`
           ${(scan.people||[]).map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
             <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.scanPerson(${i},'name',this.value)">
             <input class="f" type="text" inputmode="decimal" placeholder="نصيبه" value="${esc(p.amount)}" oninput="app.scanPerson(${i},'amount',numFix(this,1))">
             <button class="chip sm" style="padding:0" onclick="app.scanPersonDel(${i})">×</button>
           </div>`).join('')}
-          <button class="btn ghost" style="margin-top:0" onclick="app.scanPersonAdd()">زوّد شخص</button>
+          <button class="btn ghost" style="margin-top:0" onclick="app.scanPersonAdd()">ضيف شخص</button>
           <div class="hint">بيتقسم على المبلغ اللي ليك بعد ما تشيل أصناف الناس والعهدة. نصيبك هيطلع <span class="n" id="scanshare">${fmt(scanMyShare())}</span> جنيه.</div>
         `:''}`:''}
       <label class="f">خصم على الفاتورة (اختياري)</label>
@@ -2852,17 +3023,14 @@ function wClose(){
   return `<div style="margin-top:18px">
     <div class="sec-h"><h3 style="font-size:14px">الفترة</h3><span>${D.lastClose?dayLabel(from):'من البداية'} ← ${dayLabel(closeTo)}</span></div>
     <label class="f">لغاية تاريخ</label>
-    <input class="f" type="date" value="${closeTo}" onchange="app.setCloseTo(this.value)">
+    ${dateField(closeTo,'app.setCloseTo')}
 
     ${repLines(r)}
 
     <button class="btn" onclick="app.printReport()">طبع أو احفظ PDF</button>
 
     <div class="sec"><div class="sec-h"><h3>اقفل الفترة</h3></div>
-      <div class="chips">
-        <button class="chip sm${closeMode==='carry'?' on':''}" onclick="app.setCloseMode('carry')">الباقي ينتقل</button>
-        <button class="chip sm${closeMode==='settle'?' on':''}" onclick="app.setCloseMode('settle')">${r.result<0?'استلمت الفرق':'سدّدت الباقي'}</button>
-      </div>
+      ${pickRow('closemode',[{id:'carry',label:'الباقي ينتقل'},{id:'settle',label:r.result<0?'استلمت الفرق':'سدّدت الباقي'}],closeMode,'app.setCloseMode',1)}
       <div class="hint">${closeMode==='carry'
         ?'الباقي هيفضل في حسابات الدفتر ويبقى افتتاحي للفترة الجاية.'
         :(r.result<0?'هتتسجل تسوية بالفرق اللي ليك، وأرصدة العهدة هترجع صفر.'
@@ -2937,14 +3105,10 @@ function wAccounts(){
           <span>عليك <span class="n">${fmt(due)}</span></span></div>
         ${insOnAccount(a.id)>0.01?`<div class="hint" style="margin-top:10px">عندك أقساط على الكارت ده فاضل منها <span class="n">${fmt(insOnAccount(a.id))}</span>.</div>`:''}
         <label class="f">تسدد كام؟</label>
-        <div class="chips">
-          <button class="chip sm${payCard.mode==='full'?' on':''}" onclick="app.payCardMode('full')">المبلغ كله (<span class="n">${fmt(due)}</span>)</button>
-          ${(insOnAccount(a.id)>0.01&&due-insOnAccount(a.id)>0.01)?`<button class="chip sm${payCard.mode==='noins'?' on':''}" onclick="app.payCardMode('noins')">من غير الأقساط (<span class="n">${fmt(due-insOnAccount(a.id))}</span>)</button>`:''}
-          <button class="chip sm${payCard.mode==='part'?' on':''}" onclick="app.payCardMode('part')">مبلغ تاني</button>
-        </div>
+        ${pickRow('pcm'+a.id,[{id:'full',label:`المبلغ كله (<span class="n">${fmt(due)}</span>)`}].concat((insOnAccount(a.id)>0.01&&due-insOnAccount(a.id)>0.01)?[{id:'noins',label:`من غير الأقساط (<span class="n">${fmt(due-insOnAccount(a.id))}</span>)`}]:[]).concat([{id:'part',label:'مبلغ تاني'}]),payCard.mode,'app.payCardMode',1)}
         ${payCard.mode==='part'?`<input class="f" style="margin-top:10px" type="text" inputmode="decimal"
           value="${esc(payCard.amount)}" oninput="app.payCardSet('amount',numFix(this,1))">`:''}
-        <div class="hint" style="margin-top:12px">هيتخصم من ${esc(accName('bank'))}.</div>
+        ${cardPaySrcHtml(a,payCard.from,'app.setPayCardFrom')}
         <label class="f">التاريخ</label>
         ${dateField(payCard.date,'app.payCardDate')}
         <button class="btn" ${(payCard.mode==='full'?due>0:Number(onlyNum(payCard.amount))>0)?'':'disabled'}
@@ -2952,13 +3116,10 @@ function wAccounts(){
         <button class="btn ghost" onclick="app.cancelPayCard()">إلغاء</button>
       </div>`:''}`}).join('')}
     </div>
-    <div class="sec"><div class="sec-h"><h3>زوّد حساب</h3></div>
+    <div class="sec"><div class="sec-h"><h3>ضيف حساب</h3></div>
       <input class="f" id="newacc" placeholder="اسم الحساب" value="${esc(accDraft.name)}" oninput="app.accSet('name',this.value)">
       <label class="f">نوع الحساب</label>
-      <div class="chips">
-        ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']]
-          .map(k=>`<button class="chip sm${accDraft.atype===k[0]?' on':''}" onclick="app.accType('${k[0]}')">${k[1]}</button>`).join('')}
-      </div>
+      ${pickRow('acctype',[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']].map(k=>({id:k[0],label:k[1]})),accDraft.atype,'app.accType',1)}
       ${accDraft.atype==='save'?`<div class="hint">مكان بتحوّش فيه — تحوّل له ومنه بس، ومش هيظهر كحساب تصرف منه.</div>
         ${saveFieldsHtml(accDraft,'new')}`:''}
 
@@ -2968,14 +3129,12 @@ function wAccounts(){
         <input class="f" type="text" inputmode="numeric" maxlength="4" value="${esc(accDraft.last4)}" oninput="app.accSet('last4',numFix(this,0))">
         <div class="hint">بتساعد البرنامج يعرف الخصم من أنهي حساب لما تلزق رسالة البنك.</div>`:''}
       ${accDraft.credit?`
+        ${cardLinkHtml(null,accDraft.payFrom,'app.accPayFrom')}
         <label class="f">في ضمان؟</label>
-        <div class="chips">
-          <button class="chip sm${accDraft.sec?'':' on'}" onclick="app.accPickSec(false)">لأ</button>
-          <button class="chip sm${accDraft.sec?' on':''}" onclick="app.accPickSec(true)">أيوه</button>
-        </div>
+        ${yesNo('accsec',accDraft.sec,'app.accPickSec')}
         ${accDraft.sec?((D.certs||[]).length?`
           <label class="f">مضمون بأنهي شهادات؟</label>
-          <div class="chips">${D.certs.filter(c=>!certHeldBy(c.id,null)).map(c=>`<button class="chip sm${accDraft.secured.indexOf(c.id)>-1?' on':''}" onclick="app.accToggleCert('${c.id}')">${esc(c.name)} · <span class="n">${fmt(c.amount)}</span></button>`).join('')}</div>
+          <div class="chips">${D.certs.filter(c=>!c.redeemed&&!certHeldBy(c.id,null)).map(c=>`<button class="chip sm${accDraft.secured.indexOf(c.id)>-1?' on':''}" onclick="app.accToggleCert('${c.id}')">${esc(c.name)} · <span class="n">${fmt(c.amount)}</span></button>`).join('')}</div>
           ${D.certs.every(c=>certHeldBy(c.id,null))?'<div class="hint">كل شهاداتك مرهونة لحسابات تانية.</div>':''}
           ${accDraft.secured.length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(accDraft.secTotal())}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(accDraft.secTotal()*0.84))}</span>
             <button class="chip sm" style="margin-inline-start:8px" onclick="app.accUse84()">استخدمه كحد</button></div>`:''}
@@ -2989,10 +3148,7 @@ function wAccounts(){
         <label class="f">آخر يوم للسداد (من الشهر اللي بعده)</label>
         <input class="f" type="text" inputmode="numeric" value="${esc(accDraft.graceDay)}" oninput="app.accSet('graceDay',numFix(this,0))">
         <label class="f">فيه رسوم تأمين؟</label>
-        <div class="chips">
-          <button class="chip sm${accDraft.insure?' on':''}" onclick="app.accPickIns(true)">أيوه</button>
-          <button class="chip sm${accDraft.insure?'':' on'}" onclick="app.accPickIns(false)">لأ</button>
-        </div>
+        ${yesNo('accins',accDraft.insure,'app.accPickIns')}
         ${accDraft.insure?`<label class="f">نسبة التأمين ٪</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(accDraft.insureRate)}" oninput="app.accSet('insureRate',numFix(this,1))">
           <div class="hint">بتتحسب على المستحق الشهر ده بس، مش على المبلغ المقسط.</div>`:''}`:''}
@@ -3013,7 +3169,7 @@ function wVouchers(){
   const tot=live.reduce((a,v)=>a+(Number(v.amount)||0),0);
   const ok=vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&vchDraft.expiry;
   return `<div style="margin-top:18px">
-    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleVch()">${showVch?'إلغاء':'زوّد فاوتشر'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleVch()">${showVch?'إلغاء':'ضيف فاوتشر'}</button>
     ${showVch?`
       <label class="f">رقم الفاوتشر <b>*</b></label>
       <input class="f n" id="vchcode" type="text" inputmode="numeric" style="text-align:center;letter-spacing:1px"
@@ -3109,36 +3265,28 @@ function wSubs(){
   const mo=active.reduce((a,s)=>a+yearly(s)/12,0);
   const ok=subOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleSub()">${showSub?'إلغاء':'زوّد اشتراك'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleSub()">${showSub?'إلغاء':'ضيف اشتراك'}</button>
 
     ${showSub?`
       <label class="f">اسم الاشتراك</label>
       <input class="f" value="${esc(subDraft.name)}" oninput="app.subSet('name',this.value)">
 
       <label class="f">النوع</label>
-      <div class="chips">
-        <button class="chip sm${subDraft.cycle==='monthly'?' on':''}" onclick="app.subPick('cycle','monthly')">شهري</button>
-        <button class="chip sm${subDraft.cycle==='yearly'?' on':''}" onclick="app.subPick('cycle','yearly')">سنوي</button>
-        <button class="chip sm${subDraft.cycle==='trial'?' on':''}" onclick="app.subPick('cycle','trial')">تجربة مجانية</button>
-      </div>
+      ${pickRow('subcycle',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'},{id:'trial',label:'تجربة مجانية'}],subDraft.cycle,"((v)=>app.subPick('cycle',v))",1)}
 
       ${subDraft.cycle!=='trial'?`
       <label class="f">القيمة</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-      <div class="chips" style="margin-top:10px">
-        <button class="chip sm${subDraft.cur==='EGP'?' on':''}" onclick="app.subPick('cur','EGP')">بالجنيه</button>
-        <button class="chip sm${subDraft.cur==='USD'?' on':''}" onclick="app.subPick('cur','USD')">بالدولار</button>
-      </div>
-      <div class="hint">بيتخصم من كارت المشتريات وتصنيفه اشتراكات.</div>
+      ${pickRow('subcur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
+      <div class="hint">بيتخصم من ${esc(accName('card'))} وتصنيفه اشتراكات.</div>
+      ${promoFields(subDraft,'app.subSet','app.subPick','subpromo')}
 
       <label class="f">ساعة الخصم (اختياري)</label>
       <input class="f" type="time" value="${esc(subDraft.at||'')}" onchange="app.subSetAt(this.value)">
+      <div class="hint">لو حددت ساعة، الدفعة هتتسجل لوحدها بعد الساعة دي، وهيطلعلك إشعار.</div>
       <div class="hint">لو كتبتها، الاشتراك هيتسجل تلقائيًا أول ما تفتح البرنامج بعد الساعة دي. ولو سيبتها فاضية هيتسجل أول ما يعدي يوم الخصم.</div>
       <label class="f">الاشتراك ده متقسم مع ناس؟</label>
-      <div class="chips">
-        <button class="chip sm${subDraft.split?'':' on'}" onclick="app.subPick('split',false)">لأ، كله عليا</button>
-        <button class="chip sm${subDraft.split?' on':''}" onclick="app.subPick('split',true)">أيوه</button>
-      </div>
+      ${yesNo('subsplit',subDraft.split,"((v)=>app.subPick('split',v))",'لأ، كله عليا')}
       ${subDraft.split?`
         <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
         ${subDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
@@ -3146,7 +3294,7 @@ function wSubs(){
           <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.personSet(${i},'amount',numFix(this,1))">
           <button class="chip sm" style="padding:0" onclick="app.personDel(${i})">×</button>
         </div>`).join('')}
-        <button class="btn ghost" style="margin-top:0" onclick="app.personAdd()">زوّد شخص</button>
+        <button class="btn ghost" style="margin-top:0" onclick="app.personAdd()">ضيف شخص</button>
         <div class="hint">نصيبك أنت هيطلع <span class="n" id="subshare">${fmt(Math.max(0,(Number(onlyNum(subDraft.amount))||0)-subDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> ${subDraft.cur==='USD'?'دولار':'جنيه'} — المبلغ كله هيتخصم من الكارت وكل واحد هيتسجل عليه نصيبه.</div>`:''}
       `:''}
 
@@ -3155,22 +3303,13 @@ function wSubs(){
 
       ${subDraft.cycle==='trial'?`
         <label class="f">هتجدد بعد التجربة؟</label>
-        <div class="chips">
-          <button class="chip sm${subDraft.willRenew?' on':''}" onclick="app.subPick('willRenew',true)">أيوه</button>
-          <button class="chip sm${subDraft.willRenew?'':' on'}" onclick="app.subPick('willRenew',false)">لأ، هلغيها</button>
-        </div>
+        ${yesNo('subren',subDraft.willRenew,"((v)=>app.subPick('willRenew',v))",'لأ، هلغيها')}
         ${subDraft.willRenew?`
           <label class="f">قيمة الاشتراك بعد التجربة</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-          <div class="chips" style="margin-top:10px">
-            <button class="chip sm${subDraft.cur==='EGP'?' on':''}" onclick="app.subPick('cur','EGP')">بالجنيه</button>
-            <button class="chip sm${subDraft.cur==='USD'?' on':''}" onclick="app.subPick('cur','USD')">بالدولار</button>
-          </div>
+          ${pickRow('subcur2',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
           <label class="f">هيتجدد إزاي؟</label>
-          <div class="chips">
-            <button class="chip sm${subDraft.afterCycle==='monthly'?' on':''}" onclick="app.subPick('afterCycle','monthly')">شهري</button>
-            <button class="chip sm${subDraft.afterCycle==='yearly'?' on':''}" onclick="app.subPick('afterCycle','yearly')">سنوي</button>
-          </div>`:''}
+          ${pickRow('subaft',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],subDraft.afterCycle,"((v)=>app.subPick('afterCycle',v))",1)}`:''}
       `:''}
 
       <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>
@@ -3186,8 +3325,9 @@ function wSubs(){
       return `<div class="panel" id="sub-${s.id}" style="padding:15px 16px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
           <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(s.name)}</span>
-          ${trial?'<span class="tag">تجربة مجانية</span>':`<span style="font-size:15px;font-weight:600;white-space:nowrap">${money(s.amount,s.cur)}</span>`}
+          ${trial?'<span class="tag">تجربة مجانية</span>':`<span style="font-size:15px;font-weight:600;white-space:nowrap">${money(subPrice(s),s.cur)}</span>`}
         </div>
+        ${(!trial&&s.promo&&Number(s.promo.left)>0)?`<div class="hint" style="margin-top:6px">سعر مخفض — العادي <span class="n">${fmt(s.amount)}</span> من دفعة ${dayLabel(promoEndDate(s.next,s.cycle,s.promo.left))}</div>`:''}
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted);margin-top:10px">
           <span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف يوم'):cycleLabel(s)+' · الجاي')} ${dayLabel(s.next)}${(!trial&&s.at)?' الساعة '+hhmm(s.at):''}</span>
           <span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>
@@ -3196,7 +3336,7 @@ function wSubs(){
         ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
         ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
           subLastPay(s).fee?` · <span class="n">${fmt(subLastPay(s).paid||s.amount)}</span> + <span class="n">${fmt(subLastPay(s).fee)}</span> تدبير${subLastPay(s).feePending?' (تقديري — لسه ماتخصمش)':''}${subLastPay(s).feePending?'':` = <span class="n">${fmt((subLastPay(s).paid||Number(s.amount))+Number(subLastPay(s).fee))}</span>`}`:''}</div>`:''}
-        ${!trial&&subLastPay(s)&&subLastPay(s).feePending?`<div class="hint">مصاريف التدبير تقديرية ٣٪ لحد ما تأكدها من «محتاج انتباهك».</div>`:''}
+        ${!trial&&subLastPay(s)&&subLastPay(s).feePending?`<div class="hint">مصاريف التدبير تقديرية <span class="n">${ARRRATE}%</span> لحد ما تأكدها من «محتاج انتباهك».</div>`:''}
         ${feeFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">مبلغ تدبير العملة اللي اتخصم لوحده</label>
           <input class="f" id="feein" type="text" inputmode="decimal" oninput="numFix(this,1)">
@@ -3223,15 +3363,17 @@ function wSubs(){
         </div>
         ${repFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <div class="hint" style="margin-top:0">لو اتسحب منك مرتين في نفس الدورة، سجّل السحبة الزيادة هنا. تاريخ التجديد مش هيتغير.</div>
-          <label class="f">المبلغ</label>
-          <input class="f" id="repamt" type="text" inputmode="decimal" value="${s.amount}" oninput="numFix(this,1)">
+          ${(s.cur==='USD'&&isCreditAcc(s.account||'card'))?holdField('repbal',repBal,"app.setRepBal(app.holdLive('repbal','"+(s.account||'card')+"',0))",s.account||'card',0):''}
+          <label class="f">المبلغ${s.cur==='USD'?' بالدولار':''}</label>
+          <input class="f" id="repamt" type="text" inputmode="decimal" value="${subPrice(s)}" oninput="numFix(this,1)">
           <label class="f">التاريخ</label>
           ${dateField(repDate,'app.setRepDate')}
           <button class="btn" onclick="app.addRepeat('${s.id}')">سجّل السحبة</button>
           <button class="btn ghost" onclick="app.cancelRepeat()">إلغاء</button>
         </div>`:''}
         ${upFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-          <label class="f">المبلغ الجديد</label>
+          ${(s.cur==='USD'&&isCreditAcc(s.account||'card'))?holdField('upbal',upBal,"app.setUpBal(app.holdLive('upbal','"+(s.account||'card')+"',0))",s.account||'card',0):''}
+          <label class="f">المبلغ الجديد${s.cur==='USD'?' بالدولار':''}</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(upDraft.amount)}" oninput="app.upSet('amount',numFix(this,1))">
           <label class="f">رجعلك كام من القديم؟</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(upDraft.refund)}" oninput="app.upSet('refund',numFix(this,1))">
@@ -3249,28 +3391,21 @@ function wSubs(){
 
           <label class="f">القيمة</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(sDraft.amount)}" oninput="app.sdSet('amount',numFix(this,1))">
-          <div class="chips" style="margin-top:10px">
-            <button class="chip sm${sDraft.cur==='EGP'?' on':''}" onclick="app.sdPick('cur','EGP')">بالجنيه</button>
-            <button class="chip sm${sDraft.cur==='USD'?' on':''}" onclick="app.sdPick('cur','USD')">بالدولار</button>
-          </div>
+          ${pickRow('sdcur'+s.id,[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],sDraft.cur,"((v)=>app.sdPick('cur',v))",1)}
 
           <label class="f">الدورة</label>
-          <div class="chips">
-            <button class="chip sm${sDraft.cycle==='monthly'?' on':''}" onclick="app.sdPick('cycle','monthly')">شهري</button>
-            <button class="chip sm${sDraft.cycle==='yearly'?' on':''}" onclick="app.sdPick('cycle','yearly')">سنوي</button>
-          </div>
+          ${pickRow('sdcycle'+s.id,[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],sDraft.cycle,"((v)=>app.sdPick('cycle',v))",1)}
 
           <label class="f">الخصم الجاي</label>
           <input class="f" type="date" value="${sDraft.next}" onchange="app.sdPick('next',this.value)">
 
           <label class="f">ساعة الخصم (اختياري)</label>
           <input class="f" type="time" value="${esc(sDraft.at||'')}" onchange="app.sdSetAt(this.value)">
+          <div class="hint">لو حددت ساعة، الدفعة هتتسجل لوحدها بعد الساعة دي، وهيطلعلك إشعار.</div>
+          ${promoFields(sDraft,'app.sdSet','app.sdPick','sdpromo')}
 
           <label class="f">متقسم مع ناس؟</label>
-          <div class="chips">
-            <button class="chip sm${sDraft.split?'':' on'}" onclick="app.sdPick('split',false)">لأ، كله عليا</button>
-            <button class="chip sm${sDraft.split?' on':''}" onclick="app.sdPick('split',true)">أيوه</button>
-          </div>
+          ${yesNo('sdsplit'+s.id,sDraft.split,"((v)=>app.sdPick('split',v))",'لأ، كله عليا')}
           ${sDraft.split?`
             <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
             ${sDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
@@ -3278,7 +3413,7 @@ function wSubs(){
               <input class="f" type="text" inputmode="decimal" placeholder="المبلغ" value="${esc(p.amount)}" oninput="app.sdPerson(${i},'amount',numFix(this,1))">
               <button class="chip sm" style="padding:0" onclick="app.sdPersonDel(${i})">×</button>
             </div>`).join('')}
-            <button class="btn ghost" style="margin-top:0" onclick="app.sdPersonAdd()">زوّد شخص</button>
+            <button class="btn ghost" style="margin-top:0" onclick="app.sdPersonAdd()">ضيف شخص</button>
             <div class="hint">نصيبك هيطلع <span class="n" id="sdshare">${fmt(Math.max(0,(Number(onlyNum(sDraft.amount))||0)-sDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> ${sDraft.cur==='USD'?'دولار':'جنيه'}.</div>`:''}
 
           <button class="btn" onclick="app.saveSubEdit('${s.id}')">احفظ التعديل</button>
@@ -3287,7 +3422,8 @@ function wSubs(){
         ${paySubFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f">دفعته إمتى؟</label>
           ${dateField(paySubDate,'app.setPaySubDate')}
-          <button class="btn" onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(s.amount,s.cur)}</button>
+          ${(s.cur==='USD'&&isCreditAcc(s.account||'card'))?holdField('psbal',paySubBal,"app.setPaySubBal(app.holdLive('psbal','"+(s.account||'card')+"',0))",s.account||'card',0):''}
+          <button class="btn" onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(subPrice(s),s.cur)}</button>
           <button class="btn ghost" onclick="app.cancelPaySub()">إلغاء</button>
         </div>`:''}
         ${openDues(s).map(d=>`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
@@ -3299,22 +3435,13 @@ function wSubs(){
         </div>`).join('')}
         ${convFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f" style="margin-top:14px">هتجدد بعد التجربة؟</label>
-          <div class="chips">
-            <button class="chip sm${subDraft.willRenew?' on':''}" onclick="app.subPick('willRenew',true)">أيوه</button>
-            <button class="chip sm${subDraft.willRenew?'':' on'}" onclick="app.subPick('willRenew',false)">لأ، هلغيها</button>
-          </div>
+          ${yesNo('subren2',subDraft.willRenew,"((v)=>app.subPick('willRenew',v))",'لأ، هلغيها')}
           ${subDraft.willRenew?`
             <label class="f">قيمة الاشتراك</label>
             <input class="f" id="convamt" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-            <div class="chips" style="margin-top:10px">
-              <button class="chip sm${subDraft.cur==='EGP'?' on':''}" onclick="app.subPick('cur','EGP')">بالجنيه</button>
-              <button class="chip sm${subDraft.cur==='USD'?' on':''}" onclick="app.subPick('cur','USD')">بالدولار</button>
-            </div>
+            ${pickRow('subcur3',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
             <label class="f">هيتجدد إزاي؟</label>
-            <div class="chips">
-              <button class="chip sm${subDraft.afterCycle==='monthly'?' on':''}" onclick="app.subPick('afterCycle','monthly')">شهري</button>
-              <button class="chip sm${subDraft.afterCycle==='yearly'?' on':''}" onclick="app.subPick('afterCycle','yearly')">سنوي</button>
-            </div>`:''}
+            ${pickRow('subaft2',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],subDraft.afterCycle,"((v)=>app.subPick('afterCycle',v))",1)}`:''}
           <label class="f">التجربة بتنتهي إمتى؟</label>
           <input class="f" type="date" value="${subDraft.next||s.next}" onchange="app.subPick('next',this.value)">
           <button class="btn" onclick="app.savePlan('${s.id}')">احفظ الخطة</button>
@@ -3330,15 +3457,14 @@ function wIns(){
   const left=list.reduce((a,i)=>a+insLeft(i),0);
   const ok=insOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleIns()">${showIns?'إلغاء':'زوّد قسط'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleIns()">${showIns?'إلغاء':'ضيف قسط'}</button>
     ${showIns?`
       <label class="f">القسط ده إيه؟</label>
       <input class="f" value="${esc(insDraft.name)}" oninput="app.insSet('name',this.value)">
       <label class="f">مقسط على إيه؟ <b>*</b></label>
-      <div class="chips">
-        ${accountsFor('me').filter(a=>a.credit).map(a=>`<button class="chip sm${insDraft.src===a.id?' on':''}" onclick="app.insSrc('${a.id}')">${esc(a.name)}</button>`).join('')}
-        <button class="chip sm${insDraft.src==='office'?' on':''}" onclick="app.insSrc('office')">سلفة</button>
-      </div>
+      ${pickRow('inssrc',accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})).concat([{id:'office',label:'سلفة'}]),insDraft.src,'app.insSrc',1)}
+      ${insDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
+      <input class="f" value="${esc(insDraft.from||'')}" oninput="app.insSet('from',this.value)">`:''}
       ${isCreditAcc(insDraft.src)?`
       <label class="f">تاريخ الشراء</label>
       ${dateField(insDraft.buyDate||today(),'app.insBuyDate')}
@@ -3416,10 +3542,9 @@ function wIns(){
           <label class="f">يوم الاستحقاق</label>
           <input class="f" type="text" inputmode="numeric" value="${esc(iDraft.day)}" oninput="app.iDraftSet('day',numFix(this,0))">
           <label class="f">مقسط على إيه؟</label>
-          <div class="chips">
-            ${accountsFor('me').filter(a=>a.credit).map(a=>`<button class="chip sm${iDraft.src===a.id?' on':''}" onclick="app.iDraftPick('src','${a.id}')">${esc(a.name)}</button>`).join('')}
-            ${officeOn()?`<button class="chip sm${iDraft.src==='office'?' on':''}" onclick="app.iDraftPick('src','office')">سلفة</button>`:''}
-          </div>
+          ${pickRow('isrc'+i.id,accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})).concat([{id:'office',label:'سلفة'}]),iDraft.src,"((v)=>app.iDraftPick('src',v))",1)}
+          ${iDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
+          <input class="f" value="${esc(iDraft.from||'')}" oninput="app.iDraftSet('from',this.value)">`:''}
           <label class="f">بيتدفع من أنهي حساب؟</label>
           ${payChips(iDraft.account,'app.iDraftAcct','','me','',0,{src:1})}
           <div class="hint">الدفعات اللي اتسجلت قبل كده هتفضل زي ما هي.</div>
@@ -3488,18 +3613,16 @@ function wVeh(){
         ${vehRename===cur.id?`<label class="f">الاسم الجديد</label>
           <input class="f" id="vehnewname" value="${esc(cur.name)}">
           <button class="btn" onclick="app.saveVehName('${cur.id}')">احفظ</button>`:''}
-      </div>`;})():'<div class="empty" style="padding:22px 10px">مسجلتش مركبات لسه.<br><span style="font-size:12px">زوّد سكوتر أو عربية عشان تتابع بنزينها وصيانتها وأوراقها.</span></div>'}
+      </div>`;})():'<div class="empty" style="padding:22px 10px">مسجلتش مركبات لسه.<br><span style="font-size:12px">ضيف سكوتر أو عربية عشان تتابع بنزينها وصيانتها وأوراقها.</span></div>'}
 
     ${showVeh?`<div class="panel" style="padding:15px 16px;margin-top:12px">
       <label class="f" style="margin-top:0">النوع</label>
-      <div class="chips">
-        ${['سكوتر','موتوسيكل','عربية'].map(k=>`<button class="chip sm${vehDraft.kind===k?' on':''}" onclick="app.vehSet('kind','${k}')">${k}</button>`).join('')}
-      </div>
+      ${pickRow('vehkind',['سكوتر','موتوسيكل','عربية'].map(k=>({id:k,label:k})),vehDraft.kind,"((v)=>app.vehSet('kind',v))",1)}
       <label class="f">الاسم</label>
       <input class="f" id="vehname" placeholder="${esc(vehDraft.kind)}" value="${esc(vehDraft.name)}" oninput="app.vehSetName(this.value)">
       <button class="btn" onclick="app.addVeh()">احفظ</button>
       <button class="btn ghost" onclick="app.toggleVeh()">إلغاء</button>
-    </div>`:`<button class="btn ghost" onclick="app.toggleVeh()">زوّد مركبة</button>`}
+    </div>`:`<button class="btn ghost" onclick="app.toggleVeh()">ضيف مركبة</button>`}
   </div>`;
 }
 function wCerts(){
@@ -3510,19 +3633,23 @@ function wCerts(){
       if(da!==db)return da<db?1:-1;
       return b.i-a.i;
     }).map(x=>x.c);
-  const cap=list.reduce((a,c)=>a+(Number(c.amount)||0),0);
-  const mo=list.reduce((a,c)=>a+(Number(c.monthly)||0),0);
+  const act=list.filter(c=>!c.redeemed);
+  const cap=act.reduce((a,c)=>a+(Number(c.amount)||0),0);
+  const mo=act.reduce((a,c)=>a+(Number(c.monthly)||0),0);
   const ok=certOk();
   return `<div style="margin-top:18px">
-    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleCert()">${showCert?'إلغاء':'زوّد شهادة أو وديعة'}</button>
+    <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleCert()">${showCert?'إلغاء':'ضيف شهادة أو وديعة'}</button>
     ${showCert?`
       <label class="f">النوع</label>
-      <div class="chips">
-        <button class="chip sm${certDraft.type!=='deposit'?' on':''}" onclick="app.certSet('type','cert')">شهادة</button>
-        <button class="chip sm${certDraft.type==='deposit'?' on':''}" onclick="app.certSet('type','deposit')">وديعة</button>
-      </div>
+      ${pickRow('certtype',[{id:'cert',label:'شهادة'},{id:'deposit',label:'وديعة'}],certDraft.type==='deposit'?'deposit':'cert',"((v)=>app.certSet('type',v))",1)}
+      <label class="f">${certDraft.type==='deposit'?'الوديعة':'الشهادة'} تابعة لأنهي حساب؟ <b>*</b></label>
+      ${pickRow('certbank',bankAccs().map(a=>({id:a.id,label:esc(a.name)})),certDraft.bank,'app.certBank')}
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.amount)}" oninput="app.certSet('amount',numFix(this,1))">
+      <label class="f">اتخصم من الحساب ده؟</label>
+      ${pickRow('certded',[{id:false,label:'لأ، رصيدي متظبط من غيرها'},{id:true,label:'أيوه'}],certDraft.ded!==false,'app.certDed',1,1)}
+      ${certDraft.ded!==false?`<label class="f">مصاريف الشراء (اختياري)</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.fee||'')}" oninput="app.certSet('fee',numFix(this,1))">`:''}
       <label class="f">العائد الشهري</label>
       <input class="f" type="text" inputmode="decimal" placeholder="اللي بينزل كل شهر" value="${esc(certDraft.monthly)}" oninput="app.certSet('monthly',numFix(this,1))">
       <label class="f">يوم نزول العائد كل شهر</label>
@@ -3531,11 +3658,12 @@ function wCerts(){
       <div class="hint">لو البنك بينزّله في يوم ثابت غير يوم الشراء، اكتبه هنا.</div>
 
       <label class="f">${certDraft.type==='deposit'?'تاريخ الإيداع':'تاريخ الشراء'}</label>
-      <input class="f" type="date" value="${certDraft.start}" onchange="app.certSet('start',this.value)">
+      ${dateField(certDraft.start,'app.certSet',"'start'")}
       <label class="f">تاريخ التجديد (اختياري)</label>
       <input class="f" type="date" value="${certDraft.end||''}" onchange="app.certSet('end',this.value)">
       <label class="f">العائد بيدخل على إيه؟ <b>*</b></label>
-      ${payChips(certDraft.account,'app.certAccount')}
+      ${pickRow('certret',certRetAccs().map(a=>({id:a.id,label:esc(a.name)})),certDraft.account,'app.certAccount')}
+      ${isSave(D.accounts.find(a=>a.id===certDraft.account))?'<div class="hint">العائد اللي بينزل في وعاء بيتسجل «عايد»، مش دخل.</div>':''}
       <div class="hint">أول عائد بعد شهر من التاريخ ده، وبيتكرر كل شهر في نفس اليوم.</div>
       <button class="btn" id="certsave" ${ok?'':'disabled'} onclick="app.addCert()">احفظ</button>
     `:''}
@@ -3547,10 +3675,11 @@ function wCerts(){
       <div class="arow">
         <span class="rail" style="background:#46C2A8"></span>
         <span class="nm">${esc(c.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
-          <span class="n">${fmt(c.amount)}</span> · عائد جاي ${dayLabel(certNext(c))}
-          ${c.end?`<span style="display:block">تجديد ${dayLabel(c.end)}</span>`:''}</span></span>
-        <span class="vl" style="color:var(--mint)">${fmt(c.monthly)}</span>
-        <button class="chip sm" onclick="app.startCertEdit('${c.id}')">${certEdit===c.id?'إخفاء':'عدّل'}</button>
+          <span class="n">${fmt(c.amount)}</span>${c.bank?' · '+esc(accName(c.bank)):''}${c.redeemed?' · اتصرفت '+dLabel(c.redeemedOn):' · عائد جاي '+dayLabel(certNext(c))}
+          ${(!c.redeemed&&c.end)?`<span style="display:block">تجديد ${dayLabel(c.end)}</span>`:''}
+          ${(!c.redeemed&&certSecuredBy(c))?`<span style="display:block">ضامنة ${esc(certSecuredBy(c).name)}</span>`:''}</span></span>
+        <span class="vl" style="color:var(--mint)">${c.redeemed?'—':fmt(c.monthly)}</span>
+        ${c.redeemed?'':`<button class="chip sm" onclick="app.startCertEdit('${c.id}')">${certEdit===c.id?'إخفاء':'عدّل'}</button>`}
         ${delBtn('cert'+c.id,`app.delCert('${c.id}')`)}
       </div>
       ${certEdit===c.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
@@ -3563,7 +3692,16 @@ function wCerts(){
           value="${c.day||''}" oninput="numFix(this,0)">
         <label class="f">تاريخ التجديد</label>
         <input class="f" id="cend" type="date" value="${c.end||''}">
+        <label class="f">تابعة لـ</label>
+        ${pickRow('ceb'+c.id,bankAccs().map(a=>({id:a.id,label:esc(a.name)})),c.bank,"app.certEditBank_"+c.id)}
+        <label class="f">العائد بيدخل على</label>
+        ${pickRow('cer'+c.id,certRetAccs().map(a=>({id:a.id,label:esc(a.name)})),c.account,"app.certEditRet_"+c.id)}
         <button class="btn" onclick="app.saveCertEdit('${c.id}')">احفظ</button>
+        ${certSecuredBy(c)
+          ?`<div class="hint">ضامنة ${esc(certSecuredBy(c).name)} — عشان تكسرها لازم توقف الكارت الأول.</div>`
+          :`<label class="f">كسرتها؟</label>
+            <input class="f" id="cpen" type="text" inputmode="decimal" placeholder="غرامة الكسر (اختياري)" oninput="numFix(this,1)">
+            <button class="btn ghost" onclick="app.breakCert('${c.id}')">كسرتها — المبلغ رجع ${esc(accName(c.bank||c.account))}</button>`}
         <button class="btn ghost" onclick="app.cancelCertEdit()">إلغاء</button>
       </div>`:''}`).join('')}</div>`:'<div class="empty" style="padding:18px 10px">مفيش حاجة مسجلة.</div>'}
 
@@ -3589,7 +3727,7 @@ function vLog(){
       </select>`:''}
       <select class="f" style="padding:10px;font-size:13px" onchange="app.setF('acct',this.value)">
         <option value="">كل الحسابات</option>
-        ${accountsFor(book).map(a=>`<option value="${a.id}"${fAcct===a.id?' selected':''}>${esc(a.name)}</option>`).join('')}
+        ${D.accounts.filter(a=>a.scope==='both'||a.scope===book).map(a=>`<option value="${a.id}"${fAcct===a.id?' selected':''}>${esc(a.name)}${a.closed?' (موقوف)':''}</option>`).join('')}
       </select>
     </div>`;})()}
     <div class="grid4" style="margin-top:10px">
@@ -3609,13 +3747,13 @@ function vLog(){
 const normTxt=x=>String(x||'').toLowerCase()
   .replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
   .replace(/[\u064B-\u0652\u0640]/g,'');
-const txnIn=t=>!t.flIn&&!t.flOut&&(t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in'));
+const txnIn=t=>!isXferLike(t)&&(t.kind==='income'||t.kind==='float'||(t.kind==='settle'&&t.dir==='in'));
 function logList(){
   const list=D.txns.filter(t=>(t.book||'me')===book)
    .filter(t=>{
      if(!fDir)return true;
      if(t.kind==='yield')return false;
-     const tr=t.kind==='transfer'||!!t.flIn||!!t.flOut;
+     const tr=isXferLike(t);
      if(fDir==='tr')return tr;
      if(tr)return false;
      return fDir==='in'?txnIn(t):!txnIn(t);
@@ -3703,7 +3841,7 @@ function vSettings(){
     ${setSec('cats','التصنيفات',D.cats.length,()=>`
     <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
       ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
-      ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">تأكيد</button>`
+      ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
       :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`).join('')}</div>
     <div class="frow">
       <input class="f" id="newcat" placeholder="اسم تصنيف جديد">
@@ -3720,22 +3858,24 @@ function vSettings(){
         </div>
         <div>
           <label class="f">نوع الحساب</label>
-          <div class="chips">
-            ${[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']]
-              .map(k=>`<button class="chip sm${(c.atype||a.atype||'cash')===k[0]?' on':''}" onclick="app.accCfgType('${a.id}','${k[0]}')">${k[1]}</button>`).join('')}
-          </div>
+          ${pickRow('cfgtype'+a.id,[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['credit','كارت ائتماني'],['save','ادخار']].map(k=>({id:k[0],label:k[1]})),c.atype||a.atype||'cash',"((v)=>app.accCfgType('"+a.id+"',v))",1)}
           ${(c.atype||a.atype)==='bank'?`<label class="f">رقم الحساب (اختياري)</label>
             <input class="f" type="text" inputmode="numeric" value="${esc(c.accNo!==undefined?c.accNo:(a.accNo||''))}" oninput="app.accCfgSet('${a.id}','accNo',numFix(this,0))">`:''}
           ${((c.atype||a.atype)==='bank'||(c.atype||a.atype)==='credit')?`<label class="f">آخر ٤ أرقام من الكارت (اختياري)</label>
             <input class="f" type="text" inputmode="numeric" maxlength="4" value="${esc(c.last4!==undefined?c.last4:(a.last4||''))}" oninput="app.accCfgSet('${a.id}','last4',numFix(this,0))">`:''}
         </div>
         ${officeOn()?`<label class="f" style="margin:14px 0 8px">بيظهر في</label>
-        <div class="chips">
-          <button class="chip sm${a.scope==='me'?' on':''}" onclick="app.setScope('${a.id}','me')">فلوسي</button>
-          <button class="chip sm${a.scope==='office'?' on':''}" onclick="app.setScope('${a.id}','office')">${esc(bookName())}</button>
-          <button class="chip sm${a.scope==='both'?' on':''}" onclick="app.setScope('${a.id}','both')">الاتنين</button>
-        </div>`:''}
+        ${pickRow('scope'+a.id,[{id:'me',label:'فلوسي'},{id:'office',label:esc(bookName())},{id:'both',label:'الاتنين'}],a.scope,"((v)=>app.setScope('"+a.id+"',v))",1)}`:''}
 
+        ${a.credit?`${a.closed
+          ?`<div class="note warn" style="margin-top:12px">الكارت ده موقوف من ${dayLabel(a.closedOn||today())}. حركاته موجودة في السجل.</div>
+            <button class="btn ghost" onclick="app.reopenCard('${a.id}')">رجّعه</button>`
+          :`${cardLinkHtml(a,a.payFrom,"app.setPayFrom_"+a.id)}
+            ${cardDebt(a)>0.01
+              ?`<div class="hint">عشان توقفه لازم تسدد اللي عليه الأول (<span class="n">${fmt(cardDebt(a))}</span>).</div>`
+              :(confirmKey==='stop'+a.id
+                ?`<button class="btn danger" onclick="app.stopCard('${a.id}')">أكد وقف الكارت</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
+                :`<button class="btn ghost" onclick="app.askDel('stop${a.id}')">وقفت الكارت</button>`)}`}`:''}
         ${c.credit?`<label class="f">الحد الائتماني</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(c.limit)}" oninput="app.accCfgSet('${a.id}','limit',numFix(this,1))">
           <div class="hint">مش هيتحسب في «إجمالي اللي معاك».</div>
@@ -3744,14 +3884,11 @@ function vSettings(){
           <label class="f">آخر يوم للسداد</label>
           <input class="f" type="text" inputmode="numeric" value="${esc(c.graceDay!==undefined?c.graceDay:String(a.graceDay||15))}" oninput="app.accCfgSet('${a.id}','graceDay',numFix(this,0))">
           <label class="f">رسوم تأمين</label>
-          <div class="chips">
-            <button class="chip sm${a.insure!==false?' on':''}" onclick="app.setInsure('${a.id}',true)">أيوه</button>
-            <button class="chip sm${a.insure===false?' on':''}" onclick="app.setInsure('${a.id}',false)">لأ</button>
-          </div>
+          ${yesNo('insure'+a.id,a.insure!==false,"((v)=>app.setInsure('"+a.id+"',v))")}
           ${a.insure!==false?`<label class="f">نسبة التأمين ٪</label>
             <input class="f" type="text" inputmode="decimal" value="${esc(c.insureRate!==undefined?c.insureRate:String(a.insureRate!==undefined?a.insureRate:0.9))}" oninput="app.accCfgSet('${a.id}','insureRate',numFix(this,1))">`:''}
           ${(D.certs||[]).length?`<label class="f" style="margin:14px 0 8px">مضمون بأنهي شهادات؟</label>
-            <div class="chips">${D.certs.filter(ct=>!certHeldBy(ct.id,a.id)).map(ct=>`<button class="chip sm${(a.secured||[]).indexOf(ct.id)>-1?' on':''}" onclick="app.toggleSecured('${a.id}','${ct.id}')">${esc(ct.name)} · <span class="n">${fmt(ct.amount)}</span></button>`).join('')}</div>
+            <div class="chips">${D.certs.filter(ct=>!ct.redeemed&&!certHeldBy(ct.id,a.id)).map(ct=>`<button class="chip sm${(a.secured||[]).indexOf(ct.id)>-1?' on':''}" onclick="app.toggleSecured('${a.id}','${ct.id}')">${esc(ct.name)} · <span class="n">${fmt(ct.amount)}</span></button>`).join('')}</div>
             ${(a.secured||[]).length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(securedTotal(a))}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span></div>`:''}`:''}`:''}
         ${D.accounts.length>1?`<div class="chips" style="margin-top:14px">
           ${delBtn('acc'+a.id,`app.delAccount('${a.id}')`,'امسح الحساب وحركاته')}
@@ -3761,10 +3898,7 @@ function vSettings(){
     `)}
     ${setSec('daftar','دفتر '+bookName(),'',()=>`
       <p class="hint" style="margin-top:-4px">لو شغلته هيظهر سويتش فوق تبدّل بيه بين فلوسك والدفتر التاني، ومعاه التقفيل والعهد والسلف.</p>
-      <div class="chips" style="margin-top:12px">
-        <button class="chip sm${officeOn()?' on':''}" onclick="app.setOfficeOn(true)">شغّال</button>
-        <button class="chip sm${officeOn()?'':' on'}" onclick="app.setOfficeOn(false)">مقفول</button>
-      </div>
+      ${yesNo('officeon',officeOn(),'app.setOfficeOn','مقفول','شغّال')}
       ${officeOn()?`
         <label class="f">اسم الدفتر</label>
         <div class="frow" style="margin-top:0">
@@ -3795,7 +3929,7 @@ function vSettings(){
     ${officeOn()?setSec('ocats','تصنيفات '+bookName(),D.ocats.length,()=>`
       <p class="hint" style="margin-top:-4px">اللي بتختار منها وأنت بتسجل مصروف عهدة.</p>
       <div style="margin-top:10px">${D.ocats.map(c=>`<span class="catchip"><b style="background:#8C7BF0"></b>${esc(c.label)}
-        ${confirmKey==='ocat'+c.id?`<button onclick="app.ocatDel('${c.id}')" style="color:var(--mint)">تأكيد</button>`
+        ${confirmKey==='ocat'+c.id?`<button onclick="app.ocatDel('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
           :`<button onclick="app.askDel('ocat${c.id}')">×</button>`}</span>`).join('')}</div>
       <div class="frow">
         <input class="f" id="newocat" placeholder="تصنيف جديد">
@@ -3820,7 +3954,7 @@ function vSettings(){
             <input class="f" style="${own?'border-color:#5E332B':''}" value="${esc(it)}" oninput="app.grpItem('${g.id}',${ix},this.value)">
             <button class="chip sm" style="padding:0" onclick="app.grpDelItem('${g.id}',${ix})">×</button>
           </div>${own?`<div class="hint" style="color:#FF9C90;margin-top:-4px">«${esc(it)}» موجود في مجموعة «${esc(own.name)}» — شيله من هنا أو من هناك.</div>`:''}`;}).join('')}
-          <button class="btn ghost" style="margin-top:0" onclick="app.grpAddItem('${g.id}')">زوّد بند فاضي</button>
+          <button class="btn ghost" style="margin-top:0" onclick="app.grpAddItem('${g.id}')">ضيف بند فاضي</button>
           ${(function(){const n=itemNames().filter(x=>!groupNameFor(x));
             return n.length?`<div class="hint">أو اختار من بنودك:</div><div class="chips">${n.map(x=>`<button class="chip sm" onclick="app.grpAddNamed('${g.id}','${esc(x).replace(/'/g,"&#39;")}')">${esc(x)}</button>`).join('')}</div>`:'';})()}
           <button class="btn" id="grpsave${g.id}" ${(g.items||[]).some(it=>groupOwning(it,g.id))?'disabled':''} onclick="app.saveGroup('${g.id}')">احفظ</button>
@@ -3840,10 +3974,7 @@ function vSettings(){
     `):''}
     ${setSec('month','بداية الشهر','',()=>`
       <p class="hint" style="margin-top:-4px">بيأثر على تقارير الشهر بس. الأقساط بتفضل مربوطة بالمرتب في الحالتين.</p>
-      <div class="chips" style="margin-top:12px">
-        <button class="chip sm${D.monthMode==='cal'?'':' on'}" onclick="app.setMonthMode('salary')">من المرتب</button>
-        <button class="chip sm${D.monthMode==='cal'?' on':''}" onclick="app.setMonthMode('cal')">من أول الشهر</button>
-      </div>
+      ${pickRow('monthmode',[{id:'salary',label:'من المرتب'},{id:'cal',label:'من أول الشهر'}],D.monthMode==='cal'?'cal':'salary','app.setMonthMode',1)}
     `)}
     ${setSec('rate','سعر الدولار التقديري','',()=>`
       <p class="hint" style="margin-top:-4px">بيستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
@@ -3951,7 +4082,7 @@ function refundVoucher(t){
   if(v){v.used=false;v.usedOn='';}
 }
 
-const app={
+const app=new Proxy({
   setBook(bk){book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();window.scrollTo(0,0);},
   goClose(){tab='wallet';wtab='close';closeTo=today();render();window.scrollTo(0,0);},
   oSet(k,v){draftO[k]=v;setDisabled('osave',oOk());
@@ -4140,7 +4271,14 @@ const app={
   },
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
-  closeAutoMsg(){autoMsg='';render();},
+  clearAutoNote(){D.autoNote=[];save();render();},
+  undoAuto(nid){
+    const n=(D.autoNote||[]).find(x=>x.id===nid);if(!n)return;
+    D.autoNote=D.autoNote.filter(x=>x.id!==nid);
+    const s=(D.subs||[]).find(x=>x.id===n.sid);
+    const last=s&&s.payments&&s.payments[s.payments.length-1];
+    if(last&&last.t===n.t)app.undoSubPay(n.sid);else{save();render();}
+  },
   go(t){renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};openRow={};if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
   setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
   setMonth(m){month=m;render();},
@@ -4277,6 +4415,7 @@ const app={
     D.owed=(D.owed||[]).filter(o=>o.srcTxn!==id||o.got);
     const ids=(t&&t.link)?D.txns.filter(x=>x.link===t.link).map(x=>x.id):[id];
     D.floatLoans=(D.floatLoans||[]).filter(l=>ids.indexOf(l.srcTxn)<0);
+    D.arrPend=(D.arrPend||[]).filter(e=>ids.indexOf(e.src)<0);
     D.ofees=(D.ofees||[]).filter(fx=>fx.srcTxn!==id);
     (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>d.srcTxn!==id||d.got);});
     D.txns=(t&&t.link)?D.txns.filter(x=>x.link!==t.link):D.txns.filter(x=>x.id!==id);
@@ -4303,6 +4442,11 @@ const app={
     if(box)box.innerHTML=(draft.kind==='expense'&&draft.cur==='EGP')?vchPicker(draft.voucherId,total,'app.setVch'):'';
   },
   setArr(v){draft.arr=!!v;render();},
+  holdLive(id,acc,back){
+    const el=document.getElementById(id);const v=el?numFix(el,1):'';
+    const h=document.getElementById(id+'h');if(h)h.innerHTML=holdHint(acc,v,back);
+    return v;
+  },
   setPSwap(v){draft.swap=!!v;render();},
   setPSdir(v){draft.sdir=v;render();},
   setPSmy(v){draft.sMy=v;render();},
@@ -4364,10 +4508,12 @@ const app={
     const key=String(gid).replace(/^g_/,'');
     const who=key==='__none__'?'':key;
     let lastCat='lentcat';
-    list.forEach(x=>{
+    /* الأقدم الأول؛ واللي اتغطى جزء منه يفضل مفتوح بالباقي */
+    list.slice().sort((a,b)=>String(a.ref.date||'')<String(b.ref.date||'')?-1:String(a.ref.date||'')>String(b.ref.date||'')?1:0)
+    .forEach(x=>{
       if(got<=0.001)return;
-      const o=x.ref;
-      const take=Math.min(got,Number(o.amount)||0);
+      const o=x.ref, rem=Number(o.amount)||0;
+      const take=Math.round(Math.min(got,rem)*100)/100;
       if(take<=0.001)return;
       const cat=x.src==='due'?((x.sub&&x.sub.cat)||'subs'):(o.cat||'lentcat');
       lastCat=cat;
@@ -4375,7 +4521,10 @@ const app={
       const t={id:uid(),book:'me',kind:'expense',amount:-take,cat:cat,account:owedAcct,
         date:today(),note:'تحصيل'+(who?' من '+who:'')+(label?' — '+label:'')};
       D.txns.unshift(t);
-      o.got=true;o.gotOn=today();o.gotAmount=take;o.gotTxns=[t.id];
+      if(!o.gotTxns)o.gotTxns=[];o.gotTxns.push(t.id);
+      o.gotAmount=Math.round(((Number(o.gotAmount)||0)+take)*100)/100;
+      if(take>=rem-0.005){o.got=true;o.gotOn=today();}
+      else{if(o.orig===undefined)o.orig=rem;o.amount=Math.round((rem-take)*100)/100;}
       got=Math.round((got-take)*100)/100;
     });
     if(got>0.001){
@@ -4410,7 +4559,7 @@ const app={
       if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
         account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
       sortTxns();save();
-      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
       render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
     }
     if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
@@ -4428,7 +4577,7 @@ const app={
     const net=Math.round((amt-disc)*100)/100;
     let fromFloat=(draft.kind==='expense'&&draft.fromFloat&&!usd)?(Number(onlyNum(draft.floatAmt))||0):0;
     if(fromFloat>net)fromFloat=net;
-    const hold=usd?(Number(onlyNum(draft.hold))||0):0;
+    const hold=usd?holdFromBal(draft.account,draft.balAfter,0):0;
     /* المصروف بيتسجل بمبلغه الكامل؛ جزء العهدة بيتسجل لوحده إنه فلوس جاتلك منها */
     const gross=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):net;
     const vch=useVoucher(draft.kind==='expense'&&!usd?draft.voucherId:'',gross,draft.date);
@@ -4462,10 +4611,9 @@ const app={
     }
     if(draft.kind==='expense'&&draft.arr&&!usd&&isCreditAcc(draft.account)){
       const av=arrEst(finalAmt);
-      if(av>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:av,cat:'fees',
-        account:draft.account,date:draft.date,arrFee:true,pending:true,
-        note:'مصاريف تدبير'+(draft.note?' — '+String(draft.note).trim()
-          :(draft.place?' — '+String(draft.place).trim():''))});
+      if(av>0){if(!D.arrPend)D.arrPend=[];
+        D.arrPend.push({id:uid(),src:srcTxnId,acct:draft.account,amount:av,date:draft.date,
+          note:String(draft.note||draft.place||'').trim()});}
     }
     if(draft.kind==='transfer'&&draft.svFee){
       const R=saveXferRole(), f=Math.round((Number(onlyNum(draft.svFeeAmt))||0)*100)/100;
@@ -4497,7 +4645,7 @@ const app={
       });
     }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   toggleRefundWait(e,id){
@@ -4514,11 +4662,12 @@ const app={
     if(!(v>0))return;
     const base=Math.round((Number(t.amount)||0)*100)/100;
     const lbl=String(t.note||t.merchant||catOf(t.cat).label||'مرتجع').trim();
-    D.txns.unshift({id:uid(),book:'me',kind:'income',amount:base,account:t.account,
-      date:today(),note:'مرتجع — '+lbl,refundOf:t.id});
+    /* زي إرجاع الصنف واسترداد الترقية: مصروف بالسالب في نفس التصنيف، مش دخل */
+    D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-base,account:t.account,
+      cat:refundCat(t),date:today(),note:'مرتجع — '+lbl,refundOf:t.id});
     const d=Math.round((v-base)*100)/100;
     if(Math.abs(d)>=0.01){
-      D.txns.unshift({id:uid(),book:'me',kind:d>0?'income':'expense',amount:Math.abs(d),
+      D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-d,
         cat:'fees',account:t.account,date:today(),fxDiff:true,
         note:(t.usd?'فرق سعر صرف — ':'فرق استرداد — ')+lbl});
     }
@@ -4527,6 +4676,15 @@ const app={
   },
   startFix(id){fixFor=id;render();},
   cancelFix(){fixFor=null;render();},
+  fixHold(id){
+    const t=D.txns.find(x=>x.id===id);if(!t)return;
+    const el=document.getElementById('fixbal');
+    const h=holdFromBal(t.account,el?el.value:'',t.amount);
+    if(!(h>0))return;
+    t.amount=h;t.hold=true;if(t.usd>0)t.rate=Math.round(h/t.usd*100)/100;
+    (D.subs||[]).forEach(s=>(s.payments||[]).forEach(p=>{if(p.t===id)p.paid=h;}));
+    fixFor=null;feeFor=null;save();render();app.toast('اتسجل');
+  },
   confirmFix(id){
     const t=D.txns.find(x=>x.id===id);if(!t)return;
     const v=numVal('fixin');
@@ -4749,7 +4907,8 @@ const app={
 
   /* --- حسابات --- */
   editAccount(id){editAcct=editAcct===id?null:id;payCard.id=null;render();},
-  startPayCard(id){payCard={id:id,mode:'full',amount:'',from:'bank',date:today()};editAcct=null;render();},
+  startPayCard(id){payCard={id:id,mode:'full',amount:'',from:'',date:today()};editAcct=null;render();},
+  setPayCardFrom(v){payCard.from=v;render();},
   payCardMode(m){payCard.mode=m;render();},
   payCardSet(k,v){payCard[k]=v;},
   payCardDate(v){payCard.date=v;render();},
@@ -4759,9 +4918,10 @@ const app={
       :payCard.mode==='noins'?Math.max(0,due-insOnAccount(id))
       :(Number(onlyNum(payCard.amount))||0);
     if(amt<=0)return;
-    payCard.from='bank';
+    const from=cardSrc(D.accounts.find(x=>x.id===id))||payCard.from;
+    if(!from||isCreditAcc(from))return;
     D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:Math.round(amt*100)/100,
-      account:payCard.from,to:id,date:payCard.date,note:'سداد '+accName(id)});
+      account:from,to:id,date:payCard.date,note:'سداد '+accName(id)});
     sortTxns();
     payCard={id:null,mode:'full',amount:'',from:'',date:today()};
     save();render();app.toast('اتسجل السداد');
@@ -4782,8 +4942,12 @@ const app={
     const cn=(D.certs||[]).filter(c=>c.account===id).length;
     const inn=(D.installments||[]).filter(i=>i.account===id).length;
     const sn=(D.subs||[]).filter(s=>s.account===id).length;
-    if(cn+inn+sn>0){
+    const kn=(D.accounts||[]).filter(x=>x.credit&&x.payFrom===id).length;
+    const on=(D.certs||[]).filter(c=>c.bank===id&&!c.redeemed&&c.account!==id).length;
+    if(cn+inn+sn+kn+on>0){
       const parts=[];
+      if(kn)parts.push(kn+' كارت بيتسدد منه');
+      if(on)parts.push(on+' شهادة تابعة ليه');
       if(cn)parts.push(cn+' شهادة');
       if(inn)parts.push(inn+' قسط');
       if(sn)parts.push(sn+' اشتراك');
@@ -4806,6 +4970,7 @@ const app={
   accPick(c){accDraft.credit=c;render();},
   accPickSec(v){accDraft.sec=v;if(!v)accDraft.secured=[];render();},
   accPickIns(v){accDraft.insure=v;render();},
+  accPayFrom(v){accDraft.payFrom=(v==='none')?'':v;render();},
   accToggleCert(id){
     if(certHeldBy(id,null))return;
     const i=accDraft.secured.indexOf(id);
@@ -4827,7 +4992,8 @@ const app={
       graceDay:accDraft.credit?clampDay(Number(onlyNum(accDraft.graceDay))||15):undefined,
       insure:accDraft.credit?!!accDraft.insure:undefined,
       insureRate:accDraft.credit?(accDraft.insure?(Number(onlyNum(accDraft.insureRate))||0):0):undefined,
-      secured:accDraft.credit&&accDraft.sec?accDraft.secured.slice():[]});
+      secured:accDraft.credit&&accDraft.sec?accDraft.secured.slice():[],
+      payFrom:accDraft.credit?(accDraft.payFrom||''):undefined});
     if(accDraft.atype==='save'){const na=D.accounts[D.accounts.length-1];na.scope='me';applySaveCfg(na,accDraft);}
     accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',sec:false,secured:[],
       secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
@@ -4865,7 +5031,7 @@ const app={
   },
   welDel(i){wel.accs.splice(i,1);if(wel.salaryAcc>=wel.accs.length)wel.salaryAcc=0;render();},
   welSet(i,k,v){if(wel.accs[i])wel.accs[i][k]=v;if(k==='name')setDisabled('welstart',false);},
-  welSalary(k,v){wel.salary===undefined?0:0;wel[k]=v;if(k==='salaryAcc')render();},
+  welSalary(k,v){wel.salary===undefined?0:0;wel[k]=v;if(k==='salaryAcc'||k==='salaryDate')render();},
   welOffice(v){wel.office=v;render();},
   welMonthMode(m){wel.monthMode=m;render();},
   welVeh(v){wel.veh=v;render();},
@@ -4968,7 +5134,7 @@ const app={
     }else return;
     t.needs=undefined;needsFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
-  startStmtPay(id){stmtFor=stmtFor===id?null:id;stmtMode='full';stmtAcct='bank';render();},
+  startStmtPay(id){stmtFor=stmtFor===id?null:id;stmtMode='full';stmtAcct='';stmtPayDate='';render();},
   cancelStmtPay(){stmtFor=null;render();},
   stmtMode(m){stmtMode=m;render();},
   setStmtAcct(id){stmtAcct=id;render();},
@@ -4976,26 +5142,18 @@ const app={
     const st=(D.stmts||[]).find(s=>s.id===id);if(!st)return;
     st.hidden=true;st.hiddenQ=Number(D._qmax||0);save();render();
   },
+  setStmtPayDate(v){stmtPayDate=v;render();},
   payStmt(id){
     const st=(D.stmts||[]).find(s=>s.id===id);if(!st)return;
-    const left=Math.round((Number(st.total)-Number(st.paid||0))*100)/100;
+    const a=D.accounts.find(x=>x.id===st.acct);if(!a)return;
+    const left=Math.round((Number(st.total)-stmtPaidOf(a,st.key))*100)/100;
     const amt=stmtMode==='full'?left:(numVal('stmtin')||0);
     if(amt<=0)return;
-    const from=stmtAcct||'bank';
-    D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:from,to:st.acct,
-      date:today(),note:'سداد مديونية '+mLabel(st.key)});
-    st.paid=Math.round((Number(st.paid||0)+amt)*100)/100;
-    // لو المديونية اتسددت بالكامل، الأقساط اللي على الكارت تتحرك شهر
-    if(st.paid>=Number(st.total)-0.01&&!st.insDone){
-      (D.installments||[]).filter(i=>i.src===st.acct&&i.mode!=='bank'&&!insDone(i)).forEach(i=>{
-        const m=insNextMonth(i);
-        i.paid=(Number(i.paid)||0)+1;i.covered=m;
-        if(!i.payments)i.payments=[];
-        i.payments.push({d:today(),m:m,amount:Number(i.monthly)||0,type:'front',viaStmt:true});
-      });
-      st.insDone=true;
-    }
-    stmtFor=null;sortTxns();save();render();app.toast('اتسجل السداد');
+    const from=cardSrc(a)||stmtAcct;
+    if(!from||isCreditAcc(from))return;
+    D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:Math.round(amt*100)/100,account:from,to:st.acct,
+      date:stmtPayDate||today(),note:'سداد مديونية '+mLabel(st.key)});
+    stmtFor=null;stmtPayDate='';sortTxns();save();render();app.toast('اتسجل السداد');
   },
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
@@ -5163,6 +5321,8 @@ const app={
   personAdd(){subDraft.people.push({name:'',amount:''});render();},
   personDel(i){subDraft.people.splice(i,1);if(!subDraft.people.length)subDraft.people.push({name:'',amount:''});render();},
   subPick(k,v){subDraft[k]=v;render();},
+  subPick_on(v){subDraft.promo=!!v;render();},
+  sdPick_on(v){sDraft.promo=!!v;render();},
   subSetAt(v){subDraft.at=v;},
   sdSetAt(v){sDraft.at=v;},
   addSub(){
@@ -5174,14 +5334,17 @@ const app={
         ?subDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:p.name.trim()||'حد',amount:Number(onlyNum(p.amount))}))
         :[],
       myShare:null,
+      promo:(subDraft.cycle!=='trial'&&subDraft.promo&&(Number(onlyNum(subDraft.promoAmt))||0)>0&&(Number(onlyNum(subDraft.promoN))||0)>0)
+        ?{amount:Number(onlyNum(subDraft.promoAmt)),left:Number(onlyNum(subDraft.promoN))}:undefined,
       willRenew:subDraft.cycle==='trial'?!!subDraft.willRenew:undefined,
       afterCycle:subDraft.cycle==='trial'?subDraft.afterCycle:undefined});
     subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
     showSub=false;save();render();
   },
+  setPaySubBal(v){paySubBal=v;},
   paySub(id){
     const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial')return;
-    paySubFor=id;paySubDate=s.next<=today()?s.next:today();
+    paySubBal='';paySubFor=id;paySubDate=s.next<=today()?s.next:today();
     tab='wallet';wtab='subs';render();
     setTimeout(()=>{const el=document.getElementById('sub-'+id);if(el)el.scrollIntoView({block:'center'});},60);
   },
@@ -5190,15 +5353,18 @@ const app={
     const s=D.subs.find(x=>x.id===id);if(!s)return;
     const ppl=(s.people&&s.people.length)?s.people.map(p=>({name:p.name,amount:String(p.amount)})):[{name:'',amount:''}];
     sDraft={name:s.name,amount:String(s.amount||''),cur:s.cur||'EGP',cycle:s.cycle==='yearly'?'yearly':'monthly',
-      next:s.next,at:s.at||'',split:!!(s.people&&s.people.length),people:ppl};
+      next:s.next,at:s.at||'',split:!!(s.people&&s.people.length),people:ppl,
+      promo:!!(s.promo&&Number(s.promo.left)>0),promoAmt:s.promo?String(s.promo.amount):'',promoN:s.promo?String(s.promo.left):''};
     editSub=id;paySubFor=null;render();
   },
   cancelSubEdit(){editSub=null;render();},
   startRepeat(id){
     if(repFor===id){repFor=null;render();return;}
-    repFor=id;repDate=today();upFor=null;editSub=null;paySubFor=null;render();
+    repFor=id;repDate=today();repBal='';upFor=null;editSub=null;paySubFor=null;render();
   },
   cancelRepeat(){repFor=null;render();},
+  setRepBal(v){repBal=v;},
+  setUpBal(v){upBal=v;},
   setRepDate(v){repDate=v;render();},
   undoDup(sid,tid){
     const s=D.subs.find(x=>x.id===sid);if(!s)return;
@@ -5210,17 +5376,19 @@ const app={
   },
   addRepeat(id){
     const s=D.subs.find(x=>x.id===id);if(!s)return;
-    const amt=numVal('repamt')||Number(s.amount)||0;
+    const amt=numVal('repamt')||subPrice(s);
     if(amt<=0)return;
     const usd=s.cur==='USD';
-    const full=usd?Math.round(amt*D.rate*100)/100:amt;
+    const hold=usd?holdFromBal(s.account||'card',repBal,0):0;
+    const full=usd?(hold>0?hold:Math.round(amt*D.rate*100)/100):amt;
     const t={id:uid(),book:'me',kind:'expense',amount:full,cat:s.cat||'subs',
       account:s.account||'card',date:repDate||today(),note:s.name+' — سحب متكرر',
-      usd:usd?amt:undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+      usd:usd?amt:undefined,rate:usd?(hold>0?Math.round(hold/amt*100)/100:D.rate):undefined,
+      hold:hold>0?true:undefined,pending:usd?true:undefined};repBal='';
     D.txns.unshift(t);
     if(!s.payments)s.payments=[];
     const pay={d:repDate||today(),t:t.id,paid:full,dup:true};
-    if(!usd){const est=Math.round(full*0.03*100)/100;if(est>0){pay.fee=est;pay.feePending=true;}}
+    if(!usd&&isCreditAcc(s.account||'card')){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
     s.payments.push(pay);
     repFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
@@ -5228,7 +5396,7 @@ const app={
     if(upFor===id){upFor=null;render();return;}
     const s=D.subs.find(x=>x.id===id);if(!s)return;
     upDraft={amount:String(s.amount||''),refund:'',acct:s.account||'card',date:today()};
-    upFor=id;editSub=null;paySubFor=null;render();
+    upFor=id;upBal='';editSub=null;paySubFor=null;render();
   },
   cancelUpgrade(){upFor=null;render();},
   upSet(k,v){upDraft[k]=v;},
@@ -5241,19 +5409,21 @@ const app={
     const acct=upDraft.acct||s.account||'card';
     const d=upDraft.date||today();
     if(newAmt<=0){upFor=null;render();return;}
+    const hold=s.cur==='USD'?holdFromBal(s.account||'card',upBal,0):0;upBal='';
     const cat=s.cat||'subs';
     if(refund>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
       date:d,note:'استرداد ترقية — '+s.name});
     const usd=s.cur==='USD';
-    const full=usd?Math.round(newAmt*D.rate*100)/100:newAmt;
+    const full=usd?(hold>0?hold:Math.round(newAmt*D.rate*100)/100):newAmt;
     const t={id:uid(),book:'me',kind:'expense',amount:full,cat:cat,account:s.account||'card',date:d,
-      note:s.name+' — بعد الترقية',usd:usd?newAmt:undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+      note:s.name+' — بعد الترقية',usd:usd?newAmt:undefined,rate:usd?(hold>0?Math.round(hold/newAmt*100)/100:D.rate):undefined,
+      hold:hold>0?true:undefined,pending:usd?true:undefined};
     D.txns.unshift(t);
     if(!s.payments)s.payments=[];
     const pay={d:d,t:t.id,paid:full};
-    if(!usd){const est=Math.round(full*0.03*100)/100;if(est>0){pay.fee=est;pay.feePending=true;}}
+    if(!usd&&isCreditAcc(s.account||'card')){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
     s.payments.push(pay);
-    s.amount=newAmt;
+    s.amount=newAmt;delete s.promo;
     s.next=dAdd(d,s.cycle==='yearly'?12:1);
     upFor=null;sortTxns();save();render();app.toast('اترقّى');
   },
@@ -5275,10 +5445,24 @@ const app={
       ?sDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:String(p.name||'').trim()||'حد',amount:Number(onlyNum(p.amount))}))
       :[];
     s.myShare=null;
+    const pa=Number(onlyNum(sDraft.promoAmt))||0,pn=Number(onlyNum(sDraft.promoN))||0;
+    if(sDraft.promo&&pa>0&&pn>0)s.promo={amount:pa,left:pn};else delete s.promo;
     editSub=null;save();render();app.toast('اتعدل');
   },
   startFee(id){feeFor=feeFor===id?null:id;render();},
-  startFeeFix(id){feeFor=feeFor===id?null:id;render();},
+  startFeeFix(id){feeFor=feeFor===id?null:id;feeDate=today();render();},
+  setFeeDate(v){feeDate=v;render();},
+  confirmArr(id){
+    const e=(D.arrPend||[]).find(x=>x.id===id);if(!e)return;
+    const v=numVal('feein');
+    if(v>0){const src=e.src?D.txns.find(x=>x.id===e.src):null;
+      D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:v,cat:'fees',account:e.acct,
+        date:feeDate||today(),arrFee:true,arrOf:e.src||undefined,link:src&&src.link?src.link:undefined,
+        note:'مصاريف تدبير'+(e.note?' — '+e.note:'')});}
+    D.arrPend=D.arrPend.filter(x=>x.id!==id);
+    feeFor=null;sortTxns();save();render();app.toast('اتسجلت');
+  },
+  noArr(id){D.arrPend=(D.arrPend||[]).filter(x=>x.id!==id);feeFor=null;save();render();},
   confirmFee(key){
     const [id,tid]=String(key).split('|');
     const s=D.subs.find(x=>x.id===id);if(!s)return;
@@ -5287,14 +5471,15 @@ const app={
     if(s.cur==='USD'){
       // بالدولار: بنظبط المبلغ الحقيقي بالجنيه
       const t=D.txns.find(x=>x.id===p.t);
-      if(v>0&&t){t.amount=v;t.pending=undefined;p.paid=v;}
+      if(v>0&&t){t.amount=v;t.pending=undefined;p.paid=v;
+        if(t.usd>0){t.rate=Math.round(v/t.usd*100)/100;D.rate=t.rate;}}
       p.settled=true;p.feePending=false;
       feeFor=null;sortTxns();save();render();app.toast('اتظبط');return;
     }
     if(p.dup)p.settled=true;
     if(v>0){
       const t={id:uid(),book:'me',kind:'expense',amount:v,cat:'fees',account:s.account||'card',
-        date:p.d,note:'تدبير عملة — '+s.name};
+        date:feeDate||today(),arrFee:true,note:'مصاريف تدبير — '+s.name};
       D.txns.unshift(t);
       p.fee=v;p.feeTxn=t.id;p.feePending=false;s.feeEst=v;
       sortTxns();
@@ -5328,16 +5513,19 @@ const app={
   cancelPaySub(){paySubFor=null;render();},
   confirmPaySub(id){
     const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial'){paySubFor=null;render();return;}
-    const usd=s.cur==='USD'?Number(s.amount):0;
-    const full=usd?Math.round(usd*D.rate*100)/100:Number(s.amount);
+    const usd=s.cur==='USD'?subPrice(s):0;
+    const hold=usd?holdFromBal(s.account||'card',paySubBal,0):0;
+    const full=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):subPrice(s);
     const t={id:uid(),book:'me',kind:'expense',amount:full,
       cat:s.cat||'subs',account:s.account||'card',date:paySubDate,note:s.name,
-      usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
+      usd:usd||undefined,rate:usd?(hold>0?Math.round(hold/usd*100)/100:D.rate):undefined,
+      hold:hold>0?true:undefined,pending:usd?true:undefined};
     D.txns.unshift(t);
     if(!s.payments)s.payments=[];
     const pay={d:paySubDate,t:t.id,paid:full};
-    if(s.cur!=='USD'){
-      const est=Math.round(full*0.03*100)/100;
+    promoStep(s,pay);paySubBal='';
+    if(s.cur!=='USD'&&isCreditAcc(s.account||'card')){
+      const est=arrEst(full);
       if(est>0){pay.fee=est;pay.feePending=true;}
     }
     s.payments.push(pay);
@@ -5361,6 +5549,8 @@ const app={
   undoSubPay(id){
     const s=D.subs.find(x=>x.id===id);if(!s||!s.payments||!s.payments.length)return;
     const p=s.payments.pop();
+    if(s.promo&&p.promo)s.promo.left=Number(s.promo.left||0)+1;
+    if(s.promo&&p.promoEnd)s.promo.done=false;
     const ids=[p.t,p.feeTxn].filter(Boolean);
     D.txns=D.txns.filter(t=>ids.indexOf(t.id)<0);
     s.dues=(s.dues||[]).filter(d=>d.srcTxn!==p.t||d.got);
@@ -5445,7 +5635,7 @@ const app={
       months:Number(onlyNum(insDraft.months))||0,paid:Number(onlyNum(insDraft.paid))||0,
       day:clampDay(Number(onlyNum(insDraft.day))||1),account:insDraft.account,
       covered:mAdd(monthOf(today()),-1),firstMonth:monthOf(today()),tail:0,payments:[],
-      src:insDraft.src||'office',total:Number(onlyNum(insDraft.total))||0});
+      src:insDraft.src||'office',from:(insDraft.src||'office')==='office'?String(insDraft.from||'').trim():'',total:Number(onlyNum(insDraft.total))||0});
     insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};showIns=false;save();render();
   },
   startPay(id,mode){payFor=id;payMode=mode||'front';editAmt=false;payDate=today();tab='wallet';wtab='ins';render();
@@ -5457,7 +5647,7 @@ const app={
     if(insEdit===id){insEdit=null;render();return;}
     const i=D.installments.find(x=>x.id===id);if(!i)return;
     iDraft={name:i.name||'',total:String(i.total||''),monthly:String(i.monthly||''),
-      months:String(i.months||''),day:String(i.day||'1'),src:i.src||'office',account:i.account||''};
+      months:String(i.months||''),day:String(i.day||'1'),src:i.src||'office',from:i.from||'',account:i.account||''};
     insEdit=id;payFor=null;render();
   },
   cancelInsEdit(){insEdit=null;render();},
@@ -5473,6 +5663,7 @@ const app={
     const ms=Number(onlyNum(iDraft.months))||0;if(ms>0)i.months=ms;
     const dy=Number(onlyNum(iDraft.day))||0;if(dy>0)i.day=clampDay(dy);
     if(iDraft.src)i.src=iDraft.src;
+    i.from=i.src==='office'?String(iDraft.from||'').trim():'';
     if(iDraft.account)i.account=iDraft.account;
     insEdit=null;save();render();app.toast('اتعدل');
   },
@@ -5555,14 +5746,26 @@ const app={
     if(k==='start'||k==='end'||k==='type'){render();return;}
     setDisabled('certsave',certOk());},
   certAccount(id){certDraft.account=id;render();},
+  certBank(id){certDraft.bank=id;if(!certDraft.account||!certRetAccs().some(a=>a.id===certDraft.account))certDraft.account=id;render();},
+  certDed(v){certDraft.ded=!!v;render();},
   addCert(){
     const isDep=certDraft.type==='deposit';
     const cnt=(D.certs||[]).filter(c=>(c.type||'cert')===(isDep?'deposit':'cert')).length+1;
-    D.certs.push(mkCert((isDep?'وديعة ':'شهادة ')+cnt,certDraft.amount,certDraft.monthly,certDraft.start,
-      certDraft.account,certDraft.end,isDep?'deposit':'cert',certDraft.day));
-    certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'bank',type:certDraft.type};showCert=false;
+    const c=mkCert((isDep?'وديعة ':'شهادة ')+cnt,certDraft.amount,certDraft.monthly,certDraft.start,
+      certDraft.account,certDraft.end,isDep?'deposit':'cert',certDraft.day);
+    c.bank=certDraft.bank;
+    D.certs.push(c);
+    if(certDraft.ded!==false){
+      D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:c.amount,account:c.bank,
+        date:c.start,certBuy:c.id,note:'شراء '+c.name});
+      const fee=Number(onlyNum(certDraft.fee))||0;
+      if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',account:c.bank,
+        date:c.start,certFee:c.id,note:'مصاريف شراء '+c.name});
+      sortTxns();
+    }else c.legacy=true;
+    certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:certDraft.type};showCert=false;
     const cu=catchUp();save();
-    autoMsg=cu.n?('اتقيد '+cu.n+' عائد بإجمالي '+fmt(cu.tot)+' جنيه.'):'';
+    if(cu.n)pushNote('اتقيد '+cu.n+' دفعة عوائد بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');save();
     render();
   },
   delCert(id){
@@ -5572,7 +5775,9 @@ const app={
       alert('الشهادة دي ضمان لـ'+linked.map(a=>a.name).join(' و')+'. شيلها من الضمان الأول من الإعدادات.');
       render();return;
     }
-    D.certs=D.certs.filter(c=>c.id!==id);confirmKey='';save();render();
+    D.certs=D.certs.filter(c=>c.id!==id);
+    D.txns=D.txns.filter(t=>t.certBuy!==id&&t.certFee!==id&&t.certBack!==id);
+    confirmKey='';save();render();
   },
 
   /* --- تصنيفات --- */
@@ -5600,6 +5805,28 @@ const app={
     render();
   },
   setScope(id,s){const a=D.accounts.find(x=>x.id===id);if(a){a.scope=s;save();render();}},
+  certEditBank(cid,v){const c=D.certs.find(x=>x.id===cid);if(c){c.bank=v;save();render();}},
+  certEditRet(cid,v){const c=D.certs.find(x=>x.id===cid);if(c){c.account=v;save();render();}},
+  breakCert(cid){
+    const c=D.certs.find(x=>x.id===cid);if(!c||c.redeemed||certSecuredBy(c))return;
+    redeemCert(c,numVal('cpen'),today());certEdit=null;sortTxns();save();render();app.toast('اتسجل');
+  },
+  renewCert(cid){
+    const c=D.certs.find(x=>x.id===cid);if(!c||!c.end)return;
+    let m=monthsBetween(c.start,c.end);if(!(m>0))m=12;
+    c.end=dAdd(c.end,m);save();render();app.toast('اتجددت');
+  },
+  cashCert(cid){
+    const c=D.certs.find(x=>x.id===cid);if(!c||c.redeemed||certSecuredBy(c))return;
+    redeemCert(c,0,c.end||today());sortTxns();save();render();app.toast('اتسجل');
+  },
+  setPayFrom(id,v){const a=D.accounts.find(x=>x.id===id);if(a){a.payFrom=(v==='none')?'':v;save();render();app.toast('اتحفظ');}},
+  stopCard(id){
+    const a=D.accounts.find(x=>x.id===id);if(!a||cardDebt(a)>0.01)return;
+    a.closed=true;a.closedOn=today();a.freedCerts=(a.secured||[]).slice();a.secured=[];
+    confirmKey='';save();render();app.toast('اتوقف');
+  },
+  reopenCard(id){const a=D.accounts.find(x=>x.id===id);if(!a)return;a.closed=false;delete a.closedOn;save();render();app.toast('رجع');},
   setInsure(id,v){const a=D.accounts.find(x=>x.id===id);if(a){a.insure=v;save();render();}},
   toggleSecured(accId,certId){
     const a=D.accounts.find(x=>x.id===accId);if(!a)return;
@@ -5683,7 +5910,6 @@ const app={
     D.txns=D.txns.filter(t=>t.book!=='office'&&!(t.link&&links.indexOf(t.link)>-1));
     D.closings=[];D.floatLoans=[];D.ofees=[];D.lastClose='';
     D.accounts.forEach(a=>{a.openingOffice=0;});
-    D.installments=(D.installments||[]).filter(i=>i.src!=='office');
     confirmKey='';save();render();app.toast('اتمسحت');
   },
   setOfficeOn(v){
@@ -5783,7 +6009,12 @@ const app={
     D.cats=JSON.parse(JSON.stringify(DEF_CATS));D.lastClose='';D.lastBackup='';
     load();confirmKey='';save();tab='home';book='me';render();
   }
-};
+},{get(o,k){
+  if(typeof k==='string'&&k.indexOf('setPayFrom_')===0){const id=k.slice(11);return v=>o.setPayFrom(id,v);}
+  if(typeof k==='string'&&k.indexOf('certEditBank_')===0){const id=k.slice(13);return v=>o.certEditBank(id,v);}
+  if(typeof k==='string'&&k.indexOf('certEditRet_')===0){const id=k.slice(12);return v=>o.certEditRet(id,v);}
+  return o[k];
+}});
 
 if(navigator.storage&&navigator.storage.persist){
   navigator.storage.persisted().then(p=>{if(!p)navigator.storage.persist().catch(()=>{});}).catch(()=>{});
@@ -5806,15 +6037,8 @@ if(document.addEventListener)document.addEventListener('paste',e=>{
     }
   }
 });
-if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden)ghMaybePull();});
-(function(){
-  const cu=catchUp();
-  const parts=[];
-  if(cu.n)parts.push('اتقيد '+cu.n+' دفعة عوائد بإجمالي '+fmt(cu.tot)+' جنيه على حسابك.');
-  const tr=autoTrials();
-  if(tr.length)parts.push('خلصت تجربة '+tr.join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
-  autoMsg=parts.join(' ');
-})();
+if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden){ghMaybePull();runAuto();render();}});
+runAuto();
 render();
 </script>
 </body>
