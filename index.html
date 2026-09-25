@@ -458,6 +458,7 @@ let ownerFor=null;
 let needsTxn=null;
 let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''};
 let retFor=null, retAcct='', retDate=today();
+let fixMode='final', feeMode='final';
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false;
@@ -1982,6 +1983,8 @@ function vHome(){
   </div>`;
 }
 
+/* خصم بالدولار لسه تقديري ومتسجلش محجوزه */
+const canHoldFix=t=>!!(t&&t.usd&&!t.hold&&isCreditAcc(t.account));
 function alertsPanel(){
   const rows=[];
   const _dupT={};(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{_dupT[p.t]=1;}));
@@ -1991,17 +1994,19 @@ function alertsPanel(){
       <span class="g"><span class="t">${esc(T.title)}</span>
         <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':t.insFee?'تأمين · تقديري':t.insInt?'فايدة قسط · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
       <span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
-      <button class="chip sm" onclick="app.startFix('${t.id}')">ظبّط</button>
+      ${canHoldFix(t)?`<button class="chip sm${fixFor===t.id&&fixMode==='hold'?' on':''}" onclick="app.startFix('${t.id}','hold')">محجوز</button>`:''}
+      <button class="chip sm${fixFor===t.id&&fixMode!=='hold'?' on':''}" onclick="app.startFix('${t.id}','final')">ظبّط</button>
     </div>
-    ${fixFor===t.id?`<div class="inline">
+    ${fixFor===t.id?(fixMode==='hold'&&canHoldFix(t)?`<div class="inline">
+      ${holdField('fixbal','',"app.holdLive('fixbal','"+t.account+"',"+t.amount+")",t.account,t.amount)}
+      <button class="btn" onclick="app.fixHold('${t.id}')">سجّل المحجوز</button>
+      <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
+    </div>`:`<div class="inline">
       <label class="f">المبلغ الحقيقي اللي اتخصم بالجنيه</label>
       <input class="f" id="fixin" type="text" inputmode="decimal" value="${t.amount}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFix('${t.id}')">ظبّط المبلغ</button>
-      ${(t.usd&&!t.hold&&isCreditAcc(t.account))?`<div class="hint" style="margin-top:16px">ولو لسه محجوز ومش نهائي:</div>
-        ${holdField('fixbal','',"app.holdLive('fixbal','"+t.account+"',"+t.amount+")",t.account,t.amount)}
-        <button class="btn ghost" onclick="app.fixHold('${t.id}')">سجّل المحجوز</button>`:''}
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
-    </div>`:''}`);});
+    </div>`):''}`);});
 
   if(book==='me')(D.certs||[]).filter(c=>!c.redeemed&&c.end&&daysTo(c.end)<=0).forEach(c=>{
     const sec=certSecuredBy(c);
@@ -2217,20 +2222,21 @@ ${s.cycle==='trial'
           usd?` · <span class="n">${fmt(p.paid)}</span> ${((D.txns.find(x=>x.id===p.t)||{}).hold)?'محجوز':'تقديري'}`:(p.feePending?` · تدبير تقديري <span class="n">${fmt(p.fee)}</span>`:'')}</span></span>
       <span class="vl" style="white-space:nowrap">${usd?money(s.amount,'USD'):money(p.paid,'EGP')}</span>
       <div class="chips" style="flex-basis:100%;margin:10px 0 0">
-        <button class="chip sm" onclick="app.undoDup('${s.id}','${p.t}')">رجعت</button>
-        <button class="chip sm" onclick="app.startFeeFix('${esc(key)}')">${feeFor===key?'إخفاء':'ظبّط'}</button>
+        ${(usd&&canHoldFix(D.txns.find(x=>x.id===p.t)))?`<button class="chip sm${feeFor===key&&feeMode==='hold'?' on':''}" onclick="app.startFeeFix('${esc(key)}','hold')">محجوز</button>`:''}
+        <button class="chip sm${feeFor===key&&feeMode!=='hold'?' on':''}" onclick="app.startFeeFix('${esc(key)}','final')">ظبّط</button>
       </div>
     </div>
-    ${feeFor===key?(usd?`<div class="inline">
+    ${feeFor===key?(usd?(function(){const tx=D.txns.find(x=>x.id===p.t);
+      return (feeMode==='hold'&&canHoldFix(tx))?`<div class="inline">
+      ${holdField('fixbal','',"app.holdLive('fixbal','"+tx.account+"',"+tx.amount+")",tx.account,tx.amount)}
+      <button class="btn" onclick="app.fixHold('${tx.id}')">سجّل المحجوز</button>
+      <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
+    </div>`:`<div class="inline">
       <label class="f">اتخصم كام بالجنيه؟</label>
       <input class="f" id="feein" type="text" inputmode="decimal" value="${p.paid}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFee('${esc(key)}')">أكد</button>
-      ${(function(){const tx=D.txns.find(x=>x.id===p.t);
-        return (tx&&!tx.hold&&isCreditAcc(tx.account))?`<div class="hint" style="margin-top:16px">ولو لسه محجوز ومش نهائي:</div>
-          ${holdField('fixbal','',"app.holdLive('fixbal','"+tx.account+"',"+tx.amount+")",tx.account,tx.amount)}
-          <button class="btn ghost" onclick="app.fixHold('${tx.id}')">سجّل المحجوز</button>`:'';})()}
       <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
-    </div>`:feeConfirmHtml(p.fee||0,`app.confirmFee('${esc(key)}')`,`app.noFee('${esc(key)}')`)):''}`);
+    </div>`;})():feeConfirmHtml(p.fee||0,`app.confirmFee('${esc(key)}')`,`app.noFee('${esc(key)}')`)):''}`);
   }));
 
   if(book==='me')(D.subs||[]).forEach(s=>{
@@ -4674,7 +4680,7 @@ const app=new Proxy({
     t.refundDone=true;delete t.refundSince;
     rbackFor=null;sortTxns();save();render();
   },
-  startFix(id){fixFor=id;render();},
+  startFix(id,m){m=m||'final';if(fixFor===id&&fixMode===m)fixFor=null;else{fixFor=id;fixMode=m;}render();},
   cancelFix(){fixFor=null;render();},
   fixHold(id){
     const t=D.txns.find(x=>x.id===id);if(!t)return;
@@ -5450,7 +5456,7 @@ const app=new Proxy({
     editSub=null;save();render();app.toast('اتعدل');
   },
   startFee(id){feeFor=feeFor===id?null:id;render();},
-  startFeeFix(id){feeFor=feeFor===id?null:id;feeDate=today();render();},
+  startFeeFix(id,m){m=m||'final';if(feeFor===id&&feeMode===m)feeFor=null;else{feeFor=id;feeMode=m;}feeDate=today();render();},
   setFeeDate(v){feeDate=v;render();},
   confirmArr(id){
     const e=(D.arrPend||[]).find(x=>x.id===id);if(!e)return;
