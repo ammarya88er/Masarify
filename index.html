@@ -1180,8 +1180,25 @@ function cardNextDue(a){
   while(stmtDue(k,a)<today()&&g++<3)k=mAdd(k,1);
   return stmtDue(k,a);
 }
-/* المطلوب دلوقتي: اللي عليك للكارت من غير أقساط لسه ماجاش ميعادها */
-const cardDueNow=a=>Math.round(Math.max(0,cardDebt(a)-insRemainOn(a.id))*100)/100;
+/* اللي فاضل من كشف معيّن: المصروف لحد يوم الكشف ناقص السداد لحد يومه، وبعدين أي سداد بعده.
+   المحجوز اللي لسه ماتظبطش والمرتجع المستني مش بيتحسبوا، ولا الأقساط اللي ماجاش ميعادها. */
+function cardStmtLeft(a,key){
+  const sd=stmtDate(key,a);
+  let bal=(Number(a.opening)||0)+(Number(a.openingOffice)||0), paidAfter=0;
+  D.txns.forEach(t=>{
+    const v=Number(t.amount)||0;
+    if(t.to===a.id&&(t.kind==='transfer')){if(t.date<sd)bal+=v;else paidAfter+=v;return;}
+    if(t.account!==a.id)return;
+    if(t.pending||(t.refundSince&&!t.refundDone))return;
+    let e=0;
+    if(t.kind==='expense'||t.kind==='transfer')e=-v;
+    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')e=v;
+    else if(t.kind==='settle')e=t.dir==='in'?v:-v;
+    if(t.date<sd)bal+=e;else if(e>0)paidAfter+=e;
+  });
+  const owed=Math.max(0,(Number(a.limit)||0)-bal-insRemainOn(a.id));
+  return Math.round((owed-paidAfter)*100)/100;
+}
 /* أقساط الكارت بتتحرك شهر كل ما ميعاد السداد يعدي */
 function cardInsAdvance(){
   let n=0;
@@ -2353,9 +2370,9 @@ ${s.cycle==='trial'
   }
 
   if(book==='me')D.accounts.filter(a=>a.credit&&!a.closed).forEach(a=>{
-    const due=cardNextDue(a), owe=cardDueNow(a);
-    /* بيظهر من يوم الكشف لحد آخر ميعاد السداد */
-    if(owe<=0.01||today()<stmtDate(mAdd(monthOf(due),-1),a))return;
+    const due=cardNextDue(a), key=mAdd(monthOf(due),-1);
+    /* بيظهر من يوم الكشف لحد آخر ميعاد السداد، ويختفي لما اللي عليك من الكشف ده يخلص */
+    if(today()<stmtDate(key,a)||cardStmtLeft(a,key)<=0.01)return;
     const late=daysTo(due)<=0;
     /* «شفتها»: مستخبي لحد مرتب جديد، أو ٣ أيام قبل آخر ميعاد */
     const sn=a.dueSeen;
@@ -2363,9 +2380,8 @@ ${s.cycle==='trial'
     rows.push(`
     <div class="alert">
       <span class="rail" style="background:${late?'var(--clay)':'#C79447'}"></span>
-      <span class="g"><span class="t">${late?'النهارده آخر ميعاد سداد ':'سدد '}${esc(a.name)}</span>
-        <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}${insRemainOn(a.id)>0.01?' · من غير أقساط لسه ماجاش ميعادها':''}</span></span>
-      <span class="vl" style="color:${late?'var(--clay)':'inherit'};white-space:nowrap">${money(owe,'EGP')}</span>
+      <span class="g"><span class="t">${late?'النهارده آخر ميعاد سداد ':'سداد '}${esc(a.name)}</span>
+        <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}</span></span>
       <button class="chip sm" onclick="app.goPayCard('${a.id}')">سدد</button>
       ${daysTo(due)>3?`<button class="chip sm" onclick="app.seeDue('${a.id}','${due}')">شفتها</button>`:''}
     </div>`);
