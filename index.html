@@ -291,7 +291,7 @@ body.office .bookseg{border-color:#2E5147;}
    3) الحالة والتخزين ... التحميل والحفظ والترحيل (normalizeData)
    4) مشتقات ............ الأرصدة والتقارير والحسابات المشتقة:
         · balances / officeReport        الأرصدة وتقرير التقفيل
-        · stmtKey..buildStmt             دورة كارت الائتمان والمديونية
+        · stmtKey..cardInsAdvance        ميعاد سداد الكارت وأقساطه
         · insWhen..certNext              الأقساط والشهادات
         · catchUp / autoTrials           التقييد التلقائي
         · ghApi..ghConnect               المزامنة مع GitHub
@@ -467,14 +467,13 @@ let openRow={};
 let rbackFor=null;
 let flPay={from:'',to:''};
 let feeDate='';
-let stmtPayDate='';
 let paySubBal='', repBal='', upBal='';
 let alertsOpen=false;
 let svEdit=null;
 const ASEEN='masareef:alertsSeen:';
 let welSkipped=false;
 let wel={accs:[],salary:'',salaryDate:today(),salaryAcc:0,office:false,monthMode:'salary',veh:false,vehKind:'سكوتر',vehName:''};
-let stmtFor=null, stmtMode='full', stmtAcct='';
+
 let needsFor=null, nd={mode:'one',name:'',cat:'',acct:'',items:[{name:'',amount:'',cat:''}],keep:'txn'};
 const ndSum=()=>Math.round(nd.items.reduce((a,i)=>a+(Number(onlyNum(i.amount))||0),0)*100)/100;
 let refundParts={};
@@ -749,7 +748,8 @@ const fuelPrice=ft=>Number(ft==='٩٥'?D.p95:D.p92)||0;
 /* نسبة مصاريف التدبير التقديرية على مشتريات الكارت بالجنيه */
 const ARRRATE=3;
 const isCreditAcc=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return !!(a&&a.credit);};
-const arrEst=v=>Math.round((Number(v)||0)*ARRRATE)/100;
+/* رقمين بعد العلامة ويقطع الباقي (من غير تقريب) */
+const arrEst=v=>Math.floor((Number(v)||0)*ARRRATE+1e-9)/100;
 /* ==========================================================================
    وعاء الادخار (atype:'save')
    - بيظهر في التحويلات بس: مش في أي مكان تصرف منه أو تستلم عليه.
@@ -1136,11 +1136,14 @@ function autoNoteHtml(){
       const s=n.sid?(D.subs||[]).find(x=>x.id===n.sid):null;
       const last=s&&s.payments&&s.payments.length?s.payments[s.payments.length-1]:null;
       const canUndo=!!(last&&last.t===n.t);
-      return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <span style="flex:1">${n.text}</span>
-        ${canUndo?`<button class="chip sm" onclick="app.undoAuto('${n.id}')">تراجع</button>`:''}
+      const lastRow=n===L[L.length-1];
+      return `<div style="margin-bottom:${lastRow?0:14}px">
+        <div>${n.text}</div>
+        ${(canUndo||lastRow)?`<div class="chips" style="margin-top:10px">
+          ${canUndo?`<button class="chip sm" onclick="app.undoAuto('${n.id}')">تراجع</button>`:''}
+          ${lastRow?`<button class="chip sm" onclick="app.clearAutoNote()">تمام</button>`:''}
+        </div>`:''}
       </div>`;}).join('')}
-    <button class="chip sm" onclick="app.clearAutoNote()">تمام</button>
   </div>`;
 }
 function pushNote(text,sid,t){
@@ -1153,6 +1156,7 @@ function runAuto(){
   const cu=catchUp();
   if(cu.n)pushNote('اتقيد '+cu.n+' دفعة عوائد بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');
   const tr=autoTrials();
+  if(cardInsAdvance())save();
   if(tr.length)pushNote('خلصت تجربة '+tr.map(esc).join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
   if(ac.length||cu.n||tr.length)save();
 }
@@ -1170,21 +1174,33 @@ function cardPaySrcHtml(a,sel,fn){
   return f?`<div class="hint" style="margin-top:12px">هيتخصم من ${esc(accName(f))}.</div>`
     :`<label class="f">من أنهي حساب؟ <b>*</b></label>${payChips(sel,fn,a.id,'me','',0,{src:1})}`;
 }
-/* اللي اتسدد على كشف: أي فلوس دخلت الكارت من يوم الكشف لحد الكشف اللي بعده، بأي طريقة */
-function stmtPaidOf(a,key){
-  const from=stmtDate(key,a), to=stmtDate(mAdd(key,1),a);
-  return Math.round(D.txns.filter(t=>t.kind==='transfer'&&t.to===a.id&&t.date>=from&&t.date<to)
-    .reduce((x,t)=>x+(Number(t.amount)||0),0)*100)/100;
+/* آخر ميعاد سداد جاي للكارت (يوم السداد في الشهر) */
+function cardNextDue(a){
+  let k=mAdd(stmtKey(today(),a),-1),g=0;
+  while(stmtDue(k,a)<today()&&g++<3)k=mAdd(k,1);
+  return stmtDue(k,a);
 }
-function stmtSettleIns(st){
-  if(st.insDone)return;
-  (D.installments||[]).filter(i=>i.src===st.acct&&i.mode!=='bank'&&!insDone(i)).forEach(i=>{
-    const m=insNextMonth(i);
-    i.paid=(Number(i.paid)||0)+1;i.covered=m;
-    if(!i.payments)i.payments=[];
-    i.payments.push({d:today(),m:m,amount:Number(i.monthly)||0,type:'front',viaStmt:true});
+/* المطلوب دلوقتي: اللي عليك للكارت من غير أقساط لسه ماجاش ميعادها */
+const cardDueNow=a=>Math.round(Math.max(0,cardDebt(a)-insRemainOn(a.id))*100)/100;
+/* أقساط الكارت بتتحرك شهر كل ما ميعاد السداد يعدي */
+function cardInsAdvance(){
+  let n=0;
+  (D.accounts||[]).filter(a=>a.credit).forEach(a=>{
+    let k=stmtKey(today(),a);
+    while(stmtDue(k,a)>today())k=mAdd(k,-1);
+    if(!a.insAdv){a.insAdv=k;n++;return;}
+    let g=0;
+    while(a.insAdv<k&&g++<24){
+      a.insAdv=mAdd(a.insAdv,1);n++;
+      (D.installments||[]).filter(i=>i.src===a.id&&i.mode!=='bank'&&!insDone(i)).forEach(i=>{
+        const m=insNextMonth(i);
+        i.paid=(Number(i.paid)||0)+1;i.covered=m;
+        if(!i.payments)i.payments=[];
+        i.payments.push({d:stmtDue(a.insAdv,a),m:m,amount:Number(i.monthly)||0,type:'front',viaStmt:true});
+      });
+    }
   });
-  st.insDone=true;
+  return n;
 }
 function cardLinkHtml(a,sel,fn){
   const banks=bankAccs();
@@ -1336,39 +1352,6 @@ function insRemainOn(accId){
   const all=(D.installments||[]).filter(i=>i.src===accId&&i.mode!=='bank'&&!insDone(i))
     .reduce((a,i)=>a+insLeft(i),0);
   return Math.round(Math.max(0,all-insDueThisStmt(accId))*100)/100;
-}
-const stmtRecord=(accId,key)=>(D.stmts||[]).find(s=>s.acct===accId&&s.key===key);
-function stmtRange(a,key){
-  // الدورة: من يوم الكشف بتاع الشهر اللي فات لحد اليوم اللي قبله في الشهر ده
-  const pm=mAdd(key,-1), d=acctStmtDay(a);
-  return {from:pm+'-'+dayInMonth(pm,d), to:dayShift(key+'-'+dayInMonth(key,d),-1)};
-}
-function buildStmt(a,key){
-  const r=stmtRange(a,key);
-  // اللي اتصرف على الكارت جوه الدورة بس
-  let spent=0;
-  D.txns.forEach(t=>{
-    if((t.book||'me')!=='me')return;
-    if(t.date<r.from||t.date>r.to)return;
-    if(t.kind==='expense'&&t.account===a.id)spent+=Number(t.amount)||0;
-    if(t.kind==='transfer'&&t.account===a.id)spent+=Number(t.amount)||0;
-    if(t.kind==='transfer'&&t.to===a.id)spent-=Number(t.amount)||0;
-    if(t.kind==='income'&&t.account===a.id)spent-=Number(t.amount)||0;
-  });
-  spent=Math.round(Math.max(0,spent)*100)/100;
-  // الأقساط اللي على الكارت: قسط الشهر بس، والباقي مش مستحق دلوقتي
-  const carry=Math.round((D.installments||[]).filter(i=>i.src===a.id&&i.mode!=='bank'&&!insDone(i))
-    .reduce((x,i)=>x+Math.max(0,insLeft(i)-insNextAmount(i)),0)*100)/100;
-  const monthly=insDueThisStmt(a.id);
-  const bankAdj=(D.installments||[]).filter(i=>i.mode==='bank'&&i.src===a.id).reduce((x,i)=>{
-    const e=insSchedule(i).find(s=>s.key===key);if(!e)return x;
-    return e.k===1?x-((Number(i.principal)||0)-e.prin):x+e.prin;},0);
-  const base=Math.round(Math.max(0,spent-carry+bankAdj)*100)/100;
-  /* التأمين بقى حركة لوحده يوم ١ (insuranceAll)، فبيدخل في «spent» جوه الدورة */
-  const fee=0;
-  return {owed:spent,carry:carry,monthly:monthly,base:base,fee:fee,
-    from:r.from,to:r.to,
-    total:Math.round((base+fee)*100)/100};
 }
 const isCardIns=i=>!!(D.accounts.find(a=>a.id===i.src&&a.credit));
 const insOnAccount=id=>(D.installments||[]).filter(i=>i.src===id&&i.mode!=='bank'&&!insDone(i)).reduce((a,i)=>a+insLeft(i),0);
@@ -1531,7 +1514,45 @@ function beforeChargeTime(s){
 }
 const subSoon=s=>subEnded(s)?false:(s.cycle==='trial'?daysTo(s.next)<=14
   :(!s.cancelAtEnd&&daysTo(s.next)<=3&&!beforeChargeTime(s)));
-const yearly=s=>(s.cycle==='trial'||subEnded(s))?0:(s.cycle==='yearly'?(subMineCost(s)+subFeeEst(s)):(subMineCost(s)+subFeeEst(s))*12);
+/* ---------- إجمالي الاشتراكات ----------
+   بيتحسب بس الاشتراك اللي ليه دفعات جاية: مش متوقف، ومش معلّم إنه هيتلغي،
+   والتجربة بتتحسب بس لو هتجددها (بسعرها ودورتها بعد التجربة). */
+function subLive(s){
+  if(subEnded(s)||s.cancelAtEnd)return false;
+  if(s.cycle==='trial')return !!s.willRenew&&Number(s.amount)>0;
+  return true;
+}
+const subCyc=s=>s.cycle==='trial'?(s.afterCycle||'monthly'):s.cycle;
+/* نصيبك من سعر معين */
+function subMineAt(s,price){
+  if(subPeople(s).length)return Math.max(0,price-subOthers(s));
+  if(s.myShare===null||s.myShare===undefined)return price;
+  return Math.min(Number(s.myShare)||0,price);
+}
+/* تدبير الدفعة: بالجنيه على الكارت بس، ٣٪ من السعر كله؛ ولو آخر دفعة كانت «مفيش تدبير» يبقى مفيش */
+function subFeeAt(s,price){
+  if(s.cur==='USD'||!isCreditAcc(s.account||'card'))return 0;
+  const lp=subLastPay(s);
+  if(lp&&lp.fee===0&&!lp.feePending)return 0;
+  return arrEst(price);
+}
+/* تكلفة دفعة واحدة بالجنيه بسعر معين */
+const subPayCost=(s,price)=>(s.cur==='USD'?subMineAt(s,price)*D.rate:subMineAt(s,price))+subFeeAt(s,price);
+const subNowPrice=s=>s.cycle==='trial'?(Number(s.amount)||0):subPrice(s);
+/* المتوسط في الشهر: الشهري بسعره الحالي، والسنوي مقسوم على ١٢ */
+function subMonthly(s){
+  if(!subLive(s))return 0;
+  const c=subPayCost(s,subNowPrice(s));
+  return subCyc(s)==='yearly'?c/12:c;
+}
+/* اللي هيتدفع في الـ١٢ شهر الجايين: شهور العرض بسعره والباقي بالسعر العادي */
+function yearly(s){
+  if(!subLive(s))return 0;
+  const reg=Number(s.amount)||0;
+  if(subCyc(s)==='yearly')return subPayCost(s,subNowPrice(s));
+  const left=(s.cycle!=='trial'&&s.promo&&Number(s.promo.left)>0)?Math.min(12,Number(s.promo.left)):0;
+  return left*subPayCost(s,Number(s.promo&&s.promo.amount)||0)+(12-left)*subPayCost(s,reg);
+}
 
 /* ==========================================================================
    4ب) المزامنة عبر GitHub Gist
@@ -2332,47 +2353,22 @@ ${s.cycle==='trial'
   }
 
   if(book==='me')D.accounts.filter(a=>a.credit&&!a.closed).forEach(a=>{
-    const key=stmtKey(today(),a);
-    if(today()<stmtDate(key,a))return;
-    let st=stmtRecord(a.id,key);
-    if(!st){
-      const s=buildStmt(a,key);
-      if(s.total<=0.01)return;
-      st={id:uid(),acct:a.id,key:key,owed:s.owed,carry:s.carry,monthly:s.monthly,
-        base:s.base,fee:s.fee,total:s.total,from:s.from,to:s.to,
-        paid:0,hidden:false,insDone:false};
-      D.stmts.push(st);save();
-    }
-    const paidNow=stmtPaidOf(a,key);
-    const left=Math.round((Number(st.total)-paidNow)*100)/100;
-    if(left<=0.01){if(!st.insDone){stmtSettleIns(st);save();}return;}
-    if(st.hidden&&!salaryAfter(st.hiddenQ))return;
-    const due=stmtDue(key,a);
-    const late=daysTo(dayShift(due,-1))<=0;
+    const due=cardNextDue(a), owe=cardDueNow(a);
+    /* بيظهر من يوم الكشف لحد آخر ميعاد السداد */
+    if(owe<=0.01||today()<stmtDate(mAdd(monthOf(due),-1),a))return;
+    const late=daysTo(due)<=0;
+    /* «شفتها»: مستخبي لحد مرتب جديد، أو ٣ أيام قبل آخر ميعاد */
+    const sn=a.dueSeen;
+    if(sn&&sn.due===due&&!salaryAfter(sn.q)&&daysTo(due)>3)return;
     rows.push(`
     <div class="alert">
       <span class="rail" style="background:${late?'var(--clay)':'#C79447'}"></span>
-      <span class="g"><span class="t">${late?'آخر ميعاد سداد ':'مديونية '}${esc(a.name)}</span>
-        <span class="s" style="display:block">مشتريات ${dLabel(st.from||stmtRange(a,key).from)} ← ${dLabel(st.to||stmtRange(a,key).to)}</span>
-        <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}${
-          st.carry>0.01?` · متبقي مقسط <span class="n">${fmt(st.carry)}</span>`:''}</span>
-        <span class="s" style="display:block">أصل <span class="n">${fmt(st.base)}</span> + تأمين <span class="n">${fmt(st.fee)}</span>${
-          paidNow>0.01?` · سددت <span class="n">${fmt(paidNow)}</span>`:''}</span></span>
-      <span class="vl" style="color:${late?'var(--clay)':'inherit'};white-space:nowrap">${money(left,'EGP')}</span>
-      <button class="chip sm" onclick="app.startStmtPay('${st.id}')">${stmtFor===st.id?'إخفاء':'سدد'}</button>
-      ${(!st.hidden&&!late)?`<button class="chip sm" onclick="app.hideStmt('${st.id}')">شفتها</button>`:''}
-    </div>
-    ${stmtFor===st.id?`<div class="inline">
-      <label class="f">تسدد كام؟</label>
-      ${pickRow('stmtmode'+st.id,[{id:'full',label:`الكل (<span class="n">${fmt(left)}</span>)`},{id:'part',label:'مبلغ تاني'}],stmtMode,'app.stmtMode',1)}
-      ${stmtMode==='part'?`<input class="f" id="stmtin" style="margin-top:10px" type="text" inputmode="decimal" value="${left}" oninput="numFix(this,1)">`:''}
-      ${cardPaySrcHtml(a,stmtAcct,'app.setStmtAcct')}
-      <label class="f">التاريخ</label>
-      ${dateField(stmtPayDate||today(),'app.setStmtPayDate')}
-      ${st.monthly>0.01?`<div class="hint">المبلغ ده شامل قسط الشهر (<span class="n">${fmt(st.monthly)}</span>)، فالأقساط هتتحرك لوحدها.</div>`:''}
-      <button class="btn" ${(cardSrc(a)||stmtAcct)?'':'disabled'} onclick="app.payStmt('${st.id}')">سجّل السداد</button>
-      <button class="btn ghost" onclick="app.cancelStmtPay()">إلغاء</button>
-    </div>`:''}`);
+      <span class="g"><span class="t">${late?'النهارده آخر ميعاد سداد ':'سدد '}${esc(a.name)}</span>
+        <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}${insRemainOn(a.id)>0.01?' · من غير أقساط لسه ماجاش ميعادها':''}</span></span>
+      <span class="vl" style="color:${late?'var(--clay)':'inherit'};white-space:nowrap">${money(owe,'EGP')}</span>
+      <button class="chip sm" onclick="app.goPayCard('${a.id}')">سدد</button>
+      ${daysTo(due)>3?`<button class="chip sm" onclick="app.seeDue('${a.id}','${due}')">شفتها</button>`:''}
+    </div>`);
   });
 
   if(book==='me'&&ofeeBalance()>=Number(D.ofeeLimit||200))rows.push(`
@@ -3113,7 +3109,7 @@ function wAccounts(){
         <label class="f">تسدد كام؟</label>
         ${pickRow('pcm'+a.id,[{id:'full',label:`المبلغ كله (<span class="n">${fmt(due)}</span>)`}].concat((insOnAccount(a.id)>0.01&&due-insOnAccount(a.id)>0.01)?[{id:'noins',label:`من غير الأقساط (<span class="n">${fmt(due-insOnAccount(a.id))}</span>)`}]:[]).concat([{id:'part',label:'مبلغ تاني'}]),payCard.mode,'app.payCardMode',1)}
         ${payCard.mode==='part'?`<input class="f" style="margin-top:10px" type="text" inputmode="decimal"
-          value="${esc(payCard.amount)}" oninput="app.payCardSet('amount',numFix(this,1))">`:''}
+          value="${esc(payCard.amount===''?String(due):payCard.amount)}" oninput="app.payCardSet('amount',numFix(this,1))">`:''}
         ${cardPaySrcHtml(a,payCard.from,'app.setPayCardFrom')}
         <label class="f">التاريخ</label>
         ${dateField(payCard.date,'app.payCardDate')}
@@ -3268,7 +3264,8 @@ function wSubs(){
     return a.next<b.next?-1:a.next>b.next?1:0;
   });
   const active=list.filter(s=>s.cycle!=='trial');
-  const mo=active.reduce((a,s)=>a+yearly(s)/12,0);
+  const mo=Math.round(list.reduce((a,s)=>a+subMonthly(s),0)*100)/100;
+  const yr=Math.round(list.reduce((a,s)=>a+yearly(s),0)*100)/100;
   const ok=subOk();
   return `<div style="margin-top:18px">
     <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleSub()">${showSub?'إلغاء':'ضيف اشتراك'}</button>
@@ -3321,8 +3318,8 @@ function wSubs(){
       <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>
     `:''}
     ${list.length?`<div class="stats" style="margin-bottom:16px">
-      <div class="stat"><b>${fmt(Math.round(mo))}</b><span>في الشهر</span></div>
-      <div class="stat"><b>${fmt(Math.round(mo*12))}</b><span>في السنة</span></div>
+      <div class="stat"><b>${fmt(mo)}</b><span>في الشهر</span></div>
+      <div class="stat"><b>${fmt(yr)}</b><span>في السنة</span></div>
       <div class="stat"><b>${active.length}</b><span>اشتراك${list.length-active.length?' + '+(list.length-active.length)+' تجربة':''}</span></div>
     </div>`:''}
 
@@ -3343,13 +3340,6 @@ function wSubs(){
         ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
           subLastPay(s).fee?` · <span class="n">${fmt(subLastPay(s).paid||s.amount)}</span> + <span class="n">${fmt(subLastPay(s).fee)}</span> تدبير${subLastPay(s).feePending?' (تقديري — لسه ماتخصمش)':''}${subLastPay(s).feePending?'':` = <span class="n">${fmt((subLastPay(s).paid||Number(s.amount))+Number(subLastPay(s).fee))}</span>`}`:''}</div>`:''}
         ${!trial&&subLastPay(s)&&subLastPay(s).feePending?`<div class="hint">مصاريف التدبير تقديرية <span class="n">${ARRRATE}%</span> لحد ما تأكدها من «محتاج انتباهك».</div>`:''}
-        ${feeFor===s.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-          <label class="f">مبلغ تدبير العملة اللي اتخصم لوحده</label>
-          <input class="f" id="feein" type="text" inputmode="decimal" oninput="numFix(this,1)">
-          <div class="hint">هيتسجل حركة منفصلة بتصنيف عمولات ورسوم، وهيتجمع مع الاشتراك في الإجمالي.</div>
-          <button class="btn" onclick="app.saveFee('${s.id}')">احفظ</button>
-          <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
-        </div>`:''}
         ${trial?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بعد التجربة: ${s.willRenew
           ?((s.afterCycle==='yearly'?'سنوي':'شهري')+' · '+money(s.amount,s.cur))
           :'هلغيها'}</div>`:''}
@@ -4043,6 +4033,12 @@ if(document.addEventListener){
 }
 function unlockRender(){renderLock=0;if(renderPending){renderPending=false;render();}}
 
+/* مكان السكرول لكل صفحة (ولكل تاب في المحفظة ولكل دفتر) */
+const scrollMem={};
+const pageKey=()=>book+'|'+tab+(tab==='wallet'?'|'+wtab:'');
+const curY=()=>(window.scrollY||window.pageYOffset||0);
+function rememberY(){scrollMem[pageKey()]=curY();}
+function restoreY(){window.scrollTo(0,scrollMem[pageKey()]||0);}
 function render(){
   if(renderLock){renderPending=true;return;}
   if(!officeOn()&&book==='office')book='me';
@@ -4069,7 +4065,9 @@ function render(){
   if(cn)cn.innerHTML=cr.length?('رصيد ائتماني متاح: <span class="n">'+fmt(cr.reduce((x,a)=>x+(b[a.id]||0),0))+'</span>'):'';
   const views={home:vHome,add:vAdd,scan:vScan,wallet:vWallet,log:vLog,settings:vSettings};
   const showWel=isFresh()&&!welSkipped&&tab!=='settings';
+  const _y=curY();
   document.getElementById('view').innerHTML=showWel?vWelcome():views[tab]();
+  if(Math.abs(curY()-_y)>1)window.scrollTo(0,_y);
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
 }
 
@@ -4089,7 +4087,7 @@ function refundVoucher(t){
 }
 
 const app=new Proxy({
-  setBook(bk){book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();window.scrollTo(0,0);},
+  setBook(bk){rememberY();book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();restoreY();},
   goClose(){tab='wallet';wtab='close';closeTo=today();render();window.scrollTo(0,0);},
   oSet(k,v){draftO[k]=v;setDisabled('osave',oOk());
     const el=document.getElementById('ominehint');
@@ -4285,8 +4283,8 @@ const app=new Proxy({
     const last=s&&s.payments&&s.payments[s.payments.length-1];
     if(last&&last.t===n.t)app.undoSubPay(n.sid);else{save();render();}
   },
-  go(t){renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};openRow={};if(t==='settings')accCfgInit();render();window.scrollTo(0,0);},
-  setWtab(w){wtab=w;payFor=null;convFor=null;editAcct=null;render();},
+  go(t){rememberY();renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};openRow={};if(t==='settings')accCfgInit();render();restoreY();},
+  setWtab(w){rememberY();wtab=w;payFor=null;convFor=null;editAcct=null;render();restoreY();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();
     const x=document.getElementById('qx');if(x&&x.style)x.style.display=v?'block':'none';},
@@ -4922,7 +4920,7 @@ const app=new Proxy({
   doPayCard(id,due){
     const amt=payCard.mode==='full'?due
       :payCard.mode==='noins'?Math.max(0,due-insOnAccount(id))
-      :(Number(onlyNum(payCard.amount))||0);
+      :(payCard.amount===''?due:(Number(onlyNum(payCard.amount))||0));
     if(amt<=0)return;
     const from=cardSrc(D.accounts.find(x=>x.id===id))||payCard.from;
     if(!from||isCreditAcc(from))return;
@@ -5140,27 +5138,9 @@ const app=new Proxy({
     }else return;
     t.needs=undefined;needsFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
-  startStmtPay(id){stmtFor=stmtFor===id?null:id;stmtMode='full';stmtAcct='';stmtPayDate='';render();},
-  cancelStmtPay(){stmtFor=null;render();},
-  stmtMode(m){stmtMode=m;render();},
-  setStmtAcct(id){stmtAcct=id;render();},
-  hideStmt(id){
-    const st=(D.stmts||[]).find(s=>s.id===id);if(!st)return;
-    st.hidden=true;st.hiddenQ=Number(D._qmax||0);save();render();
-  },
-  setStmtPayDate(v){stmtPayDate=v;render();},
-  payStmt(id){
-    const st=(D.stmts||[]).find(s=>s.id===id);if(!st)return;
-    const a=D.accounts.find(x=>x.id===st.acct);if(!a)return;
-    const left=Math.round((Number(st.total)-stmtPaidOf(a,st.key))*100)/100;
-    const amt=stmtMode==='full'?left:(numVal('stmtin')||0);
-    if(amt<=0)return;
-    const from=cardSrc(a)||stmtAcct;
-    if(!from||isCreditAcc(from))return;
-    D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:Math.round(amt*100)/100,account:from,to:st.acct,
-      date:stmtPayDate||today(),note:'سداد مديونية '+mLabel(st.key)});
-    stmtFor=null;stmtPayDate='';sortTxns();save();render();app.toast('اتسجل السداد');
-  },
+  goPayCard(id){rememberY();tab='wallet';wtab='accounts';alertsOpen=false;
+    payCard={id:id,mode:'full',amount:'',from:'',date:today()};editAcct=null;render();window.scrollTo(0,0);},
+  seeDue(id,due){const a=D.accounts.find(x=>x.id===id);if(a){a.dueSeen={due:due,q:Number(D._qmax||0)};save();render();}},
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
   flPaySet_from(v){flPay.from=v;render();},
@@ -5504,17 +5484,6 @@ const app=new Proxy({
     feeFor=null;save();render();
   },
   cancelFee(){feeFor=null;render();},
-  saveFee(id){
-    const s=D.subs.find(x=>x.id===id);if(!s)return;
-    const v=numVal('feein');
-    if(v<=0){feeFor=null;render();return;}
-    const p=subLastPay(s);if(!p){feeFor=null;render();return;}
-    const t={id:uid(),book:'me',kind:'expense',amount:v,cat:'fees',account:s.account||'card',
-      date:today(),note:'تدبير عملة — '+s.name};
-    D.txns.unshift(t);
-    p.fee=v;p.feeTxn=t.id;s.feeEst=v;
-    feeFor=null;sortTxns();save();render();app.toast('اتسجلت');
-  },
   setPaySubDate(v){paySubDate=v;render();},
   cancelPaySub(){paySubFor=null;render();},
   confirmPaySub(id){
