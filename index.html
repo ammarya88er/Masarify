@@ -389,6 +389,8 @@ function delBtn(key,fn,label,cls){
 function setText(id,txt){const el=document.getElementById(id);if(el)el.textContent=txt;}
 function setDisabled(id,ok){const b=document.getElementById(id);if(b)b.disabled=!ok;}
 const pad=n=>String(n).padStart(2,'0');
+/* رقم محسوب يتكتب جوه خانة: رقمين بعد العلامة من غير كسور زيادة */
+const n2=x=>String(Math.round((Number(x)||0)*100)/100);
 const today=()=>new Date().toISOString().slice(0,10);
 const yesterday=()=>{const d=new Date();d.setDate(d.getDate()-1);return d.toISOString().slice(0,10);};
 const monthOf=d=>(d||'').slice(0,7);
@@ -1851,7 +1853,8 @@ function acctRow(a,b,extra,attrs){
   if(a.scope==='both'){
     const bm=balances('me')[a.id]||0, bo=balances('office')[a.id]||0;
     split=`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
-      ${book==='me'?'عهدة مكتب':'فلوسك'} <span class="n">${fmt(book==='me'?bo:bm)}</span> · إجمالي الحساب <span class="n">${fmt(bm+bo)}</span></span>`;
+      <span style="display:block">${book==='me'?'عهدة '+esc(bookName()):'فلوسك'} <span class="n">${fmt(book==='me'?bo:bm)}</span></span>
+      <span style="display:block">إجمالي الحساب <span class="n">${fmt(bm+bo)}</span></span></span>`;
   }
   return `<div class="arow" ${attrs||''}>
     <span class="rail" style="background:${aColor(a.id)}"></span>
@@ -2097,7 +2100,7 @@ function alertsPanel(){
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
     </div>`:`<div class="inline">
       <label class="f">المبلغ الحقيقي اللي اتخصم بالجنيه</label>
-      <input class="f" id="fixin" type="text" inputmode="decimal" value="${t.amount}" oninput="numFix(this,1)">
+      <input class="f" id="fixin" type="text" inputmode="decimal" value="${n2(t.amount)}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFix('${t.id}')">ظبّط المبلغ</button>
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
     </div>`):''}`);});
@@ -2159,7 +2162,7 @@ function alertsPanel(){
     </div>
     ${rbackFor===t.id?`<div class="inline">
       <label class="f">رجع كام بالجنيه؟</label>
-      <input class="f" id="rbin" type="text" inputmode="decimal" value="${t.amount}" oninput="numFix(this,1)">
+      <input class="f" id="rbin" type="text" inputmode="decimal" value="${n2(t.amount)}" oninput="numFix(this,1)">
       <div class="hint">${t.usd?'لو رجع بمبلغ مختلف عن اللي اتخصم، الفرق هيتسجل فرق سعر صرف لوحده.':'لو رجع بمبلغ مختلف، الفرق هيتسجل لوحده.'}</div>
       <button class="btn" onclick="app.confirmRefundBack('${t.id}')">سجّل الاسترداد</button>
       <button class="btn ghost" onclick="app.cancelRefundBack()">إلغاء</button>
@@ -2229,7 +2232,7 @@ ${s.cycle==='trial'
     </div>
     ${loanFor?`<div class="inline">
       <label class="f">${loanBalance()>0?'رجّعت كام للعهدة؟':'أخدت كام من العهدة؟'}</label>
-      <input class="f" id="loanin" type="text" inputmode="decimal" value="${Math.abs(loanBalance())}" oninput="numFix(this,1)">
+      <input class="f" id="loanin" type="text" inputmode="decimal" value="${n2(Math.abs(loanBalance()))}" oninput="numFix(this,1)">
       ${loanBalance()>0?`<label class="f">سددت من أنهي حساب؟</label>
         ${pickRow('flfrom',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.from||(myOnly()[0]||{}).id,'app.flPaySet_from',1)}
         <label class="f">على أنهي حساب في العهدة؟</label>
@@ -2305,7 +2308,7 @@ ${s.cycle==='trial'
         <label class="f">دخلت على أنهي حساب؟ <b>*</b></label>
         ${payChips(owedAcct,'app.setOwedAcct','','me')}
         <label class="f">وصلك كام بالظبط؟</label>
-        <input class="f" type="text" inputmode="decimal" value="${total}" oninput="app.setOwedGot(numFix(this,1))">
+        <input class="f" type="text" inputmode="decimal" value="${n2(total)}" oninput="app.setOwedGot(numFix(this,1))">
         <div class="hint">${list.length>1?'المبلغ هيتوزع على المستحقات دي بالترتيب. ':''}لو قرّب الرقم أو نقّص، اكتب اللي وصل فعلًا.</div>
         <button class="btn" ${owedAcct?'':'disabled'} onclick="app.confirmOwedGet('${esc(gid)}')">أكد الاستلام</button>
         <button class="btn ghost" onclick="app.dropOwedGroup('${esc(gid)}')">شيلها خالص</button>
@@ -2343,7 +2346,7 @@ ${s.cycle==='trial'
       <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
     </div>`:`<div class="inline">
       <label class="f">اتخصم كام بالجنيه؟</label>
-      <input class="f" id="feein" type="text" inputmode="decimal" value="${p.paid}" oninput="numFix(this,1)">
+      <input class="f" id="feein" type="text" inputmode="decimal" value="${n2(p.paid)}" oninput="numFix(this,1)">
       <button class="btn" onclick="app.confirmFee('${esc(key)}')">أكد</button>
       <button class="btn ghost" onclick="app.cancelFee()">إلغاء</button>
     </div>`;})():feeConfirmHtml(p.fee||0,`app.confirmFee('${esc(key)}')`,`app.noFee('${esc(key)}')`)):''}`);
@@ -2462,7 +2465,7 @@ ${s.cycle==='trial'
   if(book==='me'&&ofeeBalance()>=Number(D.ofeeLimit||200))rows.push(`
     <div class="alert">
       <span class="rail" style="background:#C4A484"></span>
-      <span class="g"><span class="t">رسوم مكتب ليك</span>
+      <span class="g"><span class="t">رسوم ${esc(bookName())} ليك</span>
         <span class="s" style="display:block">دفعتها من فلوسك ووصلت حد <span class="n">${fmt(D.ofeeLimit)}</span></span></span>
       <span class="vl" style="color:var(--mint);white-space:nowrap">${money(ofeeBalance(),'EGP')}</span>
       <button class="chip sm" onclick="app.startOfee()">${ofeeFor?'إخفاء':'أخدتها'}</button>
@@ -2470,12 +2473,12 @@ ${s.cycle==='trial'
     ${ofeeFor?`<div class="inline">
       <label class="f">أخدت كام؟</label>
       ${pickRow('ofeemode',[{id:'full',label:`المبلغ بالظبط (<span class="n">${fmt(ofeeBalance())}</span>)`},{id:'part',label:'مبلغ تاني'}],ofeeMode,'app.setOfeeMode',1)}
-      ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${ofeeBalance()}" oninput="numFix(this,1)">`:''}
+      ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${n2(ofeeBalance())}" oninput="numFix(this,1)">`:''}
       <label class="f">من أنهي حساب عهدة؟ <b>*</b></label>
       ${payChips(ofeeAcct,'app.setOfeeAcct','','office','',0,{src:1})}
       <label class="f">دخلت على أنهي حساب عندك؟ <b>*</b></label>
       ${payChips(ofeeTo,'app.setOfeeTo','','me')}
-      <div class="hint">هتتسجل مصروف مكتب${defOcat()?' بتصنيف '+esc(ocatOf(defOcat()).label):' من غير تصنيف'}، وأي فرق هيترحّل للمرة الجاية.</div>
+      <div class="hint">هتتسجل مصروف على ${esc(bookName())}${defOcat()?' بتصنيف '+esc(ocatOf(defOcat()).label):' من غير تصنيف'}، وأي فرق هيترحّل للمرة الجاية.</div>
       <button class="btn" ${ofeeAcct&&ofeeTo?'':'disabled'} onclick="app.takeOfee()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelOfee()">إلغاء</button>
     </div>`:''}`);
@@ -2729,7 +2732,7 @@ function txnEditForm(t){
         <button class="btn" onclick="app.doReturn('${t.id}',${ix})">أكد الإرجاع</button>
         <button class="btn ghost" onclick="app.cancelReturn()">إلغاء</button>
       </div>`:''}`).join('')}
-      <div class="hint">تقدر تغيّر اسم الصنف، تحوّله للمكتب، أو تسجّل إنك رجّعته. المبلغ والتصنيف زي ما هما.</div>
+      <div class="hint">تقدر تغيّر اسم الصنف، تحوّله لـ${esc(bookName())}، أو تسجّل إنك رجّعته. المبلغ والتصنيف زي ما هما.</div>
     `:`
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`}
@@ -2932,7 +2935,7 @@ function vScan(){
             ${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${c.label}</option>`).join('')}
           </select>
           <input class="vl" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${Number(it.amount)?it.amount:''}" onfocus="this.select()" oninput="app.iset(${k},'amount',numFix(this,1))">
-          <button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?'مكتب':(it.who?esc(it.who):'ليا')}</button>
+          <button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?esc(bookName()):(it.who?esc(it.who):'ليا')}</button>
           <button class="x" onclick="app.delItem(${k})">×</button>
         </div>
         ${ownerFor===k?`<div class="rl" style="border:0;padding-top:0;flex-wrap:wrap;gap:6px">
@@ -3053,7 +3056,7 @@ function wOAccounts(){
         `onclick="app.editAccount('${a.id}')" style="cursor:pointer"`)}
       ${editAcct===a.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
         <label class="f" style="margin-top:12px">رصيد العهدة الحالي في الحساب ده</label>
-        <input class="f" id="obalin" type="text" inputmode="decimal" value="${b[a.id]||0}" oninput="numFix(this,1)">
+        <input class="f" id="obalin" type="text" inputmode="decimal" value="${n2(b[a.id]||0)}" oninput="numFix(this,1)">
         <div class="hint">لو معاك باقي من تقفيل قديم مش مسجل هنا، اكتب الرقم الصح وهيتسجل كرصيد فتح للعهدة.</div>
         <button class="btn" style="margin-top:14px" onclick="app.setOfficeBalance('${a.id}',${b[a.id]||0})">ظبّط الرصيد</button>
       </div>`:''}`).join('')}
@@ -3173,7 +3176,7 @@ function wAccounts(){
   const b=balances();
   return `<div style="margin-top:18px">
     <div class="panel">${accountsFor('me').map(a=>{
-      const lim=Number(a.limit)||0, due=Math.max(0,lim-(b[a.id]||0));
+      const lim=Number(a.limit)||0, due=Math.round(Math.max(0,lim-(b[a.id]||0))*100)/100;
       return `
       ${acctRow(a,b,`<span style="color:var(--muted);font-size:12px">${editAcct===a.id?'▲':'▼'}</span>`,
         `onclick="app.editAccount('${a.id}')" style="cursor:pointer"`)}
@@ -3187,7 +3190,7 @@ function wAccounts(){
           ${saveFieldsHtml(svEdit,'edit')}
           <button class="btn" style="margin-top:14px" onclick="app.saveSaveCfg('${a.id}')">احفظ إعدادات الادخار</button>`:''}
         <label class="f" style="margin-top:12px">الرصيد الحالي</label>
-        <input class="f" id="balin" type="text" inputmode="decimal" value="${b[a.id]}" oninput="numFix(this,1)">
+        <input class="f" id="balin" type="text" inputmode="decimal" value="${n2(b[a.id])}" oninput="numFix(this,1)">
         <button class="btn ghost" style="margin-top:14px" onclick="app.setBalance('${a.id}',${b[a.id]})">ظبّط الرصيد</button>
       </div>`:''}
       ${payCard.id===a.id?`<div style="padding:4px 16px 20px;background:var(--surf2)">
@@ -3197,11 +3200,11 @@ function wAccounts(){
         <label class="f">تسدد كام؟</label>
         ${pickRow('pcm'+a.id,[{id:'full',label:`المبلغ كله (<span class="n">${fmt(due)}</span>)`}].concat((insOnAccount(a.id)>0.01&&due-insOnAccount(a.id)>0.01)?[{id:'noins',label:`من غير الأقساط (<span class="n">${fmt(due-insOnAccount(a.id))}</span>)`}]:[]).concat([{id:'part',label:'مبلغ تاني'}]),payCard.mode,'app.payCardMode',1)}
         ${payCard.mode==='part'?`<input class="f" style="margin-top:10px" type="text" inputmode="decimal"
-          value="${esc(payCard.amount===''?String(due):payCard.amount)}" oninput="app.payCardSet('amount',numFix(this,1))">`:''}
+          value="${esc(payCard.amount===''?n2(due):payCard.amount)}" oninput="app.payCardSet('amount',numFix(this,1))">`:''}
         ${cardPaySrcHtml(a,payCard.from,'app.setPayCardFrom')}
         <label class="f">التاريخ</label>
         ${dateField(payCard.date,'app.payCardDate')}
-        <button class="btn" ${(payCard.mode==='full'?due>0:Number(onlyNum(payCard.amount))>0)?'':'disabled'}
+        <button class="btn" ${((payCard.mode==='full'?due>0:(payCard.amount===''?due:Number(onlyNum(payCard.amount))||0)>0)&&payCard.date)?'':'disabled'}
           onclick="app.doPayCard('${a.id}',${due})">سجّل السداد</button>
         <button class="btn ghost" onclick="app.cancelPayCard()">إلغاء</button>
       </div>`:''}`}).join('')}
@@ -3449,7 +3452,7 @@ function wSubs(){
           <div class="hint" style="margin-top:0">لو اتسحب منك مرتين في نفس الدورة، سجّل السحبة الزيادة هنا. تاريخ التجديد مش هيتغير.</div>
           ${(s.cur==='USD'&&isCreditAcc(s.account||'card'))?holdField('repbal',repBal,"app.setRepBal(app.holdLive('repbal','"+(s.account||'card')+"',0))",s.account||'card',0):''}
           <label class="f">المبلغ${s.cur==='USD'?' بالدولار':''}</label>
-          <input class="f" id="repamt" type="text" inputmode="decimal" value="${subPrice(s)}" oninput="numFix(this,1)">
+          <input class="f" id="repamt" type="text" inputmode="decimal" value="${n2(subPrice(s))}" oninput="numFix(this,1)">
           <label class="f">التاريخ</label>
           ${dateField(repDate,'app.setRepDate')}
           <button class="btn" onclick="app.addRepeat('${s.id}')">سجّل السحبة</button>
@@ -3639,7 +3642,7 @@ function wIns(){
           <label class="f">دفعته إمتى؟</label>
           ${dateField(payDate,'app.setPayDate')}
           ${i.src==='office'?`<label class="f">المبلغ</label>
-            ${editAmt?`<input class="f" id="insamt" type="text" inputmode="decimal" value="${insNextAmount(i)}" oninput="numFix(this,1)">`
+            ${editAmt?`<input class="f" id="insamt" type="text" inputmode="decimal" value="${n2(insNextAmount(i))}" oninput="numFix(this,1)">`
               :`<div class="arow" style="border:1px solid var(--line);border-radius:14px;background:var(--surf)">
                   <span class="nm n" style="font-size:15px;font-weight:600">${fmt(insNextAmount(i))}</span>
                   <button class="chip sm" onclick="app.toggleEditAmt()">غيّر المبلغ</button>
@@ -4286,7 +4289,7 @@ const app=new Proxy({
       const ofv=draftO.hasFee?(Number(onlyNum(draftO.feeAmt))||0):0;
       if(ofv>0){
         const ft={id:uid(),book:'me',kind:'expense',amount:ofv,cat:'fees',account:draftO.account,
-          date:draftO.date,note:'رسوم مكتب — '+it};
+          date:draftO.date,note:'رسوم '+bookName()+' — '+it};
         D.txns.unshift(ft);
         if(!D.ofees)D.ofees=[];
         D.ofees.push({id:uid(),type:'fee',amount:ofv,date:draftO.date,note:it,srcTxn:ft.id});
@@ -4468,7 +4471,7 @@ const app=new Proxy({
     D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:amt,account:t.account,
       date:t.date,item:oit,ocat:defOcat(),note:oit,
       place:t.merchant||undefined});
-    eTxn=null;sortTxns();save();render();app.toast('اتحول للمكتب');
+    eTxn=null;sortTxns();save();render();app.toast('اتحول لـ'+bookName());
   },
   editOwedField(id,k,v){
     const o=(D.owed||[]).find(x=>x.id===id);if(!o)return;
@@ -5041,7 +5044,7 @@ const app=new Proxy({
     const amt=payCard.mode==='full'?due
       :payCard.mode==='noins'?Math.max(0,due-insOnAccount(id))
       :(payCard.amount===''?due:(Number(onlyNum(payCard.amount))||0));
-    if(amt<=0)return;
+    if(amt<=0||!payCard.date)return;
     const from=cardSrc(D.accounts.find(x=>x.id===id))||payCard.from;
     if(!from||isCreditAcc(from))return;
     D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:Math.round(amt*100)/100,
@@ -5139,7 +5142,7 @@ const app=new Proxy({
     D.txns.unshift({id:uid(),link:link,book:'office',kind:'expense',amount:amt,account:ofeeAcct,
       date:today(),item:'رسوم',ocat:defOcat(),note:'رسوم'});
     D.txns.unshift({id:uid(),link:link,book:'me',kind:'expense',amount:-amt,cat:'fees',account:ofeeTo,
-      date:today(),note:'استرداد رسوم مكتب'});
+      date:today(),note:'استرداد رسوم '+bookName()});
     if(!D.ofees)D.ofees=[];
     D.ofees.push({id:uid(),type:'take',amount:amt,date:today(),note:'استرداد'});
     ofeeFor=false;ofeeAcct='';ofeeTo='';sortTxns();save();render();app.toast('اتسجلت');
@@ -6009,7 +6012,7 @@ const app=new Proxy({
   },
   setOfficeOn(v){
     if(!v&&hasOfficeData()){
-      alert('فيه بيانات مكتب مسجلة. امسحها الأول لو عايز تقفل الدفتر.');
+      alert('فيه بيانات مسجلة في دفتر '+bookName()+'. امسحها الأول لو عايز تقفل الدفتر.');
       return;
     }
     D.officeOn=!!v;
