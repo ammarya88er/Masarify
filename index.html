@@ -452,7 +452,6 @@ let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
-let catDraft='';
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
@@ -464,7 +463,7 @@ let fixMode='final', feeMode='final', feeEd=null, feeAsk=null;
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false;
-let setsOpen={};
+let setsOpen={}, accOpen=null;
 let openRow={};
 let rbackFor=null;
 let flPay={from:'',to:''};
@@ -1392,7 +1391,6 @@ const insTail=i=>Number(i.tail)||0;
 const insNextMonth=i=>i.covered?mAdd(i.covered,1):insFirst(i);
 const insNextAmount=i=>((Number(i.paid)||0)>=(Number(i.months)||0)&&insRest(i)>0)
   ?insRest(i):(Number(i.monthly)||0);
-const insLastOpenMonth=i=>mAdd(insFirst(i),Math.max(0,(Number(i.months)||0)-1-insTail(i)));
 function insAhead(i){
   if(!i.covered)return 0;
   const cur=curPeriodMonth();
@@ -1454,7 +1452,6 @@ function insWhen(i){
 }
 
 /* --- شهادات --- */
-const certMonthly=(amount,rate)=>Math.round((Number(onlyNum(amount))||0)*(Number(onlyNum(rate))||0)/1200*100)/100;
 function mkCert(name,amount,monthly,start,account,end,type,day){
   return {id:uid(),name:name,type:type||'cert',day:Number(onlyNum(day))||0,amount:Number(onlyNum(amount))||0,
     monthly:Number(onlyNum(monthly))||0,start:start,account:account,end:end||'',covered:'',payments:[]};
@@ -1570,14 +1567,12 @@ const subMine=s=>{
   if(subPeople(s).length)return Math.max(0,subPrice(s)-subOthers(s));
   return (s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
 };
-const subMineCost=s=>s.cur==='USD'?subMine(s)*D.rate:subMine(s);
 const subShared=s=>subMine(s)<subPrice(s)-0.001;
 const subLastPay=s=>{
   const ps=(s.payments||[]).filter(p=>!p.dup);
   return ps.length?ps[ps.length-1]:null;
 };
 const subDups=s=>(s.payments||[]).filter(p=>p.dup&&!p.settled);
-const subFeeEst=s=>Number(s.feeEst)||0;
 const openDues=s=>(s.dues||[]).filter(d=>!d.got);
 const subEnded=s=>!!s.cancelAtEnd&&daysTo(s.next)<=0;
 function beforeChargeTime(s){
@@ -2335,6 +2330,7 @@ ${s.cycle==='trial'
           usd?` · <span class="n">${fmt(p.paid)}</span> ${((D.txns.find(x=>x.id===p.t)||{}).hold)?'محجوز':'تقديري'}`:(p.feePending?` · تدبير تقديري <span class="n">${fmt(p.fee)}</span>`:'')}</span></span>
       <span class="vl" style="white-space:nowrap">${usd?money(s.amount,'USD'):money(p.paid,'EGP')}</span>
       <div class="chips" style="flex-basis:100%;margin:10px 0 0">
+        <button class="chip sm" onclick="app.undoDup('${s.id}','${p.t}')">رجعت</button>
         ${(usd&&canHoldFix(D.txns.find(x=>x.id===p.t)))?`<button class="chip sm${feeFor===key&&feeMode==='hold'?' on':''}" onclick="app.startFeeFix('${esc(key)}','hold')">محجوز</button>`:''}
         <button class="chip sm${feeFor===key&&feeMode!=='hold'?' on':''}" onclick="app.startFeeFix('${esc(key)}','final')">ظبّط</button>
       </div>
@@ -3869,75 +3865,29 @@ function setSec(key,title,badge,body,mt){
   const on=!!setsOpen[key];
   return `<div class="sec"${mt?` style="margin-top:${mt}"`:''}>
     <div class="sec-h" onclick="app.toggleSet('${key}')" style="cursor:pointer${on?'':';margin-bottom:0'}">
-      <h3>${esc(title)}</h3>
-      <span>${badge!==''&&badge!==undefined?esc(String(badge))+' · ':''}${on?'▲':'▼'}</span>
+      <h3>${title.indexOf('<')>-1?title:esc(title)}</h3>
+      <span style="text-align:left">${badge!==''&&badge!==undefined?esc(String(badge))+' · ':''}${on?'▲':'▼'}</span>
     </div>
     ${on?body():''}
   </div>`;
 }
 
+/* عنوان مجموعة في الإعدادات */
+const setGrp=(t,mt)=>`<div style="font-size:11.5px;color:var(--muted);letter-spacing:.3px;margin:${mt||'28px'} 4px 2px">${t}</div>`;
+const atypeLabel=a=>a.credit?'كارت ائتماني':({cash:'كاش',bank:'حساب بنكي',wallet:'محفظة موبايل',save:'ادخار'}[a.atype]||'كاش');
 function vSettings(){
+  const syncSum=ghGist?('مربوطة'+(D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync)):'')):'مش مربوطة';
   return `<div style="padding-top:20px">
+    ${setGrp('حساباتك','6px')}
+    ${setSec('accs','الحسابات',D.accounts.length+' حسابات',()=>`
 
-    ${setSec('sync','المزامنة التلقائية','',()=>`
-    <p class="hint" style="margin-top:-4px">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
-    ${ghGist?`
-      <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
-      ${ghState.msg?`<div class="note err">${esc(ghState.msg)}</div>`:''}
-      <button class="btn ghost" ${ghState.busy?'disabled':''} onclick="app.ghSyncNow()">${ghState.busy?'بيزامن…':'زامن دلوقتي'}</button>
-      ${confirmKey==='ghdisc'
-        ?`<button class="btn danger" onclick="app.ghDisconnect()">أكد الفصل</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
-        :`<button class="btn danger" onclick="app.askDel('ghdisc')">افصل المزامنة</button>`}
-    `:`
-      ${ghState.msg?`<div class="note err">${esc(ghState.msg)}</div>`:''}
-      <input class="f" id="ghtokin" type="password" placeholder="ghp_..." style="margin-top:12px">
-      <button class="btn" ${ghState.busy?'disabled':''} onclick="app.ghConnect()">${ghState.busy?'بيربط…':'اربط بـ GitHub'}</button>
-      <button class="btn ghost" onclick="app.toggleGhHelp()">${showGhHelp?'إخفاء':'إزاي أجيب المفتاح ده؟'}</button>
-      ${showGhHelp?`<ol class="steps">
-        <li>افتح github.com/settings/tokens من سفاري (اعمل حساب مجاني لو مالكش).</li>
-        <li>Generate new token ← Generate new token (classic).</li>
-        <li>اكتب اسم زي «مصاريفي»، وحدد صلاحية gist بس.</li>
-        <li>اضغط Generate token، وانسخه — هيبان مرة واحدة بس.</li>
-        <li>الصقه في الخانة فوق واضغط اربط.</li>
-      </ol>`:''}
-    `}
-    `,'6px')}
-
-    ${setSec('apikey','مفتاح قراءة الفواتير','',()=>`
-      <p class="hint" style="margin-top:-4px">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
-      ${(getKey()&&!showKeyEdit)?`
-        <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
-        <button class="btn ghost" onclick="app.editKey()">غيّر المفتاح</button>
-        ${confirmKey==='apikey'
-          ?`<button class="btn danger" onclick="app.clearKey()">أكد المسح</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
-          :`<button class="btn danger" onclick="app.askDel('apikey')">امسح المفتاح</button>`}
-      `:`
-        <input class="f" id="keyin" type="password" placeholder="sk-ant-..." style="margin-top:12px">
-        <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
-        ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
-      `}
-    `)}
-
-    ${setSec('backup','نسخة احتياطية','',()=>`
-      <p class="hint" style="margin-top:-4px">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
-      <button class="btn ghost" onclick="app.exportData()">شارك أو نزّل نسخة من بياناتي</button>
-      ${D.lastBackup?`<div class="hint">آخر نسخة: ${dayLabel(D.lastBackup)}</div>`:''}
-      <button class="btn ghost" onclick="document.getElementById('imp').click()">ارفع نسخة محفوظة</button>
-      <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
-    `)}
-    ${setSec('cats','التصنيفات',D.cats.length,()=>`
-    <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
-      ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
-      ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
-      :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`).join('')}</div>
-    <div class="frow">
-      <input class="f" id="newcat" placeholder="اسم تصنيف جديد">
-      <button class="btn" onclick="app.addCat()">ضيف</button>
-    </div>
-    `)}
-    ${setSec('accs','الحسابات',D.accounts.length,()=>`
-      <p class="hint" style="margin-top:-4px">عدّل الأسامي، وحدد مين فيهم ليه حد أقصى.</p>
+      <p class="hint" style="margin-top:-4px">دوس على الحساب عشان تعدّل فيه.</p>
       ${D.accounts.map(a=>{const c=(accCfg&&accCfg[a.id])||{name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''};
+      if(accOpen!==a.id)return `<div class="arow" style="border:1px solid var(--line);border-radius:14px;margin-top:10px;cursor:pointer" onclick="app.openAccCfg('${a.id}')">
+          <span class="rail" style="background:${aColor(a.id)}"></span>
+          <span class="nm">${esc(a.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">${esc(atypeLabel(a))}${a.closed?' · موقوف':''}${(a.fees||[]).length?' · '+(a.fees||[]).length+' مصروف':''}</span></span>
+          <span style="color:var(--muted);font-size:12px">▼</span>
+        </div>`;
       return `<div class="panel" style="padding:14px 16px;margin-top:12px">
         <div style="display:flex;align-items:center;gap:10px">
           <span class="rail" style="background:${aColor(a.id)}"></span>
@@ -3981,10 +3931,14 @@ function vSettings(){
         ${D.accounts.length>1?`<div class="chips" style="margin-top:14px">
           ${delBtn('acc'+a.id,`app.delAccount('${a.id}')`,'امسح الحساب وحركاته')}
         </div>`:''}
+        <button class="btn" onclick="app.saveAccount('${a.id}')">احفظ</button>
+        <button class="btn ghost" onclick="app.openAccCfg('')">إلغاء</button>
       </div>`}).join('')}
-      <button class="btn" onclick="app.saveAccounts()">احفظ الحسابات</button>
-    `)}
-    ${setSec('daftar','دفتر '+bookName(),'',()=>`
+        `,'4px')}
+
+    ${setGrp('الدفتر التاني')}
+    ${setSec('daftar','دفتر '+bookName(),officeOn()?'شغّال':'مقفول',()=>`
+
       <p class="hint" style="margin-top:-4px">لو شغلته هيظهر سويتش فوق تبدّل بيه بين فلوسك والدفتر التاني، ومعاه التقفيل والعهد والسلف.</p>
       ${yesNo('officeon',officeOn(),'app.setOfficeOn','مقفول','شغّال')}
       ${officeOn()?`
@@ -4013,9 +3967,29 @@ function vSettings(){
               <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
             :`<button class="btn danger" onclick="app.askDel('owipe')">امسح بيانات الدفتر</button>`;})()}
       `:''}
-    `)}
-    ${officeOn()?setSec('ocats','تصنيفات '+bookName(),D.ocats.length,()=>`
-      <p class="hint" style="margin-top:-4px">اللي بتختار منها وأنت بتسجل مصروف عهدة.</p>
+          ${officeOn()?`
+      <label class="f">حد الرسوم</label>
+      <p class="hint" style="margin-top:0">رسوم مصاريف الدفتر بتتحسب عليك، ولما توصل الحد ده بيجيلك تنبيه تاخدها.</p>
+      <div class="frow">
+        <input class="f" id="ofeelim" type="text" inputmode="decimal" value="${D.ofeeLimit}" oninput="numFix(this,1)">
+        <button class="btn" onclick="app.saveOfeeLimit()">احفظ</button>
+      </div>
+    `:''}
+    `,'4px')}
+
+    ${setGrp('التصنيفات')}
+    ${setSec('cats','التصنيفات',D.cats.length+(officeOn()?' · '+D.ocats.length+' لدفتر '+bookName():''),()=>`
+
+    <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
+      ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
+      ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
+      :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`).join('')}</div>
+    <div class="frow">
+      <input class="f" id="newcat" placeholder="اسم تصنيف جديد">
+      <button class="btn" onclick="app.addCat()">ضيف</button>
+    </div>
+        ${officeOn()?`<h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تصنيفات ${esc(bookName())}</h4>
+      <p class="hint" style="margin-top:0">اللي بتختار منها وأنت بتسجل مصروف عهدة.</p>
       <div style="margin-top:10px">${D.ocats.map(c=>`<span class="catchip"><b style="background:#8C7BF0"></b>${esc(c.label)}
         ${confirmKey==='ocat'+c.id?`<button onclick="app.ocatDel('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
           :`<button onclick="app.askDel('ocat${c.id}')">×</button>`}</span>`).join('')}</div>
@@ -4023,9 +3997,8 @@ function vSettings(){
         <input class="f" id="newocat" placeholder="تصنيف جديد">
         <button class="btn" onclick="app.ocatAdd()">ضيف</button>
       </div>
-    `):''}
-    ${officeOn()?setSec('groups','تجميع بنود '+bookName(),(D.groups||[]).length,()=>`
-    <p class="hint" style="margin-top:-4px">البنود اللي جوه المجموعة بتتسجل مفصّلة زي ما هي، بس بتظهر في تقرير التقفيل في سطر واحد باسم المجموعة.</p>
+    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تجميع بنود ${esc(bookName())}</h4>
+    <p class="hint" style="margin-top:0">البنود اللي جوه المجموعة بتتسجل مفصّلة زي ما هي، بس بتظهر في تقرير التقفيل في سطر واحد باسم المجموعة.</p>
     <div class="panel" style="margin-top:12px">
       ${(D.groups||[]).length?(D.groups||[]).map(g=>`
         <div class="arow">
@@ -4052,50 +4025,93 @@ function vSettings(){
       <input class="f" id="newgrp" placeholder="اسم مجموعة جديدة">
       <button class="btn" onclick="app.addGroup()">ضيف</button>
     </div>
-    `):''}
-    ${officeOn()?setSec('ofee','حد الرسوم','',()=>`
-      <p class="hint" style="margin-top:-4px">رسوم مصاريف الدفتر بتتحسب عليك، ولما توصل الحد ده بيجيلك تنبيه تاخدها.</p>
-      <div class="frow">
-        <input class="f" id="ofeelim" type="text" inputmode="decimal" value="${D.ofeeLimit}" oninput="numFix(this,1)">
-        <button class="btn" onclick="app.saveOfeeLimit()">احفظ</button>
-      </div>
-    `):''}
-    ${setSec('month','بداية الشهر','',()=>`
+    `:''}
+    `,'4px')}
+
+    ${setGrp('الشهر والأسعار')}
+    ${setSec('month','بداية الشهر',D.monthMode==='cal'?'من أول الشهر':'من المرتب',()=>`
+
       <p class="hint" style="margin-top:-4px">بيأثر على تقارير الشهر بس. الأقساط بتفضل مربوطة بالمرتب في الحالتين.</p>
       ${pickRow('monthmode',[{id:'salary',label:'من المرتب'},{id:'cal',label:'من أول الشهر'}],D.monthMode==='cal'?'cal':'salary','app.setMonthMode',1)}
-    `)}
-    ${setSec('rate','سعر الدولار التقديري','',()=>`
-      <p class="hint" style="margin-top:-4px">بيستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
-      <div class="frow">
-        <input class="f" id="ratein" type="text" inputmode="decimal" value="${D.rate}" oninput="numFix(this,1)">
-        <button class="btn" onclick="app.saveRate()">احفظ</button>
-      </div>
-    `)}
-    ${setSec('fuel','سعر لتر البنزين','',()=>`
-      <p class="hint" style="margin-top:-4px">لما تسجّل بنزين وتسيب خانة اللترات فاضية، هيحسبها من المبلغ وسعر اللتر ويكتب جنبها «تقريبي».</p>
+        `,'4px')}
+    ${setSec('prices','الأسعار','دولار '+fmt(D.rate)+' · ٩٢ بـ'+fmt(D.p92||0)+' · ٩٥ بـ'+fmt(D.p95||0),()=>`
+<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">سعر الدولار التقديري</h4>
+      <p class="hint" style="margin-top:0">بيستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
+      <input class="f" id="ratein" type="text" inputmode="decimal" value="${D.rate}" oninput="numFix(this,1)">
+    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">سعر لتر البنزين</h4>
+      <p class="hint" style="margin-top:0">لما تسجّل بنزين وتسيب خانة اللترات فاضية، هيحسبها من المبلغ وسعر اللتر ويكتب جنبها «تقريبي».</p>
       <div class="f2" style="margin-top:12px">
         <div><label class="f" style="margin-top:0">لتر ٩٢</label>
           <input class="f" id="p92in" type="text" inputmode="decimal" value="${D.p92||''}" oninput="numFix(this,1)"></div>
         <div><label class="f" style="margin-top:0">لتر ٩٥</label>
           <input class="f" id="p95in" type="text" inputmode="decimal" value="${D.p95||''}" oninput="numFix(this,1)"></div>
       </div>
-      <button class="btn" onclick="app.saveFuelPrices()">احفظ الأسعار</button>
+
+          <button class="btn" onclick="app.savePrices()">احفظ الأسعار</button>
     `)}
-    ${setSec('install','تركيبه على الموبايل','',()=>`
+
+    ${setGrp('بياناتك')}
+    ${setSec('data','المزامنة والنسخة الاحتياطية',syncSum,()=>`
+<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">المزامنة التلقائية</h4>
+    <p class="hint" style="margin-top:0">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
+    ${ghGist?`
+      <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
+      ${ghState.msg?`<div class="note err">${esc(ghState.msg)}</div>`:''}
+      <button class="btn ghost" ${ghState.busy?'disabled':''} onclick="app.ghSyncNow()">${ghState.busy?'بيزامن…':'زامن دلوقتي'}</button>
+      ${confirmKey==='ghdisc'
+        ?`<button class="btn danger" onclick="app.ghDisconnect()">أكد الفصل</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
+        :`<button class="btn danger" onclick="app.askDel('ghdisc')">افصل المزامنة</button>`}
+    `:`
+      ${ghState.msg?`<div class="note err">${esc(ghState.msg)}</div>`:''}
+      <input class="f" id="ghtokin" type="password" placeholder="ghp_..." style="margin-top:12px">
+      <button class="btn" ${ghState.busy?'disabled':''} onclick="app.ghConnect()">${ghState.busy?'بيربط…':'اربط بـ GitHub'}</button>
+      <button class="btn ghost" onclick="app.toggleGhHelp()">${showGhHelp?'إخفاء':'إزاي أجيب المفتاح ده؟'}</button>
+      ${showGhHelp?`<ol class="steps">
+        <li>افتح github.com/settings/tokens من سفاري (اعمل حساب مجاني لو مالكش).</li>
+        <li>Generate new token ← Generate new token (classic).</li>
+        <li>اكتب اسم زي «مصاريفي»، وحدد صلاحية gist بس.</li>
+        <li>اضغط Generate token، وانسخه — هيبان مرة واحدة بس.</li>
+        <li>الصقه في الخانة فوق واضغط اربط.</li>
+      </ol>`:''}
+    `}
+    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">النسخة الاحتياطية</h4>
+      <p class="hint" style="margin-top:0">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
+      <button class="btn ghost" onclick="app.exportData()">شارك أو نزّل نسخة من بياناتي</button>
+      ${D.lastBackup?`<div class="hint">آخر نسخة: ${dayLabel(D.lastBackup)}</div>`:''}
+      <button class="btn ghost" onclick="document.getElementById('imp').click()">ارفع نسخة محفوظة</button>
+      <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
+        `,'4px')}
+    ${setSec('app','البرنامج',getKey()?'مفتاح الفواتير متسجل':'من غير مفتاح فواتير',()=>`
+<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">مفتاح قراءة الفواتير</h4>
+      <p class="hint" style="margin-top:0">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
+      ${(getKey()&&!showKeyEdit)?`
+        <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
+        <button class="btn ghost" onclick="app.editKey()">غيّر المفتاح</button>
+        ${confirmKey==='apikey'
+          ?`<button class="btn danger" onclick="app.clearKey()">أكد المسح</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
+          :`<button class="btn danger" onclick="app.askDel('apikey')">امسح المفتاح</button>`}
+      `:`
+        <input class="f" id="keyin" type="password" placeholder="sk-ant-..." style="margin-top:12px">
+        <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
+        ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
+      `}
+    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تركيبه على الموبايل</h4>
       <ol class="steps">
         <li>افتح اللينك من متصفح الموبايل.</li>
         <li>افتح قايمة المتصفح (زرار المشاركة أو النقط التلاتة).</li>
         <li>اختار «إضافة إلى الشاشة الرئيسية».</li>
       </ol>
       <div class="hint">هيشتغل بعدها زي أي تطبيق، وهيفتح من غير نت كمان.</div>
-    `)}
-    ${setSec('wipe','مسح البيانات','',()=>`
+        `)}
+
+    ${setSec('wipe','<span style="color:var(--clay)">مسح البيانات</span>','',()=>`
+
       <p class="hint" style="margin-top:-4px">بيمسح كل حاجة في البرنامج ومش بيرجع تاني.</p>
       ${confirmKey==='wipe'
       ?`<button class="btn danger" onclick="app.wipe()">أكد مسح كل البيانات</button>
         <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
       :`<button class="btn danger" onclick="app.askDel('wipe')">امسح كل البيانات</button>`}
-    `)}
+        `,'34px')}
   </div>`;
 }
 
@@ -4123,7 +4139,6 @@ if(document.addEventListener){
     if(!renderLock&&renderPending){renderPending=false;render();}
   });
 }
-function unlockRender(){renderLock=0;if(renderPending){renderPending=false;render();}}
 
 /* مكان السكرول لكل صفحة (ولكل تاب في المحفظة ولكل دفتر) */
 const scrollMem={};
@@ -4367,7 +4382,6 @@ const app=new Proxy({
   },
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
-  clearAutoNote(){D.autoNote=[];save();render();},
   dropNote(id){D.autoNote=(D.autoNote||[]).filter(x=>x.id!==id);save();render();},
   feeEdOpen(acc,fid){
     const a=D.accounts.find(x=>x.id===acc);if(!a)return;
@@ -4674,7 +4688,6 @@ const app=new Proxy({
     (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>dueIds.indexOf(d.id)<0);});
     owedFor=null;save();render();
   },
-  dropOwed(id){D.owed=(D.owed||[]).filter(x=>x.id!==id);owedFor=null;save();render();},
   saveEntry(){
     const amt=Number(onlyNum(draft.amount))||0;
     if(draft.kind==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw'){
@@ -5094,7 +5107,6 @@ const app=new Proxy({
   accType(t){accDraft.atype=t;accDraft.credit=(t==='credit');
     if(t==='save'&&!accDraft.saveStart){Object.assign(accDraft,{saveRate:'',saveFreq:'day',saveDay:'1',saveStart:today(),
       saveYearDate:today(),saveWithdraw:''});}if(t!=='bank')accDraft.accNo='';if(t==='cash'||t==='wallet')accDraft.last4='';render();},
-  accPick(c){accDraft.credit=c;render();},
   accPickSec(v){accDraft.sec=v;if(!v)accDraft.secured=[];render();},
   accPickIns(v){accDraft.insure=v;render();},
   accPayFrom(v){accDraft.payFrom=(v==='none')?'':v;render();},
@@ -5558,7 +5570,6 @@ const app=new Proxy({
     if(sDraft.promo&&pa>0&&pn>0)s.promo={amount:pa,left:pn};else delete s.promo;
     editSub=null;save();render();app.toast('اتعدل');
   },
-  startFee(id){feeFor=feeFor===id?null:id;render();},
   startFeeFix(id,m){m=m||'final';if(feeFor===id&&feeMode===m)feeFor=null;else{feeFor=id;feeMode=m;}feeDate=today();render();},
   setFeeDate(v){feeDate=v;render();},
   confirmArr(id){
@@ -5590,7 +5601,7 @@ const app=new Proxy({
       const t={id:uid(),book:'me',kind:'expense',amount:v,cat:'fees',account:s.account||'card',
         date:feeDate||today(),arrFee:true,note:'مصاريف تدبير — '+s.name};
       D.txns.unshift(t);
-      p.fee=v;p.feeTxn=t.id;p.feePending=false;s.feeEst=v;
+      p.fee=v;p.feeTxn=t.id;p.feePending=false;
       sortTxns();
     }else{
       p.fee=0;p.feePending=false;p.feeTxn=undefined;
@@ -5894,7 +5905,6 @@ const app=new Proxy({
 
   /* --- إعدادات --- */
   accCfgSet(id,k,v){if(!accCfg)accCfgInit();accCfg[id][k]=v;},
-  accCfgCredit(id,c){if(!accCfg)accCfgInit();accCfg[id].credit=c;render();},
   accCfgType(id,t){
     if(!accCfg)accCfgInit();
     accCfg[id].atype=t;accCfg[id].credit=(t==='credit');
@@ -5934,9 +5944,9 @@ const app=new Proxy({
     if(i>-1)a.secured.splice(i,1);else a.secured.push(certId);
     save();render();
   },
-  saveAccounts(){
+  saveAccount(id){
     if(!accCfg)accCfgInit();
-    D.accounts.forEach(a=>{const c=accCfg[a.id];if(!c)return;
+    D.accounts.filter(a=>a.id===id).forEach(a=>{const c=accCfg[a.id];if(!c)return;
       const nm=String(c.name||'').trim();
       if(nm)a.name=nm;
       a.credit=!!c.credit;
@@ -5950,7 +5960,7 @@ const app=new Proxy({
         if(a.insure===undefined)a.insure=true;
         a.insureRate=a.insure?(Number(onlyNum(c.insureRate))||0):0;
       }});
-    accCfgInit();save();app.toast('اتحفظ');render();
+    accOpen=null;accCfgInit();save();app.toast('اتحفظ');render();
   },
   addGroup(){
     const el=document.getElementById('newgrp');
@@ -6022,25 +6032,21 @@ const app=new Proxy({
   setMonthMode(m){D.monthMode=m;month='';save();render();},
   saveOfeeLimit(){
     const v=numVal('ofeelim');
-    if(v>0){D.ofeeLimit=v;save();app.toast('اتحفظ');}
+    if(v>0){D.ofeeLimit=v;setsOpen={};save();app.toast('اتحفظ');}
     render();
   },
   saveBookName(){
     const el=document.getElementById('bknamein');
     D.bookName=el?String(el.value||'').trim().slice(0,24):'';
-    save();app.toast('اتحفظ');render();
+    setsOpen={};save();app.toast('اتحفظ');render();
   },
-  saveRate(){
-    const v=numVal('ratein');
-    if(v>0){D.rate=v;save();app.toast('اتحفظ');}
-    render();
+  savePrices(){
+    const v=numVal('ratein');if(v>0)D.rate=v;
+    D.p92=numVal('p92in')||0;D.p95=numVal('p95in')||0;
+    setsOpen={};save();app.toast('اتحفظ');render();
   },
-  saveFuelPrices(){
-    D.p92=numVal('p92in')||0;
-    D.p95=numVal('p95in')||0;
-    save();app.toast('اتحفظ');render();
-  },
-  toggleSet(k){setsOpen[k]=!setsOpen[k];render();},
+  toggleSet(k){const o=!setsOpen[k];setsOpen={};if(o)setsOpen[k]=true;accOpen=null;confirmKey='';render();},
+  openAccCfg(id){accOpen=id||null;accCfgInit();feeEd=null;render();},
   toggleAlerts(){alertsOpen=!alertsOpen;render();},
   svSet(sc,k,v,rr){const o=sc==='new'?accDraft:svEdit;if(!o)return;
     /* لو الطريقة اتغيرت في التعديل، النسبة تتمسح عشان تتكتب الجديدة */
