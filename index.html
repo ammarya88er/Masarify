@@ -458,7 +458,7 @@ let ownerFor=null;
 let needsTxn=null;
 let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''};
 let retFor=null, retAcct='', retDate=today();
-let fixMode='final', feeMode='final';
+let fixMode='final', feeMode='final', feeEd=null, feeAsk=null;
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false;
@@ -1135,30 +1135,86 @@ function autoNoteHtml(){
     ${L.map(n=>{
       const s=n.sid?(D.subs||[]).find(x=>x.id===n.sid):null;
       const last=s&&s.payments&&s.payments.length?s.payments[s.payments.length-1]:null;
-      const canUndo=!!(last&&last.t===n.t);
+      const canUndo=n.fee?D.txns.some(x=>x.id===n.t):!!(last&&last.t===n.t);
       const lastRow=n===L[L.length-1];
       return `<div style="margin-bottom:${lastRow?0:14}px">
         <div>${n.text}</div>
-        ${(canUndo||lastRow)?`<div class="chips" style="margin-top:10px">
+        <div class="chips" style="margin-top:10px">
           ${canUndo?`<button class="chip sm" onclick="app.undoAuto('${n.id}')">تراجع</button>`:''}
-          ${lastRow?`<button class="chip sm" onclick="app.clearAutoNote()">تمام</button>`:''}
-        </div>`:''}
+          <button class="chip sm" onclick="app.dropNote('${n.id}')">تمام</button>
+        </div>
       </div>`;}).join('')}
   </div>`;
 }
-function pushNote(text,sid,t){
+function pushNote(text,sid,t,fee){
   if(!D.autoNote)D.autoNote=[];
-  D.autoNote.push({id:uid(),text:text,sid:sid||undefined,t:t||undefined});
+  D.autoNote.push({id:uid(),text:text,sid:sid||undefined,t:t||undefined,fee:fee||undefined});
+}
+/* ---------- مصاريف الحسابات (رسوم البنك والكارت) ---------- */
+const FEECYC={m:['شهري',1],q:['كل ٣ شهور',3],y:['سنوي',12]};
+const feeAccOk=a=>!!a&&(a.credit||(a.atype==='bank'&&!isSave(a)));
+function feeNext(f){
+  const n=(FEECYC[f.cycle]||FEECYC.m)[1], d=f.day||Number(String(f.next).slice(8,10))||1;
+  const m=mAdd(monthOf(f.next),n);
+  return m+'-'+pad(Math.min(d,dInMonth(m)));
+}
+/* بيتسجل لوحده يوم الخصم لو المبلغ معروف؛ ولو مش معروف بيستنى في «محتاج انتباهك» */
+function accFeesAuto(){
+  const done=[];
+  (D.accounts||[]).filter(a=>!a.closed&&feeAccOk(a)).forEach(a=>(a.fees||[]).forEach(f=>{
+    let g=0;
+    while(g++<24&&f.next&&f.next<=today()&&f.next>=(f.since||'')&&Number(f.amount)>0){
+      const t={id:uid(),book:'me',kind:'expense',amount:Number(f.amount),cat:'fees',account:a.id,date:f.next,note:f.name,accFee:f.id};
+      D.txns.unshift(t);
+      done.push({a:a,f:f,t:t,date:f.next});
+      f.next=feeNext(f);
+    }
+  }));
+  if(done.length){sortTxns();save();}
+  return done;
+}
+function recordAccFee(a,f,amt){
+  const t={id:uid(),book:'me',kind:'expense',amount:amt,cat:'fees',account:a.id,date:f.next,note:f.name,accFee:f.id};
+  D.txns.unshift(t);f.next=feeNext(f);sortTxns();
+}
+function accFeesHtml(a){
+  const L=a.fees||[], ed=feeEd&&feeEd.acc===a.id?feeEd:null;
+  const form=`<div class="inline">
+      <label class="f">الاسم</label>
+      <input class="f" value="${esc(ed?ed.name:'')}" placeholder="رسوم الحساب" oninput="app.feeEdSet('name',this.value)">
+      <label class="f">المبلغ (اختياري)</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(ed?ed.amount:'')}" placeholder="سيبه فاضي لو لسه مش عارفه" oninput="app.feeEdSet('amount',numFix(this,1))">
+      <label class="f">كل قد إيه؟</label>
+      ${pickRow('feecyc'+a.id,Object.keys(FEECYC).map(k=>({id:k,label:FEECYC[k][0]})),ed?ed.cycle:'m',"((v)=>app.feeEdPick('cycle',v))",1)}
+      <label class="f">ميعاد الخصم الجاي</label>
+      <input class="f" type="date" value="${esc(ed?ed.next:'')}" onchange="app.feeEdPick('next',this.value)">
+      <div class="hint">لو المبلغ فاضي، يوم الخصم هيسألك في «محتاج انتباهك» اتخصم كام.</div>
+      <button class="btn" ${(ed&&String(ed.name||'').trim()&&ed.next)?'':'disabled'} id="feeedsave" onclick="app.feeEdSave()">احفظ</button>
+      <button class="btn ghost" onclick="app.feeEdCancel()">إلغاء</button>
+    </div>`;
+  return `<label class="f" style="margin-top:16px">مصاريف الحساب</label>
+    ${L.length?L.map(f=>`<div class="arow" style="border:1px solid var(--line);border-radius:14px;margin-bottom:8px">
+        <span class="nm">${esc(f.name)}
+          <span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">${(FEECYC[f.cycle]||FEECYC.m)[0]} · الجاي ${dayLabel(f.next)}</span></span>
+        <span class="n" style="white-space:nowrap">${Number(f.amount)>0?fmt(f.amount):'مش معروف'}</span>
+      </div>
+      ${(ed&&ed.id===f.id)?form:`<div class="chips" style="margin:-2px 0 10px">
+        <button class="chip sm" onclick="app.feeEdOpen('${a.id}','${f.id}')">عدّل</button>
+        ${delBtn('fee'+f.id,`app.feeDel('${a.id}','${f.id}')`,'امسح')}
+      </div>`}`).join(''):'<div class="hint" style="margin-top:0">مفيش مصاريف على الحساب ده.</div>'}
+    ${(ed&&!ed.id)?form:`<button class="btn ghost" style="margin-top:6px" onclick="app.feeEdOpen('${a.id}','')">ضيف مصروف</button>`}`;
 }
 function runAuto(){
   const ac=autoCharge();
   ac.forEach(r=>pushNote('اتسجل اشتراك '+esc(r.name)+' بـ<span class="n">'+fmt(r.amount)+'</span> جنيه'+(r.usd?' (تقديري)':'')+' · '+dLabel(r.date)+'.',r.sid,r.t));
+  const af=accFeesAuto();
+  af.forEach(r=>pushNote('اتسجل '+esc(r.f.name)+' على '+esc(r.a.name)+' بـ<span class="n">'+fmt(r.t.amount)+'</span> جنيه · '+dLabel(r.date)+'.',undefined,r.t.id,{acc:r.a.id,fid:r.f.id}));
   const cu=catchUp();
   if(cu.n)pushNote('اتقيد '+cu.n+' دفعة عوائد بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');
   const tr=autoTrials();
   if(cardInsAdvance())save();
   if(tr.length)pushNote('خلصت تجربة '+tr.map(esc).join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
-  if(ac.length||cu.n||tr.length)save();
+  if(ac.length||af.length||cu.n||tr.length)save();
 }
 /* حركات بتنقل فلوسك من مكان لمكان — مش دخل ولا مصروف */
 const isXferLike=t=>t.kind==='transfer'||!!t.flIn||!!t.flOut||!!t.certBuy||!!t.certBack;
@@ -2045,6 +2101,22 @@ function alertsPanel(){
       <button class="btn" onclick="app.confirmFix('${t.id}')">ظبّط المبلغ</button>
       <button class="btn ghost" onclick="app.cancelFix()">إلغاء</button>
     </div>`):''}`);});
+
+  if(book==='me')(D.accounts||[]).filter(a=>!a.closed&&feeAccOk(a)).forEach(a=>(a.fees||[]).filter(f=>!(Number(f.amount)>0)&&f.next&&f.next<=today()).forEach(f=>{
+    const k=a.id+'|'+f.id;
+    rows.push(`<div class="alert">
+      <span class="rail" style="background:#C4A484"></span>
+      <span class="g"><span class="t">${esc(f.name)} — ${esc(a.name)}</span>
+        <span class="s" style="display:block">اتخصم كام؟ · ${dLabel(f.next)}</span></span>
+      <button class="chip sm${feeAsk===k?' on':''}" onclick="app.feeAskOpen('${k}')">سجّل</button>
+    </div>
+    ${feeAsk===k?`<div class="inline">
+      <label class="f">اتخصم كام؟</label>
+      <input class="f" id="feeaskin" type="text" inputmode="decimal" oninput="numFix(this,1)">
+      <button class="btn" onclick="app.feeAskSave('${a.id}','${f.id}')">سجّل</button>
+      <button class="btn ghost" onclick="app.feeAskSkip('${a.id}','${f.id}')">ماتخصمش</button>
+    </div>`:''}`);
+  }));
 
   if(book==='me')(D.certs||[]).filter(c=>!c.redeemed&&c.end&&daysTo(c.end)<=0).forEach(c=>{
     const sec=certSecuredBy(c);
@@ -3902,6 +3974,7 @@ function vSettings(){
           ${(D.certs||[]).length?`<label class="f" style="margin:14px 0 8px">مضمون بأنهي شهادات؟</label>
             <div class="chips">${D.certs.filter(ct=>!ct.redeemed&&!certHeldBy(ct.id,a.id)).map(ct=>`<button class="chip sm${(a.secured||[]).indexOf(ct.id)>-1?' on':''}" onclick="app.toggleSecured('${a.id}','${ct.id}')">${esc(ct.name)} · <span class="n">${fmt(ct.amount)}</span></button>`).join('')}</div>
             ${(a.secured||[]).length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(securedTotal(a))}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span></div>`:''}`:''}`:''}
+        ${feeAccOk(a)?accFeesHtml(a):''}
         ${D.accounts.length>1?`<div class="chips" style="margin-top:14px">
           ${delBtn('acc'+a.id,`app.delAccount('${a.id}')`,'امسح الحساب وحركاته')}
         </div>`:''}
@@ -4292,9 +4365,40 @@ const app=new Proxy({
   askDel(k){confirmKey=k;render();},
   cancelDel(){confirmKey='';render();},
   clearAutoNote(){D.autoNote=[];save();render();},
+  dropNote(id){D.autoNote=(D.autoNote||[]).filter(x=>x.id!==id);save();render();},
+  feeEdOpen(acc,fid){
+    const a=D.accounts.find(x=>x.id===acc);if(!a)return;
+    const f=fid?(a.fees||[]).find(x=>x.id===fid):null;
+    feeEd=f?{acc:acc,id:f.id,name:f.name,amount:Number(f.amount)>0?String(f.amount):'',cycle:f.cycle||'m',next:f.next}
+      :{acc:acc,id:'',name:'',amount:'',cycle:'m',next:''};
+    render();},
+  feeEdSet(k,v){if(!feeEd)return;feeEd[k]=v;setDisabled('feeedsave',!!(String(feeEd.name||'').trim()&&feeEd.next));},
+  feeEdPick(k,v){if(!feeEd)return;feeEd[k]=v;render();},
+  feeEdCancel(){feeEd=null;render();},
+  feeEdSave(){
+    if(!feeEd)return;const a=D.accounts.find(x=>x.id===feeEd.acc);if(!a)return;
+    const nm=String(feeEd.name||'').trim();if(!nm||!feeEd.next)return;
+    if(!a.fees)a.fees=[];
+    const amt=Number(onlyNum(feeEd.amount))||0, day=Number(String(feeEd.next).slice(8,10))||1;
+    let f=feeEd.id?a.fees.find(x=>x.id===feeEd.id):null;
+    if(f){f.name=nm;f.amount=amt;f.cycle=feeEd.cycle;if(f.next!==feeEd.next){f.next=feeEd.next;f.day=day;f.since=today();}}
+    else a.fees.push({id:uid(),name:nm,amount:amt,cycle:feeEd.cycle,next:feeEd.next,day:day,since:today()});
+    feeEd=null;save();runAuto();render();app.toast('اتحفظ');},
+  feeDel(acc,fid){const a=D.accounts.find(x=>x.id===acc);if(!a)return;
+    a.fees=(a.fees||[]).filter(x=>x.id!==fid);confirmKey='';save();render();},
+  feeAskOpen(k){feeAsk=feeAsk===k?null:k;render();},
+  feeAskSave(acc,fid){
+    const a=D.accounts.find(x=>x.id===acc);const f=a&&(a.fees||[]).find(x=>x.id===fid);if(!f)return;
+    const v=numVal('feeaskin');if(!(v>0))return;
+    recordAccFee(a,f,v);f.amount=v;feeAsk=null;save();render();app.toast('اتسجل');},
+  feeAskSkip(acc,fid){
+    const a=D.accounts.find(x=>x.id===acc);const f=a&&(a.fees||[]).find(x=>x.id===fid);if(!f)return;
+    f.next=feeNext(f);feeAsk=null;save();render();},
   undoAuto(nid){
     const n=(D.autoNote||[]).find(x=>x.id===nid);if(!n)return;
     D.autoNote=D.autoNote.filter(x=>x.id!==nid);
+    /* مصروف حساب: بيتشال والميعاد الجاي بيفضل زي ما هو (الخصم ده ماحصلش) */
+    if(n.fee){D.txns=D.txns.filter(x=>x.id!==n.t);save();render();return;}
     const s=(D.subs||[]).find(x=>x.id===n.sid);
     const last=s&&s.payments&&s.payments[s.payments.length-1];
     if(last&&last.t===n.t)app.undoSubPay(n.sid);else{save();render();}
