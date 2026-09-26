@@ -165,6 +165,19 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .drop p{margin:14px 0 6px;font-size:15px;font-family:var(--f-disp);font-weight:600;}
 .drop small{color:var(--muted);font-size:12px;line-height:1.7;display:block;}
 .empty{text-align:center;color:var(--muted);font-size:13px;padding:36px 12px;line-height:1.9;}
+.scard{background:var(--surf);border:1px solid var(--line);border-radius:18px;margin-top:12px;overflow:hidden;}
+.sgrp{font-size:11.5px;color:var(--muted);margin:22px 8px 0;}
+.sgrp+.scard{margin-top:8px;}
+.srow+.srow{border-top:1px solid var(--line);}
+.srow-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:15px 16px;cursor:pointer;}
+.srow-h b{font-size:15px;font-weight:600;}
+.srow-h span{font-size:12px;color:var(--muted);text-align:left;}
+.srow-b{padding:0 16px 18px;}
+.ssub{border-top:1px solid var(--line);}
+body.insets header>div,body.insets #bookseg,body.insets #split{display:none!important;}
+body.insets header{padding-bottom:0;align-items:center;}
+body.insets header::before{content:'الإعدادات';font-size:24px;font-weight:700;}
+body.insets .gear{background:var(--accent);color:var(--on);border-color:var(--accent);}
 .note{padding:13px 15px;border-radius:14px;font-size:12.5px;line-height:1.75;margin-top:16px;}
 .note.err{background:#2A1D1C;border:1px solid #4A2E2B;color:#FFC0B7;}
 .note.warn{background:#26241A;border:1px solid #4A452C;color:#EDD9A6;}
@@ -463,7 +476,7 @@ let fixMode='final', feeMode='final', feeEd=null, feeAsk=null;
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false;
-let setsOpen={}, accOpen=null;
+let setsOpen={}, accOpen=null, setSub=null, catEdit=null;
 let openRow={};
 let rbackFor=null;
 let flPay={from:'',to:''};
@@ -1014,7 +1027,7 @@ function saveFieldsHtml(o,sc){
     <div class="hint">${o.saveFreq==='month'?'بيتضاف مرة في الشهر على الرصيد في اليوم اللي تحدده.'
       :o.saveFreq==='year'?'بيتضاف مرة في السنة على الرصيد في التاريخ اللي تحدده.'
       :'بيتحسب كل يوم تراكمي ويبان في رصيد الوعاء على طول، وبيتقيّد في السجل سطر واحد آخر كل شهر.'}</div>
-    ${freqChanged?'<div class="hint" style="color:#EFCA6A">الطريقة اتغيرت — هتبدأ فترة جديدة من النهارده، فاكتب النسبة الجديدة.</div>':''}
+    ${freqChanged?'<div class="note warn">الطريقة اتغيرت — هتبدأ فترة جديدة من النهارده، فاكتب النسبة الجديدة.</div>':''}
     <label class="f">العايد السنوي ٪</label>
     <input class="f" type="text" inputmode="decimal" value="${esc(o.saveRate||'')}" oninput="app.svSet('${sc}','saveRate',numFix(this,1))" onchange="app.svSet('${sc}','saveRate',this.value,1)">
     ${rateChanged?`<label class="f">النسبة الجديدة من إمتى؟</label>
@@ -1387,7 +1400,6 @@ const insLeft=i=>{
   return Math.round((base+rest)*100)/100;
 };
 const insFirst=i=>i.firstMonth||monthOf(today());
-const insTail=i=>Number(i.tail)||0;
 const insNextMonth=i=>i.covered?mAdd(i.covered,1):insFirst(i);
 const insNextAmount=i=>((Number(i.paid)||0)>=(Number(i.months)||0)&&insRest(i)>0)
   ?insRest(i):(Number(i.monthly)||0);
@@ -2428,7 +2440,7 @@ ${s.cycle==='trial'
             ${(function(){const s=ndSum(),d=Math.round((s-Number(t.amount))*100)/100;
               if(!s)return '';
               if(Math.abs(d)<0.005)return '<div class="hint">مطابق للمبلغ المخصوم.</div>';
-              return `<div class="hint" style="color:#FF9C90">الأصناف <span class="n">${fmt(s)}</span> والمخصوم <span class="n">${fmt(t.amount)}</span> · الفرق <span class="n">${fmt(Math.abs(d))}</span></div>
+              return `<div class="note warn">الأصناف <span class="n">${fmt(s)}</span> والمخصوم <span class="n">${fmt(t.amount)}</span> · الفرق <span class="n">${fmt(Math.abs(d))}</span></div>
               ${pickRow('ndkeep',[{id:'txn',label:'المخصوم صح'},{id:'items',label:'الأصناف صح'}],nd.keep,'app.ndKeep',1)}`;})()}
           `:''}
           ${nd.mode==='bill'?`<div class="hint">هتفتحلك شاشة الفاتورة، صوّرها أو الصقها، والمبلغ هيتظبط على المخصوم.</div>
@@ -2576,7 +2588,7 @@ function vAddOffice(){
         <div class="hint">${(draftO.sdir||'take')==='take'
           ?'الكاش بيطلع من العهدة لجيبك، وبيتعوض من نصيبك في '+esc((sharedAccs().find(x=>x.id===(draftO.shared||(sharedAccs()[0]||{}).id))||{name:'الحساب المشترك'}).name)+' لنصيب العهدة.'
           :'الكاش بيطلع من جيبك للعهدة، وبيتعوض من نصيب العهدة في '+esc((sharedAccs().find(x=>x.id===(draftO.shared||(sharedAccs()[0]||{}).id))||{name:'الحساب المشترك'}).name)+' لنصيبك.'}</div>
-        ${sharedAccs().length?'':'<div class="hint" style="color:#FF9C90">مفيش حساب مشترك بين الدفترين — اعمل حساب نطاقه «الاتنين» من الإعدادات.</div>'}
+        ${sharedAccs().length?'':'<div class="note warn">مفيش حساب مشترك بين الدفترين — اعمل حساب نطاقه «الاتنين» من الإعدادات.</div>'}
       `:`
       <label class="f">من أنهي حساب؟ <b>*</b></label>
       ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit&&!isSave(x));
@@ -3861,25 +3873,43 @@ function logList(){
     :'<div class="empty">مفيش نتايج.</div>';
 }
 
-function setSec(key,title,badge,body,mt){
+/* ---------- الإعدادات: كروت، وكل كارت فيه صفوف، وصف واحد بس مفتوح ---------- */
+function setSec(key,title,badge,body){
   const on=!!setsOpen[key];
-  return `<div class="sec"${mt?` style="margin-top:${mt}"`:''}>
-    <div class="sec-h" onclick="app.toggleSet('${key}')" style="cursor:pointer${on?'':';margin-bottom:0'}">
-      <h3>${title.indexOf('<')>-1?title:esc(title)}</h3>
-      <span style="text-align:left">${badge!==''&&badge!==undefined?esc(String(badge))+' · ':''}${on?'▲':'▼'}</span>
+  return `<div class="srow">
+    <div class="srow-h" onclick="app.toggleSet('${key}')">
+      <b>${title.indexOf('<')>-1?title:esc(title)}</b>
+      <span>${badge!==''&&badge!==undefined?esc(String(badge))+' ':''}${on?'▲':'▼'}</span>
     </div>
-    ${on?body():''}
+    ${on?`<div class="srow-b">${body()}</div>`:''}
   </div>`;
 }
-
-/* عنوان مجموعة في الإعدادات */
-const setGrp=(t,mt)=>`<div style="font-size:11.5px;color:var(--muted);letter-spacing:.3px;margin:${mt||'28px'} 4px 2px">${t}</div>`;
+/* صف جوه جزء (زي التصنيفات) — واحد بس مفتوح */
+function subRow(key,title,badge,body){
+  const on=setSub===key;
+  return `<div class="ssub">
+    <div class="srow-h" style="padding:13px 2px" onclick="app.toggleSetSub('${key}')">
+      <b style="font-size:14px">${esc(title)}</b>
+      <span>${badge!==''&&badge!==undefined?esc(String(badge))+' ':''}${on?'▲':'▼'}</span>
+    </div>
+    ${on?`<div style="padding:0 2px 16px">${body()}</div>`:''}
+  </div>`;
+}
+/* كارت: اسم المجموعة بيظهر بس لو فيه أكتر من جزء */
+const setCard=(label,rows)=>`${(label&&rows.length>1)?`<div class="sgrp">${label}</div>`:''}<div class="scard">${rows.join('')}</div>`;
 const atypeLabel=a=>a.credit?'كارت ائتماني':({cash:'كاش',bank:'حساب بنكي',wallet:'محفظة موبايل',save:'ادخار'}[a.atype]||'كاش');
+function catEditHtml(){
+  return `<div class="frow" style="margin:6px 0 8px">
+      <input class="f" id="catedin" value="${esc(catEdit.val)}" oninput="app.catEditSet(this.value)">
+      <button class="btn" onclick="app.catEditSave()">احفظ</button>
+      <button class="btn ghost" onclick="app.catEditCancel()">إلغاء</button>
+    </div>`;
+}
 function vSettings(){
   const syncSum=ghGist?('مربوطة'+(D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync)):'')):'مش مربوطة';
-  return `<div style="padding-top:20px">
-    ${setGrp('حساباتك','6px')}
-    ${setSec('accs','الحسابات',D.accounts.length+' حسابات',()=>`
+  return `<div style="padding-top:6px">
+    ${setCard('',[setSec('accs','الحسابات',D.accounts.length+' حسابات',()=>`
+
 
       <p class="hint" style="margin-top:-4px">دوس على الحساب عشان تعدّل فيه.</p>
       ${D.accounts.map(a=>{const c=(accCfg&&accCfg[a.id])||{name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''};
@@ -3909,7 +3939,7 @@ function vSettings(){
             <button class="btn ghost" onclick="app.reopenCard('${a.id}')">رجّعه</button>`
           :`${cardLinkHtml(a,a.payFrom,"app.setPayFrom_"+a.id)}
             ${cardDebt(a)>0.01
-              ?`<div class="hint">عشان توقفه لازم تسدد اللي عليه الأول (<span class="n">${fmt(cardDebt(a))}</span>).</div>`
+              ?`<div class="note warn">عشان توقفه لازم تسدد اللي عليه الأول (<span class="n">${fmt(cardDebt(a))}</span>).</div>`
               :(confirmKey==='stop'+a.id
                 ?`<button class="btn danger" onclick="app.stopCard('${a.id}')">أكد وقف الكارت</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
                 :`<button class="btn ghost" onclick="app.askDel('stop${a.id}')">وقفت الكارت</button>`)}`}`:''}
@@ -3934,10 +3964,9 @@ function vSettings(){
         <button class="btn" onclick="app.saveAccount('${a.id}')">احفظ</button>
         <button class="btn ghost" onclick="app.openAccCfg('')">إلغاء</button>
       </div>`}).join('')}
-        `,'4px')}
+            `)])}
+    ${setCard('',[setSec('daftar','دفتر '+bookName(),officeOn()?'شغّال':'مقفول',()=>`
 
-    ${setGrp('الدفتر التاني')}
-    ${setSec('daftar','دفتر '+bookName(),officeOn()?'شغّال':'مقفول',()=>`
 
       <p class="hint" style="margin-top:-4px">لو شغلته هيظهر سويتش فوق تبدّل بيه بين فلوسك والدفتر التاني، ومعاه التقفيل والعهد والسلف.</p>
       ${yesNo('officeon',officeOn(),'app.setOfficeOn','مقفول','شغّال')}
@@ -3949,7 +3978,7 @@ function vSettings(){
         </div>
         <div class="hint">الاسم ده بيظهر في السويتش فوق وفي عناوين الدفتر.</div>`:''}
       ${(officeOn()&&hasOfficeData())?`
-        <div class="hint">فيه بيانات مسجلة في الدفتر ده، فمش هينفع تقفله. امسحها الأول.</div>
+        <div class="note warn">فيه بيانات مسجلة في الدفتر ده، فمش هينفع تقفله. امسحها الأول.</div>
         ${(function(){
           const b=balances('office');
           const held=D.accounts.filter(a=>Math.abs(b[a.id]||0)>0.01);
@@ -3960,7 +3989,7 @@ function vSettings(){
             held.forEach(a=>parts.push(esc(a.name)+' '+fmt(b[a.id])));
             if(loan)parts.push('سلفة عهدة '+fmt(Math.abs(loanBalance())));
             if(fees)parts.push('رسوم ليك '+fmt(ofeeBalance()));
-            return `<div class="hint" style="color:#FF9C90">لسه فيه رصيد عهدة: ${parts.join(' · ')}. قفّل الفترة أو سوّها الأول.</div>`;
+            return `<div class="note warn">لسه فيه رصيد عهدة: ${parts.join(' · ')}. قفّل الفترة أو سوّها الأول.</div>`;
           }
           return confirmKey==='owipe'
             ?`<button class="btn danger" onclick="app.wipeOffice()">أكد مسح بيانات الدفتر</button>
@@ -3975,29 +4004,32 @@ function vSettings(){
         <button class="btn" onclick="app.saveOfeeLimit()">احفظ</button>
       </div>
     `:''}
-    `,'4px')}
+        `)])}
+    ${setCard('',[setSec('cats','التصنيفات',D.cats.length+' ليك'+(officeOn()?' · '+D.ocats.length+' للمكتب':''),()=>`
+      ${subRow('mine','تصنيفاتي',D.cats.length+' تصنيف',()=>`
 
-    ${setGrp('التصنيفات')}
-    ${setSec('cats','التصنيفات',D.cats.length+(officeOn()?' · '+D.ocats.length+' لدفتر '+bookName():''),()=>`
 
-    <div>${D.cats.map(c=>`<span class="catchip"><b style="background:${c.color}"></b>${c.label}
+    <div>${D.cats.map(c=>`${catEdit&&catEdit.kind==='me'&&catEdit.id===c.id?catEditHtml():`<span class="catchip"><b style="background:${c.color}"></b><span style="cursor:pointer" onclick="app.catEditOpen('me','${c.id}')">${esc(c.label)}</span>
       ${LOCKED.indexOf(c.id)>-1?'':(confirmKey==='cat'+c.id
       ?`<button onclick="app.delCat('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
-      :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`).join('')}</div>
+      :`<button onclick="app.askDel('cat${c.id}')">×</button>`)}</span>`}`).join('')}</div>
+    <div class="hint">دوس على اسم التصنيف عشان تغيّره.</div>
     <div class="frow">
       <input class="f" id="newcat" placeholder="اسم تصنيف جديد">
       <button class="btn" onclick="app.addCat()">ضيف</button>
     </div>
-        ${officeOn()?`<h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تصنيفات ${esc(bookName())}</h4>
+      `)}
+      ${officeOn()?subRow('ocats','تصنيفات '+bookName(),D.ocats.length+' تصنيف',()=>`
       <p class="hint" style="margin-top:0">اللي بتختار منها وأنت بتسجل مصروف عهدة.</p>
-      <div style="margin-top:10px">${D.ocats.map(c=>`<span class="catchip"><b style="background:#8C7BF0"></b>${esc(c.label)}
+      <div style="margin-top:10px">${D.ocats.map(c=>`${catEdit&&catEdit.kind==='o'&&catEdit.id===c.id?catEditHtml():`<span class="catchip"><b style="background:#8C7BF0"></b><span style="cursor:pointer" onclick="app.catEditOpen('o','${c.id}')">${esc(c.label)}</span>
         ${confirmKey==='ocat'+c.id?`<button onclick="app.ocatDel('${c.id}')" style="color:var(--mint)">أكد المسح</button>`
-          :`<button onclick="app.askDel('ocat${c.id}')">×</button>`}</span>`).join('')}</div>
+          :`<button onclick="app.askDel('ocat${c.id}')">×</button>`}</span>`}`).join('')}</div>
+      <div class="hint">دوس على اسم التصنيف عشان تغيّره.</div>
       <div class="frow">
         <input class="f" id="newocat" placeholder="تصنيف جديد">
         <button class="btn" onclick="app.ocatAdd()">ضيف</button>
       </div>
-    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تجميع بنود ${esc(bookName())}</h4>
+          `)+subRow('groups','تجميع بنود '+bookName(),(D.groups||[]).length+' مجموعة',()=>`
     <p class="hint" style="margin-top:0">البنود اللي جوه المجموعة بتتسجل مفصّلة زي ما هي، بس بتظهر في تقرير التقفيل في سطر واحد باسم المجموعة.</p>
     <div class="panel" style="margin-top:12px">
       ${(D.groups||[]).length?(D.groups||[]).map(g=>`
@@ -4014,7 +4046,7 @@ function vSettings(){
             return `<div style="display:grid;grid-template-columns:1fr 34px;gap:8px;margin-bottom:8px">
             <input class="f" style="${own?'border-color:#5E332B':''}" value="${esc(it)}" oninput="app.grpItem('${g.id}',${ix},this.value)">
             <button class="chip sm" style="padding:0" onclick="app.grpDelItem('${g.id}',${ix})">×</button>
-          </div>${own?`<div class="hint" style="color:#FF9C90;margin-top:-4px">«${esc(it)}» موجود في مجموعة «${esc(own.name)}» — شيله من هنا أو من هناك.</div>`:''}`;}).join('')}
+          </div>${own?`<div class="note warn" style="margin:0 0 10px">«${esc(it)}» موجود في مجموعة «${esc(own.name)}» — شيله من هنا أو من هناك.</div>`:''}`;}).join('')}
           <button class="btn ghost" style="margin-top:0" onclick="app.grpAddItem('${g.id}')">ضيف بند فاضي</button>
           ${(function(){const n=itemNames().filter(x=>!groupNameFor(x));
             return n.length?`<div class="hint">أو اختار من بنودك:</div><div class="chips">${n.map(x=>`<button class="chip sm" onclick="app.grpAddNamed('${g.id}','${esc(x).replace(/'/g,"&#39;")}')">${esc(x)}</button>`).join('')}</div>`:'';})()}
@@ -4025,20 +4057,19 @@ function vSettings(){
       <input class="f" id="newgrp" placeholder="اسم مجموعة جديدة">
       <button class="btn" onclick="app.addGroup()">ضيف</button>
     </div>
-    `:''}
-    `,'4px')}
+          `):''}
+    `)])}
+    ${setCard('الشهر والأسعار',[setSec('month','بداية الشهر',D.monthMode==='cal'?'من أول الشهر':'من المرتب',()=>`
 
-    ${setGrp('الشهر والأسعار')}
-    ${setSec('month','بداية الشهر',D.monthMode==='cal'?'من أول الشهر':'من المرتب',()=>`
 
       <p class="hint" style="margin-top:-4px">بيأثر على تقارير الشهر بس. الأقساط بتفضل مربوطة بالمرتب في الحالتين.</p>
       ${pickRow('monthmode',[{id:'salary',label:'من المرتب'},{id:'cal',label:'من أول الشهر'}],D.monthMode==='cal'?'cal':'salary','app.setMonthMode',1)}
-        `,'4px')}
-    ${setSec('prices','الأسعار','دولار '+fmt(D.rate)+' · ٩٢ بـ'+fmt(D.p92||0)+' · ٩٥ بـ'+fmt(D.p95||0),()=>`
-<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">سعر الدولار التقديري</h4>
+            `),setSec('prices','الأسعار','دولار '+fmt(D.rate)+' · بنزين '+fmt(D.p92||0)+' و'+fmt(D.p95||0),()=>`
+
+<label class="f" style="margin-top:0">سعر الدولار التقديري</label>
       <p class="hint" style="margin-top:0">بيستخدم لحد ما تظبط المبلغ الحقيقي، وبعدها بيتحدّث لوحده بآخر سعر فعلي.</p>
       <input class="f" id="ratein" type="text" inputmode="decimal" value="${D.rate}" oninput="numFix(this,1)">
-    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">سعر لتر البنزين</h4>
+    <label class="f" style="margin-top:22px">سعر لتر البنزين</label>
       <p class="hint" style="margin-top:0">لما تسجّل بنزين وتسيب خانة اللترات فاضية، هيحسبها من المبلغ وسعر اللتر ويكتب جنبها «تقريبي».</p>
       <div class="f2" style="margin-top:12px">
         <div><label class="f" style="margin-top:0">لتر ٩٢</label>
@@ -4048,11 +4079,10 @@ function vSettings(){
       </div>
 
           <button class="btn" onclick="app.savePrices()">احفظ الأسعار</button>
-    `)}
+        `)])}
+    ${setCard('بياناتك',[setSec('data','المزامنة والنسخة الاحتياطية',syncSum,()=>`
 
-    ${setGrp('بياناتك')}
-    ${setSec('data','المزامنة والنسخة الاحتياطية',syncSum,()=>`
-<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">المزامنة التلقائية</h4>
+<label class="f" style="margin-top:0">المزامنة التلقائية</label>
     <p class="hint" style="margin-top:0">بياناتك بتتخزن في ملف خاص بيك على حسابك في GitHub، وبتتزامن أوتوماتيك بين أجهزتك. مفيش حد غيرك يقدر يوصله. المفتاح بيتخزن على الموبايل بس.</p>
     ${ghGist?`
       <div class="note ok" style="margin-top:12px">مربوط${D.ghLastSync?' · آخر مزامنة '+dLabel(localDay(D.ghLastSync))+' '+localTime(D.ghLastSync):''}</div>
@@ -4074,15 +4104,15 @@ function vSettings(){
         <li>الصقه في الخانة فوق واضغط اربط.</li>
       </ol>`:''}
     `}
-    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">النسخة الاحتياطية</h4>
+    <label class="f" style="margin-top:22px">النسخة الاحتياطية</label>
       <p class="hint" style="margin-top:0">اعمل نسخة كل شوية. لو مسحت بيانات المتصفح، الأرقام بتروح.</p>
+      <div class="note ${(D.lastBackup&&daysTo(D.lastBackup)>=-30)?'ok':'warn'}" style="margin-top:12px">${D.lastBackup?'آخر نسخة: '+dayLabel(D.lastBackup):'معملتش نسخة لسه'}</div>
       <button class="btn ghost" onclick="app.exportData()">شارك أو نزّل نسخة من بياناتي</button>
-      ${D.lastBackup?`<div class="hint">آخر نسخة: ${dayLabel(D.lastBackup)}</div>`:''}
       <button class="btn ghost" onclick="document.getElementById('imp').click()">ارفع نسخة محفوظة</button>
       <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="app.importData(this)">
-        `,'4px')}
-    ${setSec('app','البرنامج',getKey()?'مفتاح الفواتير متسجل':'من غير مفتاح فواتير',()=>`
-<h4 style="font-size:13px;margin:4px 0 10px;color:var(--muted)">مفتاح قراءة الفواتير</h4>
+            `),setSec('app','البرنامج',getKey()?'مفتاح الفواتير متسجل':'من غير مفتاح فواتير',()=>`
+
+<label class="f" style="margin-top:0">مفتاح قراءة الفواتير</label>
       <p class="hint" style="margin-top:0">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
       ${(getKey()&&!showKeyEdit)?`
         <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
@@ -4095,25 +4125,26 @@ function vSettings(){
         <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
         ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
       `}
-    <h4 style="font-size:13px;margin:22px 0 10px;color:var(--muted)">تركيبه على الموبايل</h4>
+    <label class="f" style="margin-top:22px">تركيبه على الموبايل</label>
       <ol class="steps">
         <li>افتح اللينك من متصفح الموبايل.</li>
         <li>افتح قايمة المتصفح (زرار المشاركة أو النقط التلاتة).</li>
         <li>اختار «إضافة إلى الشاشة الرئيسية».</li>
       </ol>
       <div class="hint">هيشتغل بعدها زي أي تطبيق، وهيفتح من غير نت كمان.</div>
-        `)}
+            `)])}
+    ${setCard('',[setSec('wipe','<span style="color:var(--clay)">مسح البيانات</span>','',()=>`
 
-    ${setSec('wipe','<span style="color:var(--clay)">مسح البيانات</span>','',()=>`
 
       <p class="hint" style="margin-top:-4px">بيمسح كل حاجة في البرنامج ومش بيرجع تاني.</p>
       ${confirmKey==='wipe'
       ?`<button class="btn danger" onclick="app.wipe()">أكد مسح كل البيانات</button>
         <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
       :`<button class="btn danger" onclick="app.askDel('wipe')">امسح كل البيانات</button>`}
-        `,'34px')}
+            `)])}
   </div>`;
 }
+
 
 /* ==========================================================================
    8) المحرك
@@ -4151,7 +4182,8 @@ function render(){
   if(!officeOn()&&book==='office')book='me';
   const bs=document.getElementById('bookseg');
   if(bs&&bs.style)bs.style.display=officeOn()?'':'none';
-  if(document.body&&document.body.classList)document.body.classList.toggle('office',book==='office');
+  if(document.body&&document.body.classList){document.body.classList.toggle('office',book==='office');
+    document.body.classList.toggle('insets',tab==='settings'&&!(isFresh()&&!welSkipped));}
   document.querySelectorAll('.bookseg button').forEach(x=>x.classList.remove('on'));
   setText('bk-office',bookName());
   const bb=document.getElementById(book==='me'?'bk-me':'bk-office');
@@ -4420,7 +4452,7 @@ const app=new Proxy({
     const last=s&&s.payments&&s.payments[s.payments.length-1];
     if(last&&last.t===n.t)app.undoSubPay(n.sid);else{save();render();}
   },
-  go(t){rememberY();renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};openRow={};if(t==='settings')accCfgInit();render();restoreY();},
+  go(t){rememberY();renderLock=0;renderPending=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};setSub=null;catEdit=null;openRow={};if(t==='settings')accCfgInit();render();restoreY();},
   setWtab(w){rememberY();wtab=w;payFor=null;convFor=null;editAcct=null;render();restoreY();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();
@@ -6045,7 +6077,16 @@ const app=new Proxy({
     D.p92=numVal('p92in')||0;D.p95=numVal('p95in')||0;
     setsOpen={};save();app.toast('اتحفظ');render();
   },
-  toggleSet(k){const o=!setsOpen[k];setsOpen={};if(o)setsOpen[k]=true;accOpen=null;confirmKey='';render();},
+  toggleSet(k){const o=!setsOpen[k];setsOpen={};if(o)setsOpen[k]=true;accOpen=null;setSub=null;catEdit=null;confirmKey='';render();},
+  toggleSetSub(k){setSub=setSub===k?null:k;catEdit=null;confirmKey='';render();},
+  catEditOpen(kind,id){const L=kind==='o'?D.ocats:D.cats;const c=(L||[]).find(x=>x.id===id);if(!c)return;catEdit={kind:kind,id:id,val:c.label};render();},
+  catEditSet(v){if(catEdit)catEdit.val=v;},
+  catEditCancel(){catEdit=null;render();},
+  catEditSave(){
+    if(!catEdit)return;const L=catEdit.kind==='o'?D.ocats:D.cats;const c=(L||[]).find(x=>x.id===catEdit.id);if(!c)return;
+    const v=String(catEdit.val||'').trim();if(!v)return;
+    if(L.some(x=>x.id!==c.id&&String(x.label).trim()===v)){app.toast('الاسم ده مستخدم');return;}
+    c.label=v;catEdit=null;save();render();app.toast('اتحفظ');},
   openAccCfg(id){accOpen=id||null;accCfgInit();feeEd=null;render();},
   toggleAlerts(){alertsOpen=!alertsOpen;render();},
   svSet(sc,k,v,rr){const o=sc==='new'?accDraft:svEdit;if(!o)return;
