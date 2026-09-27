@@ -447,7 +447,7 @@ let insEdit=null, iDraft={};
 let showIns=false, showCert=false, showSub=false;
 let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
-let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
 let accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',sec:false,secured:[],
@@ -930,6 +930,8 @@ const officeOnly=()=>D.accounts.filter(a=>a.scope==='office'&&!a.credit&&!isSave
 const officeAccs=()=>accountsFor('office').filter(a=>!a.credit&&!isSave(a));
 const sharedAccs=()=>D.accounts.filter(a=>a.scope==='both'&&!a.credit&&!isSave(a));
 const myOnly=()=>D.accounts.filter(a=>a.scope!=='office'&&!a.credit&&!isSave(a));
+/* حساب الدفتر: لو مشترك بيتكتب «نصيب الدفتر في …» */
+const offAccLabel=a=>a.scope==='both'?'نصيب '+bookName()+' في '+a.name:a.name;
 function officeCashId(){
   const l=officeAccs();
   const c=l.find(a=>a.scope==='office'&&a.atype==='cash')||l.find(a=>a.scope==='office')||l[0];
@@ -1231,7 +1233,7 @@ function runAuto(){
   if(ac.length||af.length||cu.n||tr.length)save();
 }
 /* حركات بتنقل فلوسك من مكان لمكان — مش دخل ولا مصروف */
-const isXferLike=t=>t.kind==='transfer'||!!t.flIn||!!t.flOut||!!t.certBuy||!!t.certBack;
+const isXferLike=t=>t.kind==='transfer'||!!t.flIn||!!t.flOut||!!t.certBuy||!!t.certBack||!!t.ocard||!!t.omine||!!t.flBack;
 /* حسابات البنك (للربط والشهادات) */
 const bankAccs=()=>(D.accounts||[]).filter(a=>a.atype==='bank'&&!a.credit&&!a.closed&&a.scope!=='office');
 /* ---------- ٤٧: الكارت بيتسدد من حساب مربوط ---------- */
@@ -1357,7 +1359,8 @@ function officeReport(from,to){
     return t.kind==='expense'?-v:(t.kind==='income'||t.kind==='float')?v:t.kind==='settle'?(t.dir==='in'?v:-v):0;};
   const base=D.accounts.reduce((x,a)=>x+(Number(a.openingOffice)||0),0);
   const opening=base+off.filter(t=>t.date<from).reduce((a,t)=>a+sign(t),0);
-  const floats=off.filter(t=>t.kind==='float'&&t.date>=from&&t.date<=to)
+  /* العهدة اللي دخلت، واللي رجعلك من فلوسك (بالسالب) */
+  const floats=off.filter(t=>(t.kind==='float'||(t.kind==='settle'&&t.flBack))&&t.date>=from&&t.date<=to)
                   .sort((a,b)=>a.date<b.date?-1:1);
   const exp=off.filter(t=>t.kind==='expense'&&t.date>=from&&t.date<=to);
   const g={};
@@ -1371,7 +1374,7 @@ function officeReport(from,to){
   const items=Object.values(g).sort((a,b)=>b.sum-a.sum);
   const byCat={};
   items.forEach(i=>byCat[i.ocat]=(byCat[i.ocat]||0)+i.sum);
-  const floatsTotal=floats.reduce((a,t)=>a+Number(t.amount),0);
+  const floatsTotal=floats.reduce((a,t)=>a+sign(t),0);
   const spent=items.reduce((a,i)=>a+i.sum,0);
   const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
   return {from:from,to:to,opening:r2(opening),floats:floats,floatsTotal:r2(floatsTotal),
@@ -2244,7 +2247,13 @@ ${s.cycle==='trial'
         ${pickRow('flfrom',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.from||(myOnly()[0]||{}).id,'app.flPaySet_from',1)}
         <label class="f">على أنهي حساب في العهدة؟</label>
         ${pickRow('flto',officeAccs().map(a=>({id:a.id,label:esc(a.name)})),flPay.to||officeCashId(),'app.flPaySet_to',1)}
-        <div class="hint">المبلغ هيتخصم من حسابك، ولو سددت على حساب غير اللي خدت منه، فلوس العهدة هتتنقل بينهم.</div>`:''}
+        <div class="hint">المبلغ هيتخصم من حسابك، ولو سددت على حساب غير اللي خدت منه، فلوس العهدة هتتنقل بينهم.</div>`
+      :`<label class="f">خدتها من أنهي حساب في ${esc(bookName())}؟</label>
+        ${pickRow('flbfrom',officeAccs().map(a=>({id:a.id,label:esc(offAccLabel(a))})),flPay.bfrom||officeCashId(),'app.flPaySet_bfrom',1)}
+        ${(function(){const f=D.accounts.find(a=>a.id===(flPay.bfrom||officeCashId()));
+          return (f&&f.scope==='both')?'':`<label class="f">ودخلت على أنهي حساب عندك؟</label>
+          ${pickRow('flbto',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.bto||(myOnly()[0]||{}).id,'app.flPaySet_bto',1)}`;})()}
+        <div class="hint">المبلغ هيطلع من ${esc(bookName())} ويدخل حسابك.</div>`}
       <button class="btn" onclick="app.settleLoan()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelLoan()">إلغاء</button>
     </div>`:''}`);
@@ -2606,8 +2615,16 @@ function vAddOffice(){
 
 
     ${(k==='loan'||k==='xfer')?'':`<label class="f">${k==='float'?'دخلت فين؟':'اتدفعت من إيه؟'} <b>*</b></label>
-    ${(function(){const opts=D.accounts.filter(x=>!isSave(x)&&(k==='expense'?true:!x.credit));
-      return pickRow('oacct',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.account,'app.oAccount');})()}`}
+    ${(function(){const opts=D.accounts.filter(x=>!x.closed&&!isSave(x)&&(k==='expense'?true:!x.credit));
+      return pickRow('oacct',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.account,'app.oAccount');})()}
+    ${(k==='expense'&&isCreditAcc(draftO.account))?`
+      <label class="f">خدت الفلوس من فين؟ <b>*</b></label>
+      ${pickRow('ocardfrom',officeAccs().map(a=>({id:a.id,label:esc(offAccLabel(a))})).concat([{id:'later',label:'لسه، هاخدها بعدين'}]),draftO.cardFrom,'app.oCardFrom',1)}
+      ${(function(){const f=D.accounts.find(a=>a.id===draftO.cardFrom);
+        return (f&&f.scope!=='both')?`<label class="f">ودخلت على أنهي حساب عندك؟ <b>*</b></label>${payChips(draftO.cardTo,'app.oCardTo','','me','',0,{src:1})}`:'';})()}
+      <div class="hint">${draftO.cardFrom==='later'
+        ?'الكارت هيتخصم منه المبلغ، و'+esc(bookName())+' هيتسجل عليه ليك لحد ما تاخدها.'
+        :'الكارت هيتخصم منه المبلغ، والفلوس اللي خدتها من '+esc(bookName())+' هتدخل حسابك — ومش هيتحسب مصروف عليك.'}</div>`:''}`}
 
     ${k==='xfer'?'':k==='loan'?`
       <label class="f">على إيه؟ (اختياري)</label>
@@ -2631,8 +2648,8 @@ function vAddOffice(){
         <label class="f">المكان (اختياري)</label>
         <input class="f" placeholder="اسم المحل أو المكان" value="${esc(draftO.place)}" oninput="app.oSet('place',this.value)">
 
-        <label class="f">المبلغ ده جالي أنا؟</label>
-        ${yesNo('otome',draftO.toMe,'app.oToMe','لأ، اتصرف بره','أيوه، أخدته')}
+        ${isCreditAcc(draftO.account)?'':`<label class="f">المبلغ ده جالي أنا؟</label>
+        ${yesNo('otome',draftO.toMe,'app.oToMe','لأ، اتصرف بره','أيوه، أخدته')}`}
         ${draftO.toMe?`<label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
           ${payChips(draftO.to,'app.oTo','','me')}
           <div class="hint">هيتسجل بند منصرف على العهدة باسمه وتصنيفه، ودخل ليك بنفس المبلغ. لو نفس الحساب، الفلوس مش هتتحرك فعليًا — بس هتخرج من نصيب العهدة وتدخل نصيبك.</div>`:''}
@@ -2643,7 +2660,7 @@ function vAddOffice(){
           <input class="f" type="text" inputmode="decimal" value="${esc(draftO.feeAmt)}" oninput="app.oSet('feeAmt',numFix(this,1))">
           <div class="hint">الرسوم بتتحسب عليك أنت، ولما توصل <span class="n">${fmt(D.ofeeLimit)}</span> جنيه هفكرك تاخدها من العهدة.</div>`:''}
 
-        <label class="f">اللي خرج من العهدة (لو مختلف)</label>
+        ${(isCreditAcc(draftO.account)&&draftO.cardFrom==='later')?'':`<label class="f">اللي خرج من العهدة (لو مختلف)</label>
         <input class="f" type="text" inputmode="decimal" placeholder="سيبها فاضية لو نفس المبلغ"
           value="${esc(draftO.paid)}" oninput="app.oSetLive('paid',numFix(this,1))">
         <div class="hint" id="opaidhint">${(function(){
@@ -2654,19 +2671,17 @@ function vAddOffice(){
             : 'الفرق '+fmt(a-p)+' هيتحسب إنك دفعته من فلوسك، وهيبقى ليك في العهدة.';})()}</div>
         ${(function(){const a=Number(onlyNum(draftO.amount))||0,p=Number(onlyNum(draftO.paid))||0;
           if(!(p>a+0.005))return '';
-          let h=`<label class="f">الفرق يدخل على أنهي حساب؟ <b>*</b></label>${payChips(draftO.diffTo,'app.oDiffTo','','me')}`;
-          if(isCreditAcc(draftO.account)){
-            h+=`<label class="f">والفرق ده طلع من أنهي حساب في العهدة؟ <b>*</b></label>
-              ${pickRow('odiff',accountsFor('office').map(x=>({id:x.id,label:esc(x.name)})),draftO.diffFrom,'app.oDiffFrom')}
-              <div class="hint">الكارت هيتخصم منه المبلغ الفعلي <span class="n">${fmt(a)}</span>، والعهدة هيتسجل عليها المقفول <span class="n">${fmt(p)}</span>، والفرق <span class="n">${fmt(Math.round((p-a)*100)/100)}</span> هيطلع من الحساب ده.</div>`;
-          }
-          return h;})()}
+          /* بالكارت: الفرق بيدخل نفس الحساب اللي دخلت عليه الفلوس */
+          if(isCreditAcc(draftO.account))return `<div class="hint">الكارت هيتخصم منه المبلغ الفعلي <span class="n">${fmt(a)}</span>، و${esc(bookName())} هيتسجل عليه المقفول <span class="n">${fmt(p)}</span>، والفرق <span class="n">${fmt(Math.round((p-a)*100)/100)}</span> هيتسجل دخل ليك.</div>`;
+          return `<label class="f">الفرق يدخل على أنهي حساب؟ <b>*</b></label>${payChips(draftO.diffTo,'app.oDiffTo','','me')}`;})()}`}
 
-        <label class="f">فيه جزء من فلوسك؟</label>
+        ${isCreditAcc(draftO.account)?'':`<label class="f">فيه جزء من فلوسك؟</label>
         ${yesNo('omine',draftO.mine,'app.oMine')}
         ${draftO.mine?`<label class="f">كام منها من فلوسك؟</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(draftO.mineAmt)}" oninput="app.oSetLive('mineAmt',numFix(this,1))">
-          <div class="hint">هيتخصم من العهدة <span class="n" id="ominehint">${fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)))}</span> جنيه، والباقي هيتسجل إن العهدة عليها ليك.</div>`:''}
+          <label class="f">طلعت من أنهي حساب عندك؟ <b>*</b></label>
+          ${payChips(draftO.mineFrom,'app.oMineFrom','','me','',0,{src:1})}
+          <div class="hint">هيتخصم من العهدة <span class="n" id="ominehint">${fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)))}</span> جنيه، والباقي هيتخصم من حسابك ويتسجل إن العهدة عليها ليك.</div>`:''}`}
       `:''}
     `}
 
@@ -2704,6 +2719,12 @@ function oOk(){const k=draftO.kind;
   if(k==='xfer'&&draftO.swap)return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.myAcc
     &&(draftO.shared||sharedAccs().length===1));
   if(k==='xfer')return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.to&&draftO.to!==draftO.account);
+  if(k==='expense'&&isCreditAcc(draftO.account)){
+    if(!draftO.cardFrom)return false;
+    const f=D.accounts.find(a=>a.id===draftO.cardFrom);
+    if(f&&f.scope!=='both'&&!draftO.cardTo)return false;
+  }
+  if(k==='expense'&&!isCreditAcc(draftO.account)&&draftO.mine&&(Number(onlyNum(draftO.mineAmt))||0)>0&&!draftO.mineFrom)return false;
   return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&(k==='float'||(draftO.item.trim()&&draftO.ocat))&&(!draftO.toMe||draftO.to));}
 
 function txnEditForm(t){
@@ -3095,7 +3116,7 @@ function repLines(r){
   <div class="rep">
     <h4>الرصيد</h4>
     <div class="l"><span class="n">${fmt(r.opening)}</span><span>باقي من التقفيل اللي فات</span></div>
-    ${r.floats.map(f=>`<div class="l"><span class="n">${fmt(f.amount)}</span><span>عهدة<small style="display:block">${esc(f.note||'')}${f.note?' · ':''}${esc(accName(f.account))} · ${dayLabel(f.date)}</small></span></div>`).join('')}
+    ${r.floats.map(f=>`<div class="l"><span class="n">${fmt(f.kind==='settle'?-f.amount:f.amount)}</span><span>${f.kind==='settle'?'رجعلك من فلوسك':'عهدة'}<small style="display:block">${esc(f.note||'')}${f.note?' · ':''}${esc(accName(f.account))} · ${dayLabel(f.date)}</small></span></div>`).join('')}
     <div class="tot"><span class="n">${fmt(r.opening+r.floatsTotal)}</span><span>إجمالي الرصيد</span></div>
   </div>
 
@@ -3163,7 +3184,7 @@ function printHTML(r){
 
   <h2>الرصيد</h2>
   <div class="l"><span>${fmt(r.opening)}</span><span>باقي من التقفيل اللي فات</span></div>
-  ${r.floats.map(f=>`<div class="l"><span>${fmt(f.amount)}</span><span>عهدة — ${esc(f.note||accName(f.account))} <small>(${esc(accName(f.account))} · ${dayLabel(f.date)})</small></span></div>`).join('')}
+  ${r.floats.map(f=>`<div class="l"><span>${fmt(f.kind==='settle'?-f.amount:f.amount)}</span><span>${f.kind==='settle'?'رجعلك من فلوسك':'عهدة'} — ${esc(f.note||accName(f.account))} <small>(${esc(accName(f.account))} · ${dayLabel(f.date)})</small></span></div>`).join('')}
   <div class="tot"><span>${fmt(r.opening+r.floatsTotal)}</span><span>إجمالي الرصيد</span></div>
 
   <h2>المنصرف</h2>
@@ -4232,14 +4253,16 @@ const app=new Proxy({
     const el=document.getElementById('ominehint');
     if(el)el.textContent=fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)));},
   oKind(k){draftO.kind=k;render();},
-  oAccount(id){draftO.account=id;render();},
+  oAccount(id){draftO.account=id;draftO.cardFrom='';draftO.cardTo='';render();},
   oCat(id){draftO.ocat=id;render();},
   oDir(d){draftO.dir=d;render();},
   oMine(v){draftO.mine=v;if(!v)draftO.mineAmt='';render();},
   oHasFee(v){draftO.hasFee=v;if(!v)draftO.feeAmt='';render();},
   oToMe(v){draftO.toMe=v;if(!v)draftO.to='';render();},
   oDiffTo(id){draftO.diffTo=id;render();},
-  oDiffFrom(id){draftO.diffFrom=id;render();},
+  oCardFrom(id){draftO.cardFrom=id;draftO.cardTo='';render();},
+  oCardTo(id){draftO.cardTo=id;render();},
+  oMineFrom(id){draftO.mineFrom=id;render();},
   oSetLive(k,v){
     draftO[k]=v;setDisabled('osave',oOk());
     const el=document.getElementById('ominehint');
@@ -4277,7 +4300,7 @@ const app=new Proxy({
       }
       sortTxns();save();
       draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',
-        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
       render();window.scrollTo(0,0);app.toast('اتسجل');return;
     }
     if(draftO.kind==='xfer'&&(!draftO.to||draftO.to===draftO.account))return;
@@ -4287,7 +4310,7 @@ const app=new Proxy({
         to:draftO.to,date:draftO.date,note:String(draftO.note||'').trim()||'تحويل عهدة'});
       sortTxns();save();
       draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',
-        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+        mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
       render();window.scrollTo(0,0);app.toast('اتحول');return;
     }
     if(draftO.kind==='loan'){
@@ -4295,38 +4318,49 @@ const app=new Proxy({
       D.floatLoans.push({id:uid(),dir:draftO.dir==='back'?'back':'take',amount:amt,
         date:draftO.date,note:String(draftO.note||'').trim()});
       save();
-      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+      draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
       render();window.scrollTo(0,0);app.toast('اتسجلت');return;
     }
     if(draftO.kind==='float'){
       D.txns.unshift({id:uid(),book:'office',kind:'float',amount:amt,account:draftO.account,
         date:draftO.date,note:String(draftO.note||'').trim()});
     }else{
-      const paidOut=Number(onlyNum(draftO.paid))||0;
+      /* بالكارت: المصروف بيتسجل على حساب الدفتر اللي خدت منه الفلوس، والكارت بيتخصم في دفترك */
+      const card=isCreditAcc(draftO.account), later=card&&draftO.cardFrom==='later';
+      const offAcc=card?(later?officeCashId():draftO.cardFrom):draftO.account;
+      const paidOut=later?0:(Number(onlyNum(draftO.paid))||0);
       const extra=paidOut>amt+0.005?Math.round((paidOut-amt)*100)/100:0;
-      let mine=draftO.mine?(Number(onlyNum(draftO.mineAmt))||0):0;
+      let mine=(!card&&draftO.mine)?(Number(onlyNum(draftO.mineAmt))||0):0;
       if(paidOut>0&&paidOut<amt-0.005)mine=Math.max(mine,Math.round((amt-paidOut)*100)/100);
       if(mine>amt)mine=amt;
-      D.txns.unshift({id:uid(),book:'office',kind:'expense',amount:Math.round((amt+extra)*100)/100,
-        account:draftO.account,date:draftO.date,item:it,ocat:draftO.ocat,
+      const oexp={id:uid(),book:'office',kind:'expense',amount:Math.round((amt+extra)*100)/100,
+        account:offAcc,date:draftO.date,item:it,ocat:draftO.ocat,
         note:String(draftO.onote||'').trim()||it,
-        real:extra>0?amt:undefined,place:String(draftO.place||'').trim()||undefined});
-      if(extra>0){
-        D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,
-          account:draftO.diffTo||'cash',date:draftO.date,note:'باقي تقريب — '+it});
-        /* كارت ائتماني: البنك خصم الفعلي بس، فالفرق بيتنقل جوه العهدة
-           من الحساب اللي خدت منه الفرق للكارت — العهدة يفضل عليها المقفول */
-        if(isCreditAcc(draftO.account)){
-          const offA=accountsFor('office');
-          const from=(draftO.diffFrom&&offA.some(x=>x.id===draftO.diffFrom))
-            ?draftO.diffFrom:((offA[0]&&offA[0].id)||'');
-          if(from&&from!==draftO.account){
-            D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:extra,
-              account:from,to:draftO.account,date:draftO.date,note:'فرق تقريب — '+it});
-          }
+        real:extra>0?amt:undefined,place:String(draftO.place||'').trim()||undefined};
+      D.txns.unshift(oexp);
+      if(card){
+        const L=uid();oexp.link=L;oexp.ocard=draftO.account;
+        D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:amt,account:draftO.account,
+          date:draftO.date,ocard:true,link:L,note:'مصروف '+bookName()+' بالكارت — '+it});
+        if(later){
+          D.txns.unshift({id:uid(),book:'office',kind:'float',amount:amt,account:offAcc,date:draftO.date,
+            link:L,note:'من فلوسي (الكارت) — '+it});
+          if(!D.floatLoans)D.floatLoans=[];
+          D.floatLoans.push({id:uid(),dir:'back',amount:amt,date:draftO.date,note:it,srcTxn:oexp.id});
+        }else{
+          const f=D.accounts.find(a=>a.id===offAcc);
+          const tgt=(f&&f.scope==='both')?offAcc:draftO.cardTo;
+          D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:amt,account:tgt,
+            date:draftO.date,ocard:true,link:L,note:'من '+bookName()+' — '+it});
+          if(extra>0)D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,account:tgt,
+            date:draftO.date,link:L,note:'باقي تقريب — '+it});
         }
       }
-      if(draftO.toMe&&draftO.to){
+      if(extra>0&&!card){
+        D.txns.unshift({id:uid(),book:'me',kind:'income',amount:extra,
+          account:draftO.diffTo||'cash',date:draftO.date,note:'باقي تقريب — '+it});
+      }
+      if(!card&&draftO.toMe&&draftO.to){
         const link=uid();
         const last=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.item===it&&t.date===draftO.date);
         if(last)last.link=link;
@@ -4342,14 +4376,18 @@ const app=new Proxy({
         D.ofees.push({id:uid(),type:'fee',amount:ofv,date:draftO.date,note:it,srcTxn:ft.id});
       }
       if(mine>0){
+        const L=oexp.link||uid();oexp.link=L;
         D.txns.unshift({id:uid(),book:'office',kind:'float',amount:mine,account:draftO.account,
-          date:draftO.date,note:'من فلوسي — '+it});
+          date:draftO.date,link:L,note:'من فلوسي — '+it});
+        /* الفلوس بتطلع من حسابك انت */
+        if(draftO.mineFrom)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:mine,account:draftO.mineFrom,
+          date:draftO.date,omine:true,link:L,note:'حطيت في '+bookName()+' — '+it});
         if(!D.floatLoans)D.floatLoans=[];
-        D.floatLoans.push({id:uid(),dir:'back',amount:mine,date:draftO.date,note:it});
+        D.floatLoans.push({id:uid(),dir:'back',amount:mine,date:draftO.date,note:it,srcTxn:oexp.id});
       }
     }
     sortTxns();save();
-    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',diffFrom:'',onote:'',toMe:false};
+    draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'cash',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   setCloseTo(v){closeTo=v;render();},
@@ -5312,6 +5350,8 @@ const app=new Proxy({
   cancelLoan(){loanFor=false;render();},
   flPaySet_from(v){flPay.from=v;render();},
   flPaySet_to(v){flPay.to=v;render();},
+  flPaySet_bfrom(v){flPay.bfrom=v;flPay.bto='';render();},
+  flPaySet_bto(v){flPay.bto=v;render();},
   settleLoan(){
     const v=numVal('loanin');
     if(v>0){
@@ -5331,7 +5371,14 @@ const app=new Proxy({
           date:td,flOut:true,note:'سداد للعهدة'});
         sortTxns();
       }else{
-        D.floatLoans.push({id:uid(),dir:'take',amount:v,date:today(),note:'تسوية',mig:1});
+        const u=Math.min(v,Math.abs(loanBalance())),td=today();
+        const from=flPay.bfrom||officeCashId(), f=D.accounts.find(a=>a.id===from);
+        const to=(f&&f.scope==='both')?from:(flPay.bto||(myOnly()[0]||{}).id);
+        D.floatLoans.push({id:uid(),dir:'take',amount:u,date:td,note:'تسوية',mig:1,acct:from});
+        const L=uid();
+        if(from)D.txns.unshift({id:uid(),book:'office',kind:'settle',dir:'out',amount:u,account:from,date:td,flBack:true,link:L,note:'رجعلي من فلوسي'});
+        if(to)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:u,account:to,date:td,flBack:true,link:L,note:'رجعلي من '+bookName()});
+        sortTxns();
       }
       save();
     }
