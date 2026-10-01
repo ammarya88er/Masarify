@@ -531,7 +531,7 @@ function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),cur:a.cur||'EGP'});}
 let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:'cert'};
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
-let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null;
+let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null, vchMsg='';
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
 let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
@@ -599,12 +599,14 @@ function normalizeData(){
     if(s.myShare===undefined)s.myShare=null;
   });
   if(!D.vouchers)D.vouchers=[];
-  if(!D.cardDigits)D.cardDigits='402977';
-  if(!D.phone)D.phone='01015606989';
+  if(D.cardDigits===undefined)D.cardDigits='';
+  if(D.phone===undefined)D.phone='';
+  /* الفاوتشرات القديمة كانت بنك واحد ثابت — بتتربط بأول حساب بنك عندك */
+  if(D.vchAcct===undefined){const b=D.vouchers.length&&vchBanks()[0];D.vchAcct=b?b.id:'';}
   D.vouchers.forEach(v=>{
     if(v.used===undefined)v.used=!(Number(v.left)>0);
     if(!v.code)v.code=v.name||'';
-    if(!v.card)v.card=D.cardDigits;
+    if(!v.card&&D.cardDigits)v.card=D.cardDigits;
   });
   if(!D.cats)D.cats=JSON.parse(JSON.stringify(DEF_CATS));
   if(!D.cats.some(c=>c.id==='installment'))D.cats.push({id:'installment',label:'قسط',color:'#5C86C4'});
@@ -769,6 +771,9 @@ function save(){
   scheduleGhPush();
 }
 const getKey=()=>{try{return localStorage.getItem(AKEY)||'';}catch(e){return '';}};
+/* نوع المفتاح من أوله: مفاتيح Gemini بتبدأ بـ AIza، والباقي Anthropic */
+const keyProv=k=>/^AIza/.test(String(k||'').trim())?'gemini':'anthropic';
+const keySite=()=>keyProv(getKey())==='gemini'?'Google AI Studio':'منصة أنثروبيك';
 
 /* ==========================================================================
    4) مشتقات
@@ -1662,6 +1667,23 @@ function periodStart(from){
 const RLM='\u200F';
 const periodFrom=()=>D.lastClose?dayShift(D.lastClose,1):'2000-01-01';
 const vchLive=v=>!v.used&&!v.given&&(!v.expiry||v.expiry>=today());
+/* الحسابات اللي ممكن الفاوتشرات تيجي منها */
+const vchBanks=()=>(D.accounts||[]).filter(a=>!a.closed&&a.atype==='bank'&&a.scope!=='office');
+const vchBank=()=>{const a=(D.accounts||[]).find(x=>x.id===D.vchAcct);return a?a.name:'';};
+const vchSetupOk=()=>!!(vchBank()&&D.cardDigits&&D.phone);
+/* رسالة الفاوتشر من البنك: «... بقسيمة رقم 2016804891815 بقيمة 1000 جم صالحة حتى 28/12/2026 ...» */
+function parseVchMsg(raw){
+  const t=String(raw||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  const c=t.match(/قسيمة\s*(?:رقم)?\s*(\d{6,})/);
+  if(!c)return null;
+  const a=t.match(/بقيمة\s*([\d,]+(?:\.\d+)?)/);
+  const e=t.match(/حت[ىي]\s*(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  const p2=n=>String(n).padStart(2,'0');
+  return {code:c[1],amount:a?a[1].replace(/,/g,''):'',
+    expiry:e&&Number(e[2])<=12&&Number(e[1])<=31?e[3]+'-'+p2(e[2])+'-'+p2(e[1]):''};
+}
+/* ترتيب الفاوتشرات: الشغال ← المبعوت ← المستخدم والمنتهي، والأجدد فوق في كل مجموعة */
+const vchRank=v=>vchLive(v)?0:(v.given&&vchOpen(v))?1:2;
 const vchOpen=v=>!v.used&&(!v.expiry||v.expiry>=today());
 const vchUsed=t=>(t.voucher&&Number(t.voucher.amount))||0;
 const grossOf=t=>egpOf(t)+vchUsed(t);
@@ -2094,9 +2116,17 @@ async function shrink(file){
   return c.toDataURL('image/jpeg',.85).split(',')[1];
 }
 /* طلب واحد لقراءة الفواتير والرسايل: بيرجّع الـJSON اللي في الرد.
-   الموديلات الجديدة بترفض temperature، فمش بنبعته. */
+   المفتاح بيحدد الخدمة: Anthropic أو Gemini. الموديلات الجديدة بترفض temperature، فمش بنبعته. */
+const GEMINI_MODEL='gemini-3.8-flash';
+const aiErr=(m,c)=>{const er=new Error(m);er.code=c;return er;};
+function aiJson(text){
+  const clean=String(text||'').replace(/```json|```/g,'').trim();
+  try{return JSON.parse(clean.slice(clean.indexOf('{'),clean.lastIndexOf('}')+1));}
+  catch(e){throw aiErr('json','bad');}
+}
 async function aiCall(content,maxTok){
   const key=getKey();
+  if(key&&keyProv(key)==='gemini')return geminiCall(key,content,maxTok);
   const headers={'content-type':'application/json'};
   if(key){headers['x-api-key']=key;headers['anthropic-version']='2023-06-01';
           headers['anthropic-dangerous-direct-browser-access']='true';}
@@ -2104,21 +2134,42 @@ async function aiCall(content,maxTok){
   try{r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers,body:JSON.stringify({
     model:key?'claude-sonnet-5':'claude-sonnet-4-6', max_tokens:key?maxTok:1000,
     messages:[{role:'user',content}]})});}
-  catch(e){const er=new Error('net');er.code='net';throw er;}
+  catch(e){throw aiErr('net','net');}
   let data;
-  try{data=await r.json();}catch(e){const er=new Error('HTTP '+r.status);er.code=r.status===529?'busy':'bad';throw er;}
-  if(data.error){const er=new Error(data.error.message||'api');er.code=data.error.type||'';throw er;}
-  if(data.stop_reason==='max_tokens'){const er=new Error('long');er.code='long';throw er;}
-  const text=(data.content||[]).filter(i=>i.type==='text').map(i=>i.text).join('\n');
-  const clean=text.replace(/```json|```/g,'').trim();
-  try{return JSON.parse(clean.slice(clean.indexOf('{'),clean.lastIndexOf('}')+1));}
-  catch(e){const er=new Error('json');er.code='bad';throw er;}
+  try{data=await r.json();}catch(e){throw aiErr('HTTP '+r.status,r.status===529?'busy':'bad');}
+  if(data.error)throw aiErr(data.error.message||'api',data.error.type||'');
+  if(data.stop_reason==='max_tokens')throw aiErr('long','long');
+  return aiJson((data.content||[]).filter(i=>i.type==='text').map(i=>i.text).join('\n'));
+}
+/* Gemini: نفس الطلب بشكل جوجل. التفكير على أقل مستوى، وبيتحسب من حد الرد فالحد أكبر */
+async function geminiCall(key,content,maxTok){
+  const parts=content.map(c=>c.type==='image'?{inline_data:{mime_type:c.source.media_type,data:c.source.data}}:{text:c.text});
+  let r;
+  try{r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent',{method:'POST',
+    headers:{'content-type':'application/json','x-goog-api-key':key},
+    body:JSON.stringify({contents:[{role:'user',parts}],
+      generationConfig:{maxOutputTokens:maxTok*2,responseMimeType:'application/json',thinkingConfig:{thinkingLevel:'low'}}})});}
+  catch(e){throw aiErr('net','net');}
+  let data;
+  try{data=await r.json();}catch(e){throw aiErr('HTTP '+r.status,(r.status===503||r.status===429)?'busy':'bad');}
+  if(data.error){
+    const st=String(data.error.status||''), m=String(data.error.message||'api'), n=Number(data.error.code)||r.status;
+    throw aiErr(m, n===402?'billing_error'
+      :(st==='PERMISSION_DENIED'||n===403||/API key/i.test(m))?'authentication_error'
+      :st==='RESOURCE_EXHAUSTED'||n===429?'quota'
+      :st==='UNAVAILABLE'||n===503?'busy':'');
+  }
+  const cand=(data.candidates||[])[0];
+  if(!cand)throw aiErr('json','bad');
+  if(cand.finishReason==='MAX_TOKENS')throw aiErr('long','long');
+  return aiJson(((cand.content||{}).parts||[]).filter(p=>!p.thought&&p.text).map(p=>p.text).join('\n'));
 }
 /* ترجمة غلط القراءة لجملة بتقولك تعمل إيه — نفس الجمل للفواتير والرسايل.
    لو الغلط مش معروف بترجع '' والنداء بيعرض السبب الحقيقي. */
 function aiErrMsg(e){
   const m=String((e&&e.message)||''), c=String((e&&e.code)||'');
-  if(c==='billing_error'||/credit|balance/i.test(m))return 'رصيد المفتاح خلص. اشحنه من منصة أنثروبيك.';
+  if(c==='billing_error'||/credit|balance/i.test(m))return 'رصيد المفتاح خلص. اشحنه من '+keySite()+'.';
+  if(c==='quota')return 'المفتاح وصل لحد الاستخدام المسموح دلوقتي. جرب بعد شوية، أو فعّل الدفع من '+keySite()+'.';
   if(c==='authentication_error'||c==='permission_error'||/x-api-key/i.test(m))return 'المفتاح غلط أو ناقص. راجعه من الإعدادات.';
   if(c==='overloaded_error'||c==='rate_limit_error'||c==='busy')return 'الخدمة زحمة دلوقتي. جرب كمان دقيقة.';
   if(c==='net')return 'الطلب ماوصلش. اتأكد من النت وجرب تاني.';
@@ -3720,8 +3771,8 @@ function vScan(){
     </div>
     ${!getKey()?`<div class="note warn" style="margin-top:16px;text-align:start;line-height:1.9">
       <b style="display:block;margin-bottom:6px">قراءة الفواتير محتاجة مفتاح</b>
-      عشان البرنامج يقرا صورة الفاتورة ويطلّع منها الأصناف والأسعار، بيبعتها لخدمة ذكاء اصطناعي اسمها Anthropic.
-      الخدمة دي بتحتاج مفتاح خاص بيك تجيبه من موقعهم وتشحنه برصيد صغير، وقراءة الفاتورة الواحدة بتكلف قروش قليلة.
+      عشان البرنامج يقرا صورة الفاتورة ويطلّع منها الأصناف والأسعار، بيبعتها لخدمة ذكاء اصطناعي: Anthropic أو Gemini من جوجل.
+      الخدمة دي بتحتاج مفتاح خاص بيك تجيبه من موقعها. مفتاح Anthropic بتشحنه برصيد صغير، وGemini فيه استخدام مجاني بحدود.
       <br><br>
       من غير المفتاح، كل حاجة تانية في البرنامج شغالة عادي — سجّل مصاريفك بإيدك من تبويب «إضافة»
       أو اكتب فاتورة بأصنافها من الزرار اللي تحت.
@@ -4072,6 +4123,8 @@ function wVouchers(){
   const src=D.vouchers||[];
   const list=src.map((v,i)=>({v:v,i:i}))
     .sort((a,b)=>{
+      const ra=vchRank(a.v), rb=vchRank(b.v);
+      if(ra!==rb)return ra-rb;
       const da=String(a.v.added||a.v.expiry||''), db=String(b.v.added||b.v.expiry||'');
       if(da!==db)return da<db?1:-1;
       return b.i-a.i;
@@ -4085,20 +4138,17 @@ function wVouchers(){
       <label class="f">رقم الفاوتشر <b>*</b></label>
       <input class="f n" id="vchcode" type="text" inputmode="numeric" style="text-align:center;letter-spacing:1px"
         value="${esc(vchDraft.code)}" oninput="app.vchSet('code',this.value,this)">
-      <button class="btn ghost" style="margin-top:10px" onclick="app.pasteCode()">الصق الرقم من الحافظة</button>
+      <button class="btn ghost" style="margin-top:10px" onclick="app.pasteVchMsg()">الصق رسالة الفاوتشر</button>
+      ${vchMsg?`<div class="note err">${esc(vchMsg)}</div>`:''}
 
       <label class="f">قيمته <b>*</b></label>
       <input class="f" type="text" inputmode="decimal" value="${esc(vchDraft.amount)}" oninput="app.vchSet('amount',numFix(this,1))">
 
-      <label class="f">آخر ٦ أرقام من البطاقة</label>
-      <input class="f n" style="text-align:center;letter-spacing:1px;color:var(--muted)" value="${esc(D.cardDigits)}" readonly disabled>
-
-      <label class="f">رقم الموبايل</label>
-      <input class="f n" style="text-align:center;letter-spacing:1px;color:var(--muted)" value="${esc(D.phone)}" readonly disabled>
-
       <label class="f">تاريخ الانتهاء <b>*</b></label>
       <input class="f" type="date" value="${vchDraft.expiry}" onchange="app.vchSet('expiry',this.value)">
 
+      ${vchSetupOk()?'':`<div class="note warn" style="line-height:1.9">البنك ورقم البطاقة والموبايل اللي بيتبعتوا مع الفاوتشر لما تشاركه بيتظبطوا من الإعدادات.
+        <div class="chips" style="margin-top:10px"><button class="chip sm" onclick="app.goVchSet()">كمّل بيانات الفاوتشرات</button></div></div>`}
       <button class="btn" id="vchsave" ${ok?'':'disabled'} onclick="app.addVch()">احفظ الفاوتشر</button>
     `:''}
 
@@ -4116,8 +4166,8 @@ function wVouchers(){
           <span class="n" style="font-size:15px;font-weight:600;color:${dead?'var(--muted)':'var(--mint)'}">${fmt(v.amount)}</span>
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.8">
-          بنك CIB · بطاقة <span class="n">${esc(v.card)}</span><br>
-          ${v.used?((v.usedBy?'استخدمه '+esc(v.usedBy):'استخدم')+(v.usedOn?atDay(v.usedOn):''))
+          ${vchBank()?esc(vchBank())+'<br>':''}
+          ${v.used?((v.usedBy?'استخدمه '+esc(v.usedBy):'استخدمته')+(v.usedOn?atDay(v.usedOn):''))
             :v.given?('مبعوت'+(v.givenTo?' '+esc(toName(v.givenTo)):'')+' · بينتهي '+dayLabel(v.expiry))
             :(daysTo(v.expiry)<0?'انتهى في '+dayLabel(v.expiry):'بينتهي '+dayLabel(v.expiry)+' · '+whenLabel(v.expiry))}
         </div>
@@ -4170,7 +4220,9 @@ function wSubs(){
   const list=(D.subs||[]).slice().sort((a,b)=>{
     const ae=subEnded(a)?1:0, be=subEnded(b)?1:0;
     if(ae!==be)return ae-be;
-    return a.next<b.next?-1:a.next>b.next?1:0;
+    if(a.next!==b.next)return a.next<b.next?-1:1;
+    const ta=a.cycle==='trial'?'':(a.at||''), tb=b.cycle==='trial'?'':(b.at||'');
+    return ta<tb?-1:ta>tb?1:0;
   });
   const active=list.filter(s=>s.cycle!=='trial');
   const mo=Math.round(list.reduce((a,s)=>a+subMonthly(s),0)*100)/100;
@@ -4189,7 +4241,7 @@ function wSubs(){
       ${subDraft.cycle!=='trial'?`
       <label class="f">القيمة</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-      ${pickRow('subcur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
+      <div style="margin-top:8px">${pickRow('subcur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}</div>
       <div class="hint">بيتخصم من ${esc(accName('card'))} وتصنيفه اشتراكات.</div>
       ${promoFields(subDraft,'app.subSet','app.subPick','subpromo')}
 
@@ -4219,7 +4271,7 @@ function wSubs(){
         ${subDraft.willRenew?`
           <label class="f">قيمة الاشتراك بعد التجربة</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-          ${pickRow('subcur2',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
+          <div style="margin-top:8px">${pickRow('subcur2',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}</div>
           <label class="f">هيتجدد إزاي؟</label>
           ${pickRow('subaft',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],subDraft.afterCycle,"((v)=>app.subPick('afterCycle',v))",1)}`:''}
       `:''}
@@ -4241,8 +4293,9 @@ function wSubs(){
         </div>
         ${(!trial&&s.promo&&Number(s.promo.left)>0)?`<div class="hint" style="margin-top:6px">سعر مخفض — العادي <span class="n">${fmt(s.amount)}</span> من دفعة ${dayLabel(promoEndDate(s.next,s.cycle,s.promo.left))}</div>`:''}
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted);margin-top:10px">
-          <span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف يوم'):cycleLabel(s)+' · الجاي')} ${dayLabel(s.next)}${(!trial&&s.at)?' الساعة '+hhmm(s.at):''}</span>
-          <span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>
+          ${(function(){const td=!subEnded(s)&&daysTo(s.next)===0;
+            return `<span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف'):cycleLabel(s)+' · الجاي')} ${td?'<b style="color:var(--clay);font-weight:500">النهارده</b>':(s.cancelAtEnd&&!subEnded(s)?'يوم ':'')+dayLabel(s.next)}${(!trial&&s.at)?' الساعة '+hhmm(s.at):''}</span>
+          ${td?'':`<span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>`}`;})()}
         </div>
         ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
         ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
@@ -4296,7 +4349,7 @@ function wSubs(){
 
           <label class="f">القيمة</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(sDraft.amount)}" oninput="app.sdSet('amount',numFix(this,1))">
-          ${pickRow('sdcur'+s.id,[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],sDraft.cur,"((v)=>app.sdPick('cur',v))",1)}
+          <div style="margin-top:8px">${pickRow('sdcur'+s.id,[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],sDraft.cur,"((v)=>app.sdPick('cur',v))",1)}</div>
 
           <label class="f">الدورة</label>
           ${pickRow('sdcycle'+s.id,[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],sDraft.cycle,"((v)=>app.sdPick('cycle',v))",1)}
@@ -4344,7 +4397,7 @@ function wSubs(){
           ${subDraft.willRenew?`
             <label class="f">قيمة الاشتراك</label>
             <input class="f" id="convamt" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
-            ${pickRow('subcur3',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}
+            <div style="margin-top:8px">${pickRow('subcur3',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}</div>
             <label class="f">هيتجدد إزاي؟</label>
             ${pickRow('subaft2',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],subDraft.afterCycle,"((v)=>app.subPick('afterCycle',v))",1)}`:''}
           <label class="f">التجربة بتنتهي إمتى؟</label>
@@ -4949,6 +5002,18 @@ function vSettings(){
           <button class="btn" onclick="app.saveFxRates()">احفظ الأسعار</button>`:''}
       `:''}
         `)])}
+    ${setCard('',[setSec('vch','الفاوتشرات',vchBank()||'مش متظبطة',()=>`
+      <p class="hint" style="margin-top:0">البيانات دي بتتبعت مع الفاوتشر لما تشاركه مع حد عشان يقدر يستخدمه.</p>
+      <label class="f">الفاوتشرات جاية من أنهي حساب؟</label>
+      ${vchBanks().length?pickRow('vchacct',vchBanks().map(a=>({id:a.id,label:esc(a.name)})),D.vchAcct,'app.setVchAcct',1)
+        :'<div class="hint" style="margin-top:0">مفيش حساب بنك — ضيف واحد من «الحسابات».</div>'}
+      <label class="f">آخر ٦ أرقام من البطاقة</label>
+      <input class="f n" id="vchcard" type="text" inputmode="numeric" maxlength="6" style="text-align:center;letter-spacing:1px" value="${esc(D.cardDigits||'')}">
+      <label class="f">رقم الموبايل</label>
+      <input class="f n" id="vchphone" type="text" inputmode="tel" style="text-align:center;letter-spacing:1px" value="${esc(D.phone||'')}">
+      <button class="btn" onclick="app.saveVchSet()">احفظ بيانات الفاوتشرات</button>
+    `)])}
+
     ${setCard('بياناتك',[setSec('data','المزامنة والنسخة الاحتياطية',syncSum,()=>`
 
 <label class="f" style="margin-top:0">المزامنة التلقائية</label>
@@ -4982,15 +5047,16 @@ function vSettings(){
             `),setSec('app','البرنامج',getKey()?'مفتاح الفواتير متسجل':'من غير مفتاح فواتير',()=>`
 
 <label class="f" style="margin-top:0">مفتاح قراءة الفواتير</label>
-      <p class="hint" style="margin-top:0">المفتاح متخزن على الموبايل ده بس. باقي البرنامج شغال من غيره عادي.</p>
+      <p class="hint" style="margin-top:0">ينفع مفتاح Anthropic أو مفتاح Gemini من Google AI Studio. المفتاح متخزن على الموبايل ده بس، وباقي البرنامج شغال من غيره عادي.</p>
+      <p class="hint">لو مفتاح Gemini على الخطة المجانية، جوجل ممكن تستخدم الصور والرسايل اللي بتتبعت في تحسين خدماتها.</p>
       ${(getKey()&&!showKeyEdit)?`
-        <div class="note ok" style="margin-top:12px">المفتاح متسجل · قراءة الفواتير شغالة</div>
+        <div class="note ok" style="margin-top:12px">مفتاح ${keyProv(getKey())==='gemini'?'Gemini':'Anthropic'} متسجل · قراءة الفواتير شغالة</div>
         <button class="btn ghost" onclick="app.editKey()">غيّر المفتاح</button>
         ${confirmKey==='apikey'
           ?`<button class="btn danger" onclick="app.clearKey()">أكد المسح</button><button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
           :`<button class="btn danger" onclick="app.askDel('apikey')">امسح المفتاح</button>`}
       `:`
-        <input class="f" id="keyin" type="password" placeholder="sk-ant-..." style="margin-top:12px">
+        <input class="f" id="keyin" type="password" placeholder="sk-ant-... أو AIza..." style="margin-top:12px">
         <button class="btn" onclick="app.saveKey()">احفظ المفتاح</button>
         ${getKey()?`<button class="btn ghost" onclick="app.cancelKeyEdit()">إلغاء</button>`:''}
       `}
@@ -5919,12 +5985,13 @@ const app=new Proxy({
   async pasteSms(){
     if(sms.busy)return;
     sms.err='';scan.err='';
-    if(!getKey()){sms.err='محتاج تحط مفتاح قراءة الفواتير من الإعدادات.';render();return;}
     if(!navigator.clipboard||!navigator.clipboard.readText){sms.err='المتصفح ده مش بيسمح باللصق.';render();return;}
     let txt='';
     try{txt=String(await navigator.clipboard.readText()||'').trim();}
     catch(e){sms.err='مقدرتش أوصل للحافظة.';render();return;}
     if(!txt){sms.err='مفيش رسالة في الحافظة. انسخ رسالة البنك الأول.';render();return;}
+    const vm=parseVchMsg(txt);if(vm)return app.openVchFrom(vm);
+    if(!getKey()){sms.err='محتاج تحط مفتاح قراءة الفواتير من الإعدادات.';render();return;}
     return app.readSmsNow(txt);
   },
   async readSmsNow(txt){
@@ -6433,7 +6500,7 @@ const app=new Proxy({
   },
   goVouchers(){tab='wallet';wtab='vouchers';render();window.scrollTo(0,0);},
   goAccounts(){tab='wallet';wtab='accounts';render();window.scrollTo(0,0);},
-  toggleVch(){showVch=!showVch;render();},
+  toggleVch(){showVch=!showVch;vchMsg='';render();},
   vchSet(k,v,el){
     vchDraft[k]= k==='code'?onlyDigits(v):v;
     if(el&&k==='code'&&el.value!==vchDraft.code)el.value=vchDraft.code;
@@ -6464,17 +6531,36 @@ const app=new Proxy({
     v.used=true;v.usedOn=today();v.usedBy=v.givenTo||'صاحبك';
     save();render();
   },
-  async pasteCode(){
-    try{
-      const t=await navigator.clipboard.readText();
-      const digits=onlyDigits(t);
-      if(digits){vchDraft.code=digits;render();setTimeout(()=>{const el=document.getElementById('vchcode');if(el)el.focus();},50);}
-      else alert('مفيش أرقام في اللي ناسخه.');
-    }catch(e){alert('مقدرتش أقرا الحافظة. الصق الرقم بإيدك في الخانة.');}
+  /* رسالة البنك كاملة بتملى الرقم والقيمة والانتهاء؛ ولو رقم بس بيتحط في خانة الرقم */
+  async pasteVchMsg(){
+    vchMsg='';
+    if(!navigator.clipboard||!navigator.clipboard.readText){vchMsg='المتصفح ده مش بيسمح باللصق.';render();return;}
+    let t='';
+    try{t=String(await navigator.clipboard.readText()||'');}
+    catch(e){vchMsg='مقدرتش أوصل للحافظة.';render();return;}
+    const m=parseVchMsg(t);
+    if(m){vchDraft={code:m.code,amount:m.amount||vchDraft.amount,expiry:m.expiry||vchDraft.expiry};render();return;}
+    const digits=onlyDigits(t);
+    if(digits){vchDraft.code=digits;render();setTimeout(()=>{const el=document.getElementById('vchcode');if(el)el.focus();},50);return;}
+    vchMsg='مفيش رسالة فاوتشر ولا رقم في الحافظة.';render();
+  },
+  /* رسالة فاوتشر اتلزقت في مكان تاني: تفتح «ضيف فاوتشر» متملية */
+  openVchFrom(m){
+    vchDraft={code:m.code,amount:m.amount,expiry:m.expiry};vchMsg='';showVch=true;
+    tab='wallet';wtab='vouchers';render();window.scrollTo(0,0);
+    app.toast('دي رسالة فاوتشر — راجعها واحفظ');
+  },
+  goVchSet(){app.go('settings');setsOpen={vch:true};render();},
+  setVchAcct(id){D.vchAcct=id;save();render();},
+  saveVchSet(){
+    const c=document.getElementById('vchcard'), p=document.getElementById('vchphone');
+    D.cardDigits=onlyDigits(c?c.value:D.cardDigits);
+    D.phone=onlyDigits(p?p.value:D.phone);
+    setsOpen={};save();app.toast('اتحفظ');render();
   },
   addVch(){
     D.vouchers.push({id:uid(),code:vchDraft.code.trim(),amount:Number(onlyNum(vchDraft.amount))||0,
-      expiry:vchDraft.expiry,card:D.cardDigits,used:false,usedOn:'',added:today()});
+      expiry:vchDraft.expiry,card:D.cardDigits||undefined,used:false,usedOn:'',added:today()});
     vchDraft={code:'',amount:'',expiry:''};showVch=false;save();render();
   },
   startGive(id){giveFor=id;render();},
@@ -6491,10 +6577,11 @@ const app=new Proxy({
   },
   async shareVch(id){
     const v=D.vouchers.find(x=>x.id===id);if(!v)return;
-    const txt='فاوتشر CIB\n'+
+    const card=v.card||D.cardDigits;
+    const txt='فاوتشر'+(vchBank()?' — '+vchBank():'')+'\n'+
       'رقم الفاوتشر: '+v.code+'\n'+
-      'آخر ٦ أرقام من البطاقة: '+v.card+'\n'+
-      'رقم الموبايل: '+D.phone+'\n'+
+      (card?'آخر ٦ أرقام من البطاقة: '+card+'\n':'')+
+      (D.phone?'رقم الموبايل: '+D.phone+'\n':'')+
       'القيمة: '+fmt(v.amount)+' جنيه\n'+
       'ينتهي في: '+dayLabel(v.expiry);
     try{
