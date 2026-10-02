@@ -1055,18 +1055,21 @@ function saveEarned(a){
   return Math.round((booked+saveAccrued(a))*100)/100;
 }
 /* ديون الكارت في التاريخ ده من الدفترين — الكارت واحد عند البنك */
-function cardDebtAt(id,d){
-  let x=0;
+/* اللي عليك للكارت قبل يوم معيّن — زي رصيد الكشف: الرصيد اللي الكارت بدأ بيه داخل،
+   والمحجوز اللي لسه ماتظبطش والمرتجع المستني مش داخلين، ولا الأقساط اللي ماجاش ميعادها. */
+function cardOwedAt(a,sd){
+  let bal=(Number(a.opening)||0)+(Number(a.openingOffice)||0);
   D.txns.forEach(t=>{
-    if(t.date>d)return;
+    if(t.date>=sd)return;
     const v=Number(t.amount)||0;
-    if(t.kind==='transfer'){if(t.account===id)x+=v;if(t.to===id)x-=inAmt(t);return;}
-    if(t.account!==id)return;
-    if(t.kind==='expense')x+=v;
-    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')x-=v;
-    else if(t.kind==='settle')x+=(t.dir==='in'?-v:v);
+    if(t.to===a.id&&t.kind==='transfer'){bal+=inAmt(t);return;}
+    if(t.account!==a.id)return;
+    if(t.pending||(t.refundSince&&!t.refundDone))return;
+    if(t.kind==='expense'||t.kind==='transfer')bal-=v;
+    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')bal+=v;
+    else if(t.kind==='settle')bal+=(t.dir==='in'?v:-v);
   });
-  return Math.round(x*100)/100;
+  return Math.round(Math.max(0,(Number(a.limit)||0)-bal-insRemainOn(a.id))*100)/100;
 }
 /* --------------------------------------------------------------------------
    أقساط الكارت (mode:'bank') — زي البنك بالظبط:
@@ -1135,17 +1138,25 @@ function insuranceAll(){
     if(!a.insLast){a.insLast=cur;changed=true;return;}
     let m=nextMonth(a.insLast),g=0;
     while(m<=cur&&g++<120){
-      const prev=(function(){const p=m.split('-').map(Number);
-        return p[1]===1?(p[0]-1)+'-12':p[0]+'-'+pad2(p[1]-1);})();
-      const sd=prev+'-'+pad2(Math.min(clampDay(Number(a.stmtDay)||20),Number(monthEnd(prev).slice(8))));
-      const debt=cardDebtAt(a.id,sd);
-      const fee=Math.floor(Math.max(0,debt)*acctRate(a))/100;
-      if(fee>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
-        account:a.id,date:m+'-01',insFee:true,pending:true,note:'تأمين '+a.name+' — '+mLabel(m)});
+      insFeeFor(a,m);
       a.insLast=m;changed=true;m=nextMonth(m);
     }
+    /* تصليح مرة واحدة: الحسبة القديمة كانت بتنسى الرصيد اللي الكارت بدأ بيه فتطلع صفر،
+       وتعلّم الشهر إنه اتعمل. لو الشهر ده مفيهوش تأمين خالص، يتحسب دلوقتي. */
+    if(!D._insFix1&&a.insLast===cur&&!D.txns.some(t=>t.account===a.id&&t.kind==='expense'&&monthOf(t.date)===cur
+        &&(t.insFee||/تأمين/.test(String(t.note||'')))))
+      {insFeeFor(a,cur);changed=true;}
   });
+  if(!D._insFix1){D._insFix1=1;changed=true;}
   if(changed){sortTxns();save();}
+}
+/* تأمين شهر m: نسبة من اللي عليك للكارت يوم آخر كشف قبله — تقديري لحد ما تأكده */
+function insFeeFor(a,m){
+  const p=m.split('-').map(Number), prev=p[1]===1?(p[0]-1)+'-12':p[0]+'-'+pad2(p[1]-1);
+  const sd=prev+'-'+pad2(Math.min(clampDay(Number(a.stmtDay)||20),Number(monthEnd(prev).slice(8))));
+  const fee=Math.floor(cardOwedAt(a,sd)*acctRate(a))/100;
+  if(fee>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
+    account:a.id,date:m+'-01',insFee:true,pending:true,note:'تأمين '+a.name+' — '+mLabel(m)});
 }
 /* حسابات العهدة: الخاصة بيها بس، والمشتركة (زي البنك) */
 const officeOnly=()=>D.accounts.filter(a=>a.scope==='office'&&!a.credit&&!isSave(a));
@@ -1682,7 +1693,7 @@ function parseVchMsg(raw){
   return {code:c[1],amount:a?a[1].replace(/,/g,''):'',
     expiry:e&&Number(e[2])<=12&&Number(e[1])<=31?e[3]+'-'+p2(e[2])+'-'+p2(e[1]):''};
 }
-/* ترتيب الفاوتشرات: الشغال ← المبعوت ← المستخدم والمنتهي، والأجدد فوق في كل مجموعة */
+/* ترتيب الفاوتشرات: الشغال ← المبعوت ← المستخدم والمنتهي، وجوه كل مجموعة اللي ينتهي بعدين فوق */
 const vchRank=v=>vchLive(v)?0:(v.given&&vchOpen(v))?1:2;
 const vchOpen=v=>!v.used&&(!v.expiry||v.expiry>=today());
 const vchUsed=t=>(t.voucher&&Number(t.voucher.amount))||0;
@@ -4125,7 +4136,7 @@ function wVouchers(){
     .sort((a,b)=>{
       const ra=vchRank(a.v), rb=vchRank(b.v);
       if(ra!==rb)return ra-rb;
-      const da=String(a.v.added||a.v.expiry||''), db=String(b.v.added||b.v.expiry||'');
+      const da=String(a.v.expiry||''), db=String(b.v.expiry||'');
       if(da!==db)return da<db?1:-1;
       return b.i-a.i;
     }).map(x=>x.v);
@@ -4859,7 +4870,17 @@ function vSettings(){
         <button class="btn" onclick="app.saveAccount('${a.id}')">احفظ</button>
         <button class="btn ghost" onclick="app.openAccCfg('')">إلغاء</button>
       </div>`}).join('')}
-            `)])}
+            `),setSec('vch','الفاوتشرات',vchBank()||'مش متظبطة',()=>`
+      <p class="hint" style="margin-top:0">البيانات دي بتتبعت مع الفاوتشر لما تشاركه مع حد عشان يقدر يستخدمه.</p>
+      <label class="f">الفاوتشرات جاية من أنهي حساب؟</label>
+      ${vchBanks().length?pickRow('vchacct',vchBanks().map(a=>({id:a.id,label:esc(a.name)})),D.vchAcct,'app.setVchAcct',1)
+        :'<div class="hint" style="margin-top:0">مفيش حساب بنك — ضيف واحد من «الحسابات».</div>'}
+      <label class="f">آخر ٦ أرقام من البطاقة</label>
+      <input class="f n" id="vchcard" type="text" inputmode="numeric" maxlength="6" style="text-align:center;letter-spacing:1px" value="${esc(D.cardDigits||'')}">
+      <label class="f">رقم الموبايل</label>
+      <input class="f n" id="vchphone" type="text" inputmode="tel" style="text-align:center;letter-spacing:1px" value="${esc(D.phone||'')}">
+      <button class="btn" onclick="app.saveVchSet()">احفظ بيانات الفاوتشرات</button>
+    `)])}
     ${setCard('',[setSec('daftar','دفتر '+bookName(),officeOn()?'شغّال':'مقفول',()=>`
 
 
@@ -5002,18 +5023,6 @@ function vSettings(){
           <button class="btn" onclick="app.saveFxRates()">احفظ الأسعار</button>`:''}
       `:''}
         `)])}
-    ${setCard('',[setSec('vch','الفاوتشرات',vchBank()||'مش متظبطة',()=>`
-      <p class="hint" style="margin-top:0">البيانات دي بتتبعت مع الفاوتشر لما تشاركه مع حد عشان يقدر يستخدمه.</p>
-      <label class="f">الفاوتشرات جاية من أنهي حساب؟</label>
-      ${vchBanks().length?pickRow('vchacct',vchBanks().map(a=>({id:a.id,label:esc(a.name)})),D.vchAcct,'app.setVchAcct',1)
-        :'<div class="hint" style="margin-top:0">مفيش حساب بنك — ضيف واحد من «الحسابات».</div>'}
-      <label class="f">آخر ٦ أرقام من البطاقة</label>
-      <input class="f n" id="vchcard" type="text" inputmode="numeric" maxlength="6" style="text-align:center;letter-spacing:1px" value="${esc(D.cardDigits||'')}">
-      <label class="f">رقم الموبايل</label>
-      <input class="f n" id="vchphone" type="text" inputmode="tel" style="text-align:center;letter-spacing:1px" value="${esc(D.phone||'')}">
-      <button class="btn" onclick="app.saveVchSet()">احفظ بيانات الفاوتشرات</button>
-    `)])}
-
     ${setCard('بياناتك',[setSec('data','المزامنة والنسخة الاحتياطية',syncSum,()=>`
 
 <label class="f" style="margin-top:0">المزامنة التلقائية</label>
