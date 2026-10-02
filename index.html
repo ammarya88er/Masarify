@@ -247,7 +247,7 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
 .alert .side .vl{text-align:center;}
 .alert .side .chip{text-align:center;}
 .alert .g{flex:1;min-width:0;}
-.alert .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.alert .t{display:block;font-size:14px;line-height:1.45;overflow-wrap:anywhere;}
 .alert .s{font-size:11px;color:var(--muted);margin-top:6px;}
 .inline{padding:0 16px 16px;border-bottom:1px solid var(--line);}
 .tag{font-size:10.5px;padding:3px 8px;border-radius:8px;background:var(--surf2);color:var(--muted);}
@@ -433,8 +433,13 @@ const DEF_ICATS=[{id:'salary',label:'مرتب',color:'#4FD08D'},{id:'other_in',l
 const ILOCKED=['salary','other_in'];
 const NEWCOLORS=['#7FD1E8','#F0A6C0','#A5D96F','#D9A0F0','#F2C14E','#6FD3B0','#F08A6E','#9BA8F5'];
 
-const BRAND={bank:'#0A4C8A',card:'#C79447',vcash:'#E60000',cash:'#2FA96B'};
-const ACOLORS=['#8C7BF0','#E8A03C','#4FB6E0','#C77DE0','#5BD0C4','#EE93B2','#B7A88F'];
+/* ألوان الحسابات: كل حساب لونه متخزن معاه وبيتغير من إعداداته */
+const ACOLORS=['#0A4C8A','#4FB6E0','#2FA96B','#5BD0C4','#C79447','#E8A03C','#E60000','#EE93B2','#8C7BF0','#C77DE0','#B7A88F'];
+/* الألوان القديمة (قبل ما اللون يتخزن مع الحساب) — للنقل مرة واحدة بس */
+const OLD_BRAND={bank:'#0A4C8A',card:'#C79447',vcash:'#E60000',cash:'#2FA96B'};
+const OLD_ACOLORS=['#8C7BF0','#E8A03C','#4FB6E0','#C77DE0','#5BD0C4','#EE93B2','#B7A88F'];
+/* لون لحساب جديد: أول لون مش مستخدم */
+const freeColor=()=>{const used=(D.accounts||[]).map(a=>a.color);return ACOLORS.find(c=>used.indexOf(c)<0)||ACOLORS[(D.accounts||[]).length%ACOLORS.length];};
 
 const DEFAULT={accounts:[],txns:[]};
 
@@ -528,7 +533,7 @@ function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   name:a.name,credit:!!a.credit,atype:a.atype||'cash',limit:a.limit?String(a.limit):'',
   accNo:a.accNo||'',last4:a.last4||'',
   stmtDay:String(a.stmtDay||20),graceDay:String(a.graceDay||15),
-  insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),cur:a.cur||'EGP'});}
+  insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),cur:a.cur||'EGP',color:aColor(a.id)});}
 let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:'cert'};
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null, vchMsg='';
@@ -597,6 +602,11 @@ function normalizeData(){
     if(!s.payments)s.payments=[];
     if(!s.dues)s.dues=[];
     if(s.myShare===undefined)s.myShare=null;
+    /* التدبير: من آخر دفعة اتأكدت، ولو مفيش يفضل مش معروف */
+    if(s.arr===undefined&&s.cur!=='USD'){
+      const lp=(s.payments||[]).filter(p=>p.fee!==undefined&&!p.feePending).slice(-1)[0];
+      if(lp)s.arr=Number(lp.fee)>0;
+    }
   });
   if(!D.vouchers)D.vouchers=[];
   if(D.cardDigits===undefined)D.cardDigits='';
@@ -693,7 +703,8 @@ function normalizeData(){
   D.accounts.forEach(a=>{if(!a.scope)a.scope=(a.id==='bank'?'both':a.id==='ocash'?'office':'me');});
   D.txns.forEach(t=>{if(!t.book)t.book='me';});
   if(!D.certs)D.certs=[];
-  D.accounts.forEach(a=>{
+  D.accounts.forEach((a,i)=>{
+    if(!a.color)a.color=OLD_BRAND[a.id]||OLD_ACOLORS[i%OLD_ACOLORS.length];
     if(a.credit===undefined)a.credit=Number(a.limit)>0;
     if(a.credit){
       if(!a.stmtDay)a.stmtDay=Number(D.stmtDay)||20;
@@ -779,8 +790,7 @@ const keySite=()=>keyProv(getKey())==='gemini'?'Google AI Studio':'منصة أن
    4) مشتقات
    ========================================================================== */
 const catOf=id=>(D.cats||DEF_CATS).find(c=>c.id===id)||{id:'other',label:'حاجات تانية',color:'#8D96A2'};
-const aColor=id=>{if(BRAND[id])return BRAND[id];
-  const i=D.accounts.findIndex(a=>a.id===id);return ACOLORS[(i<0?0:i)%ACOLORS.length];};
+const aColor=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return (a&&a.color)||ACOLORS[0];};
 const accName=id=>{const a=D.accounts.find(x=>x.id===id);return a?a.name:'—';};
 const shortDay=d=>{const p=d.split('-');return Number(p[2])+' '+MONTHS[Number(p[1])-1];};
 const salaryAfter=q=>D.txns.some(t=>(t.book||'me')==='me'&&t.kind==='income'&&t.salary&&(t._q||0)>Number(q||0));
@@ -1822,7 +1832,7 @@ function chargeSub(s,d){
   if(!s.payments)s.payments=[];
   const pay={d:d,t:t.id,paid:full,auto:true};
   promoStep(s,pay);
-  if(s.cur!=='USD'&&isCreditAcc(s.account||'card')){
+  if(subArrOn(s)){
     const est=arrEst(full);
     if(est>0){pay.fee=est;pay.feePending=true;}
   }
@@ -1925,9 +1935,15 @@ function subMineAt(s,price){
   if(s.myShare===null||s.myShare===undefined)return price;
   return Math.min(Number(s.myShare)||0,price);
 }
-/* تدبير الدفعة: بالجنيه على الكارت بس، ٣٪ من السعر كله؛ ولو آخر دفعة كانت «مفيش تدبير» يبقى مفيش */
+/* الاشتراك ليه تدبير؟ بالجنيه على كارت ائتماني بس. s.arr: true أيوه، false لأ، من غير قيمة = لسه مش معروف
+   (بيتعامل زي «أيوه» لحد ما تأكد أول دفعة من التنبيهات، وساعتها بيتحدد لوحده) */
+const subArrAsk=s=>s.cur!=='USD'&&isCreditAcc(s.account||'card');
+const subArrOn=s=>subArrAsk(s)&&s.arr!==false;
+const subArrAskD=d=>d.cur!=='USD'&&d.cycle!=='trial'&&isCreditAcc(d.account||'card');
+/* تدبير الدفعة: ٣٪ من السعر كله لو الاشتراك ليه تدبير */
 function subFeeAt(s,price){
-  if(s.cur==='USD'||!isCreditAcc(s.account||'card'))return 0;
+  if(!subArrOn(s))return 0;
+  if(s.arr===true)return arrEst(price);
   const lp=subLastPay(s);
   if(lp&&lp.fee===0&&!lp.feePending)return 0;
   return arrEst(price);
@@ -2698,12 +2714,15 @@ function vHome(){
 
 /* خصم بالدولار لسه تقديري ومتسجلش محجوزه */
 const canHoldFix=t=>!!(t&&t.usd&&!t.hold&&isCreditAcc(t.account));
+/* لون خط التنبيه على حسب أهميته */
+const ALC={1:'var(--clay)',2:'#E8A03C',3:'#4F86C6',4:'#9AA3AE'};
+const RAIL=(g,d)=>'<span class="rail" data-g="'+g+'" data-d="'+esc(String(d||''))+'" style="background:'+ALC[g]+'"></span>';
 function alertsPanel(){
-  const rows=[];
+  let rows=[];
   const _dupT={};(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{_dupT[p.t]=1;}));
   if(book==='me')D.txns.filter(t=>t.pending&&!_dupT[t.id]).forEach(t=>{const T=txnTitle(t);rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#EFCA6A"></span>
+      ${RAIL(2,t.date)}
       <span class="g"><span class="t">${esc(T.title)}</span>
         <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':t.insFee?'تأمين · تقديري':t.insInt?'فايدة قسط · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
@@ -2724,7 +2743,7 @@ function alertsPanel(){
   if(book==='me')(D.accounts||[]).filter(a=>!a.closed&&feeAccOk(a)).forEach(a=>(a.fees||[]).filter(f=>!(Number(f.amount)>0)&&f.next&&f.next<=today()).forEach(f=>{
     const k=a.id+'|'+f.id;
     rows.push(`<div class="alert">
-      <span class="rail" style="background:#C4A484"></span>
+      ${RAIL(2,f.next)}
       <span class="g"><span class="t">${esc(f.name)} — ${esc(a.name)}</span>
         <span class="s" style="display:block">اتخصم كام؟ · ${dLabel(f.next)}</span></span>
       <div class="side"><button class="chip sm${feeAsk===k?' on':''}" onclick="app.feeAskOpen('${k}')">سجّل</button></div>
@@ -2740,7 +2759,7 @@ function alertsPanel(){
   if(book==='me')(D.certs||[]).filter(c=>!c.redeemed&&c.end&&daysTo(c.end)<=0).forEach(c=>{
     const sec=certSecuredBy(c);
     rows.push(`<div class="alert">
-      <span class="rail" style="background:#46C2A8"></span>
+      ${RAIL(2,c.end)}
       <span class="g"><span class="t">${esc(c.name)}</span>
         <span class="s" style="display:block">ميعاد التجديد ${dLabel(c.end)}${sec?' · ضامنة '+esc(sec.name):''}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(c.amount,'EGP')}</span>
@@ -2754,7 +2773,7 @@ function alertsPanel(){
     const T=src?txnTitle(src):{title:e.note||'مصاريف تدبير',extra:''};
     const key='arr|'+e.id;
     rows.push(`<div class="alert">
-      <span class="rail" style="background:#C4A484"></span>
+      ${RAIL(2,e.date)}
       <span class="g"><span class="t">${esc(T.title)}</span>
         <span class="s" style="display:block">مصاريف تدبير · تقديري · دفعة ${dLabel(e.date)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(e.amount,'EGP')}</span>
@@ -2768,7 +2787,7 @@ function alertsPanel(){
     const T=txnTitle(t);
     rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#5FB8A0"></span>
+      ${RAIL(4,t.refundSince)}
       <span class="g"><span class="t">${esc(T.title)}</span>
         <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}مستني مرتجع · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}${t.usd?' · '+money(t.usd,'USD'):''}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
@@ -2786,7 +2805,7 @@ function alertsPanel(){
     const d=daysTo(a.saveWithdraw);
     rows.push(`
     <div class="alert">
-      <span class="rail" style="background:${aColor(a.id)}"></span>
+      ${RAIL(d<=0?1:3,a.saveWithdraw)}
       <span class="g"><span class="t">سحب من ${esc(a.name)}</span>
         <span class="s" style="display:block">${d>0?'باقي '+d+' يوم':d===0?'النهارده':'فات '+(-d)+' يوم'} · ${dLabel(a.saveWithdraw)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money((bs[a.id]||0)+saveAccrued(a),'EGP')}</span>
@@ -2797,7 +2816,7 @@ function alertsPanel(){
   if(book==='me')(D.gams||[]).forEach(g=>{
     if(gamDue(g))rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#C79447"></span>
+      ${RAIL(1,'')}
       <span class="g"><span class="t">${esc(g.name)}</span>
         <span class="s" style="display:block">${gamLate(g)>1?'عليك '+gamLate(g)+' أقساط جمعية · الجاي قسط '+mLabel(gamMonth(g,gamNext(g))):'قسط جمعية · '+mLabel(gamMonth(g,gamNext(g)))+(gamNext(g)<gamIdx(g)?' · متأخر':'')}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(g.amount,'EGP')}</span>
@@ -2805,7 +2824,7 @@ function alertsPanel(){
     </div>`);
     if(gamGetDue(g))rows.push(`
     <div class="alert">
-      <span class="rail" style="background:var(--mint)"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">${esc(g.name)}</span>
         <span class="s" style="display:block">دورك تقبض الجمعية</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap;color:var(--mint)">${money(gamTotal(g),'EGP')}</span>
@@ -2814,7 +2833,7 @@ function alertsPanel(){
   });
   if(book==='me')(D.installments||[]).filter(insDue).forEach(i=>rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#5C86C4"></span>
+      ${RAIL(1,'')}
       <span class="g"><span class="t">${esc(i.name)}</span>
         <span class="s" style="display:block">قسط · ${insWhen(i)} · ${esc(accName(i.account))}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(i.monthly,'EGP')}</span>
@@ -2823,7 +2842,7 @@ function alertsPanel(){
 
   if(book==='me')(D.subs||[]).filter(s=>subSoon(s)&&!(s.hideUntil===s.next&&daysTo(s.next)>0)).forEach(s=>rows.push(`
     <div class="alert">
-      <span class="rail" style="background:${s.cycle==='trial'?'#F58F52':catOf(s.cat).color}"></span>
+      ${RAIL(daysTo(s.next)<=0?1:3,s.next+' '+(s.at||''))}
       <span class="g"><span class="t">${esc(s.name)}</span>
         <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):cycleLabel(s)} · ${whenLabel(s.next)}${(s.promo&&Number(s.promo.left)===0&&!s.promo.done)?' · الدفعة دي بالسعر العادي':''}</span></span>
       <div class="side">${s.cycle==='trial'?'':`<span class="vl" style="white-space:nowrap">${money(subPrice(s),s.cur)}</span>`}
@@ -2835,7 +2854,7 @@ ${s.cycle==='trial'
 
   if(book==='me')(D.vouchers||[]).filter(v=>vchOpen(v)&&v.expiry&&daysTo(v.expiry)<=14).forEach(v=>rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#F2C14E"></span>
+      ${RAIL(3,v.expiry)}
       <span class="g"><span class="t">فاوتشر <span class="n">${esc(v.code)}</span></span>
         <span class="s" style="display:block">${v.given?('مبعوت'+(v.givenTo?' '+esc(toName(v.givenTo)):'')+' · '):''}بينتهي · ${whenLabel(v.expiry)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(v.amount,'EGP')}</span>
@@ -2847,7 +2866,7 @@ ${s.cycle==='trial'
       const v=bb[a.id]||0;
       if(v>=-0.01||isFxAcc(a.id))return;
       rows.push(`<div class="alert">
-        <span class="rail" style="background:var(--clay)"></span>
+        ${RAIL(1,'')}
         <span class="g"><span class="t">${esc(a.name)} بالسالب</span>
           <span class="s" style="display:block">غالبًا فيه حركة ناقصة أو مبلغ اتسجل غلط</span></span>
       <div class="side"><span class="vl" style="color:var(--clay);white-space:nowrap">${money(v,'EGP')}</span>
@@ -2856,7 +2875,7 @@ ${s.cycle==='trial'
 
   if(book==='me'&&Math.abs(loanBalance())>0.01)rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#C4A484"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">${loanBalance()>0?'عليك للعهدة':'العهدة عليها ليك'}</span>
         <span class="s" style="display:block">${loanBalance()>0?'فلوس من كاش العهدة معاك — رجّعها':'حطيت من فلوسك في العهدة'}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(Math.abs(loanBalance()),'EGP')}</span>
@@ -2886,7 +2905,7 @@ ${s.cycle==='trial'
       const v=b[a.id]||0;
       if(v>=-0.01)return;
       rows.push(`<div class="alert">
-        <span class="rail" style="background:var(--mint)"></span>
+        ${RAIL(2,'')}
         <span class="g"><span class="t">دفعت من فلوسك — ${esc(a.name)}</span>
           <span class="s" style="display:block">المبلغ ده ليك في العهدة</span></span>
       <div class="side"><span class="vl" style="color:var(--mint);white-space:nowrap">${money(Math.abs(v),'EGP')}</span>
@@ -2932,7 +2951,7 @@ ${s.cycle==='trial'
         const who=x.who, gid='g_'+(who||'__none__');
         body+=`
       <div class="alert">
-        <span class="rail" style="background:var(--mint)"></span>
+        ${RAIL(4,'')}
         <span class="g"><span class="t">فلوس ليك${who?' عند '+esc(who):''}</span>
           ${x.rec.map(o=>line(o,1)).join('')}${x.debt.map(o=>line(o,-1)).join('')}</span>
         <div class="side"><span class="vl" style="color:var(--mint);white-space:nowrap">${money(x.net,'EGP')}</span>
@@ -2951,7 +2970,7 @@ ${s.cycle==='trial'
       </div>`:''}`;
       });
       rows.push(`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
-      <span class="rail" style="background:var(--mint)"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">فلوس ليك <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span></span>
         <span class="s" style="display:block">${ppl(pos.length)} · ${cnt} مستحق</span></span>
       <div class="side"><span class="vl" style="color:var(--mint);white-space:nowrap">${money(grand,'EGP')}</span></div>
@@ -2967,7 +2986,7 @@ ${s.cycle==='trial'
         const who=x.who, gid='d_'+who, need=Math.round(-x.net*100)/100;
         body+=`
       <div class="alert">
-        <span class="rail" style="background:var(--clay)"></span>
+        ${RAIL(4,'')}
         <span class="g"><span class="t">فلوس عليك ${esc(toName(who))}</span>
           ${x.debt.map(o=>line(o,1)).join('')}${x.rec.map(o=>line(o,-1)).join('')}</span>
         <div class="side"><span class="vl" style="color:var(--clay);white-space:nowrap">${money(need,'EGP')}</span>
@@ -2984,7 +3003,7 @@ ${s.cycle==='trial'
       </div>`:''}`;
       });
       rows.push(`<div class="alert" onclick="app.toggleDebtPanel()" style="cursor:pointer">
-      <span class="rail" style="background:var(--clay)"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">فلوس عليك <span style="color:var(--muted);font-size:12px">${debtOpen?'▲':'▼'}</span></span>
         <span class="s" style="display:block">${ppl(neg.length)} · ${cnt} مستحق</span></span>
       <div class="side"><span class="vl" style="color:var(--clay);white-space:nowrap">${money(grand,'EGP')}</span></div>
@@ -2997,7 +3016,7 @@ ${s.cycle==='trial'
     const key=s.id+'|'+p.t;
     rows.push(`
     <div class="alert">
-      <span class="rail" style="background:var(--clay)"></span>
+      ${RAIL(2,p.d)}
       <span class="g"><span class="t">سحب متكرر — ${esc(s.name)}</span>
         <span class="s" style="display:block">اتسحب تاني ${dLabel(p.d)}${
           usd?` · <span class="n">${fmt(p.paid)}</span> ${((D.txns.find(x=>x.id===p.t)||{}).hold)?'محجوز':'تقديري'}`:(p.feePending?` · تدبير تقديري <span class="n">${fmt(p.fee)}</span>`:'')}</span></span>
@@ -3024,7 +3043,7 @@ ${s.cycle==='trial'
     (s.payments||[]).filter(p=>p.feePending&&!p.dup).forEach(p=>{
       const key=s.id+'|'+p.t;
       rows.push(`<div class="alert">
-        <span class="rail" style="background:#C4A484"></span>
+        ${RAIL(2,p.d)}
         <span class="g"><span class="t">${esc(s.name)}</span>
           <span class="s" style="display:block">مصاريف تدبير · تقديري · دفعة ${dLabel(p.d)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(p.fee,'EGP')}</span>
@@ -3045,7 +3064,7 @@ ${s.cycle==='trial'
       const late=daysTo(x.d)<0;
       rows.push(`
       <div class="alert">
-        <span class="rail" style="background:${late?'var(--clay)':'#C79447'}"></span>
+        ${RAIL(late?1:3,x.d)}
         <span class="g"><span class="t">${late?'انتهت ':''}${esc(x.t)}</span>
           <span class="s" style="display:block">${late?'كانت بتنتهي':'بتنتهي'} ${dayLabel(x.d)} · ${whenLabel(x.d)}</span></span>
       <div class="side"><button class="chip sm" onclick="app.goVeh()">جدّدها</button></div>
@@ -3057,7 +3076,7 @@ ${s.cycle==='trial'
     const s=Number(t.needsDiff), d=Math.round((s-Number(t.amount))*100)/100;
     rows.push(`
     <div class="alert">
-      <span class="rail" style="background:var(--clay)"></span>
+      ${RAIL(2,t.date)}
       <span class="g"><span class="t">فرق في فاتورة ${esc(t.place||t.merchant||'')}</span>
         <span class="s" style="display:block">الأصناف <span class="n">${fmt(s)}</span> والمخصوم <span class="n">${fmt(t.amount)}</span> · الفرق <span class="n">${fmt(Math.abs(d))}</span></span></span>
       <div class="side"><button class="chip sm" onclick="app.fixDiff('${t.id}','txn')">المخصوم صح</button>
@@ -3070,7 +3089,7 @@ ${s.cycle==='trial'
     needs.forEach(t=>{
       rows.push(`
       <div class="alert">
-        <span class="rail" style="background:#C79447"></span>
+        ${RAIL(2,t.date)}
         <span class="g"><span class="t">${t.kind==='expense'?'خصم محتاج تفاصيل':'عملية محتاجة مراجعة'}</span>
           <span class="s" style="display:block">${esc(t.place||t.note||'')}${t.account?' · '+esc(accName(t.account)):' · الحساب مش معروف'} · ${dLabel(t.date)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
@@ -3105,7 +3124,7 @@ ${s.cycle==='trial'
     if(sn&&sn.due===due&&!salaryAfter(sn.q)&&daysTo(due)>3)return;
     rows.push(`
     <div class="alert">
-      <span class="rail" style="background:${late?'var(--clay)':'#C79447'}"></span>
+      ${RAIL(late?1:3,due)}
       <span class="g"><span class="t">${late?'النهارده آخر ميعاد سداد ':'سداد '}${esc(a.name)}</span>
         <span class="s" style="display:block">آخر ميعاد ${dayLabel(due)}</span></span>
       <div class="side"><button class="chip sm" onclick="app.goPayCard('${a.id}')">سدد</button>
@@ -3115,7 +3134,7 @@ ${s.cycle==='trial'
 
   if(book==='me'&&ofeeBalance()>=Number(D.ofeeLimit||200))rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#C4A484"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">رسوم ${esc(bookName())} ليك</span>
         <span class="s" style="display:block">دفعتها من فلوسك ووصلت حد <span class="n">${fmt(D.ofeeLimit)}</span></span></span>
       <div class="side"><span class="vl" style="color:var(--mint);white-space:nowrap">${money(ofeeBalance(),'EGP')}</span>
@@ -3136,12 +3155,16 @@ ${s.cycle==='trial'
 
   if(book==='me'&&(!D.lastBackup||daysTo(D.lastBackup)<-30))rows.push(`
     <div class="alert">
-      <span class="rail" style="background:#8FA0C4"></span>
+      ${RAIL(4,'')}
       <span class="g"><span class="t">نسخة احتياطية</span>
         <span class="s" style="display:block">${D.lastBackup?('آخر نسخة من '+dayLabel(D.lastBackup)):'لسه معملتش نسخة من بياناتك'}</span></span>
       <div class="side"><button class="chip sm" onclick="app.exportData()">اعملها</button></div>
     </div>`);
 
+  /* الترتيب بالأهمية: ١ مطلوب النهارده أو متأخر، ٢ محتاج تأكيد منك، ٣ فيه ميعاد جاي، ٤ أرصدة ومعلومات.
+     جوه كل مجموعة الأقرب في التاريخ فوق. كل تنبيه بياخد المجموعة والتاريخ من أول خط ملون فيه. */
+  rows=rows.map((r,i)=>{const m=/data-g="(\d)" data-d="([^"]*)"/.exec(r);return {r,i,g:m?Number(m[1]):4,d:(m&&m[2])||'9999'};})
+    .sort((a,b)=>a.g-b.g||(a.d<b.d?-1:a.d>b.d?1:0)||a.i-b.i).map(x=>x.r);
   if(!rows.length)return '';
   /* الصندوق مقفول افتراضيًا، وبيتفتح لوحده لو فيه تنبيه ماكانش موجود المرة اللي فاتت.
      هوية التنبيه = أول زرار فيه بالـ id بتاعه، ولو مفيش = عنوانه. */
@@ -4254,6 +4277,9 @@ function wSubs(){
       <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
       <div style="margin-top:8px">${pickRow('subcur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}</div>
       <div class="hint">بيتخصم من ${esc(accName('card'))} وتصنيفه اشتراكات.</div>
+      ${subArrAskD(subDraft)?`<label class="f">ليه مصاريف تدبير؟ (اختياري)</label>
+      ${pickRow('subarr',[{id:false,label:'لأ'},{id:true,label:'أيوه'}],subDraft.arr,"((v)=>app.subPick('arr',v))",1,1)}
+      ${subDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
       ${promoFields(subDraft,'app.subSet','app.subPick','subpromo')}
 
       <label class="f">ساعة الخصم (اختياري)</label>
@@ -4313,6 +4339,7 @@ function wSubs(){
         ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
           subLastPay(s).fee?` · <span class="n">${fmt(subLastPay(s).paid||s.amount)}</span> + <span class="n">${fmt(subLastPay(s).fee)}</span> تدبير${subLastPay(s).feePending?' (تقديري — لسه ماتخصمش)':''}${subLastPay(s).feePending?'':` = <span class="n">${fmt((subLastPay(s).paid||Number(s.amount))+Number(subLastPay(s).fee))}</span>`}`:''}</div>`:''}
         ${!trial&&subLastPay(s)&&subLastPay(s).feePending?`<div class="hint">مصاريف التدبير تقديرية <span class="n">${ARRRATE}%</span> لحد ما تأكدها من «محتاج انتباهك».</div>`:''}
+        ${!trial&&!subEnded(s)&&subArrAsk(s)&&s.arr===undefined?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">التدبير هيتحدد من أول دفعة</div>':''}
         ${trial?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بعد التجربة: ${s.willRenew
           ?((s.afterCycle==='yearly'?'سنوي':'شهري')+' · '+money(s.amount,s.cur))
           :'هلغيها'}</div>`:''}
@@ -4361,6 +4388,9 @@ function wSubs(){
           <label class="f">القيمة</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(sDraft.amount)}" oninput="app.sdSet('amount',numFix(this,1))">
           <div style="margin-top:8px">${pickRow('sdcur'+s.id,[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],sDraft.cur,"((v)=>app.sdPick('cur',v))",1)}</div>
+          ${subArrAskD(sDraft)?`<label class="f">ليه مصاريف تدبير؟ (اختياري)</label>
+      ${pickRow('sdarr'+s.id,[{id:false,label:'لأ'},{id:true,label:'أيوه'}],sDraft.arr,"((v)=>app.sdPick('arr',v))",1,1)}
+      ${sDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
 
           <label class="f">الدورة</label>
           ${pickRow('sdcycle'+s.id,[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],sDraft.cycle,"((v)=>app.sdPick('cycle',v))",1)}
@@ -4822,10 +4852,12 @@ function vSettings(){
         </div>`;
       return `<div class="panel" style="padding:14px 16px;margin-top:12px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="rail" style="background:${aColor(a.id)}"></span>
+          <span class="rail" style="background:${c.color||aColor(a.id)}"></span>
           <input class="f" style="padding:9px 11px;font-size:14px" value="${esc(c.name)}" oninput="app.accCfgSet('${a.id}','name',this.value)">
         </div>
         <div>
+          <label class="f">اللون</label>
+          <div class="chips">${ACOLORS.map(col=>`<button class="chip sm${(c.color||aColor(a.id))===col?' on':''}" aria-label="لون" style="padding:0;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center" onclick="app.accCfgColor('${a.id}','${col}')"><span style="width:18px;height:18px;border-radius:50%;background:${col};display:block"></span></button>`).join('')}</div>
           <label class="f">نوع الحساب</label>
           ${pickRow('cfgtype'+a.id,[['cash','كاش'],['bank','حساب بنكي'],['wallet','محفظة موبايل'],['prepaid','كارت مسبق الدفع'],['credit','كارت ائتماني'],['save','ادخار']].filter(k=>!(isFxAcc(a.id)&&k[0]==='credit')).map(k=>({id:k[0],label:k[1]})),c.atype||a.atype||'cash',"((v)=>app.accCfgType('"+a.id+"',v))",1)}
           ${(c.atype||a.atype)==='bank'?`<label class="f">رقم الحساب (اختياري)</label>
@@ -5056,7 +5088,23 @@ function vSettings(){
             `),setSec('app','البرنامج',getKey()?'مفتاح الفواتير متسجل':'من غير مفتاح فواتير',()=>`
 
 <label class="f" style="margin-top:0">مفتاح قراءة الفواتير</label>
-      <p class="hint" style="margin-top:0">ينفع مفتاح Anthropic أو مفتاح Gemini من Google AI Studio. المفتاح متخزن على الموبايل ده بس، وباقي البرنامج شغال من غيره عادي.</p>
+      <p class="hint" style="margin-top:0">المفتاح ده بيخلي البرنامج يقرا صور الفواتير ورسايل البنك ويطلّع منها المبالغ والأصناف لوحده. من غيره كل حاجة تانية شغالة عادي، بس هتسجل بإيدك. المفتاح متخزن على الموبايل ده بس.</p>
+      ${(!getKey()||showKeyEdit)?`
+        <label class="f">تجيبه منين؟ ينفع واحد من الاتنين:</label>
+        <p class="hint" style="margin-top:0"><b>Gemini</b> — الأسهل للبداية، وفيه استخدام مجاني بحدود.</p>
+        <ol class="steps">
+          <li>افتح الصفحة وادخل بحساب جوجل.</li>
+          <li>دوس «Create API key».</li>
+          <li>انسخ المفتاح والزقه في الخانة اللي تحت.</li>
+        </ol>
+        <div class="chips"><button class="chip sm" onclick="app.openLink('https://aistudio.google.com/apikey')">افتح Google AI Studio</button></div>
+        <p class="hint"><b>Anthropic</b> — محتاج تشحن رصيد صغير، وقراءة الفاتورة الواحدة بقروش.</p>
+        <ol class="steps">
+          <li>اعمل حساب واشحن رصيد.</li>
+          <li>من صفحة «API Keys» اعمل مفتاح جديد.</li>
+          <li>انسخه والزقه في الخانة اللي تحت.</li>
+        </ol>
+        <div class="chips"><button class="chip sm" onclick="app.openLink('https://platform.claude.com')">افتح منصة Anthropic</button></div>`:''}
       <p class="hint">لو مفتاح Gemini على الخطة المجانية، جوجل ممكن تستخدم الصور والرسايل اللي بتتبعت في تحسين خدماتها.</p>
       ${(getKey()&&!showKeyEdit)?`
         <div class="note ok" style="margin-top:12px">مفتاح ${keyProv(getKey())==='gemini'?'Gemini':'Anthropic'} متسجل · قراءة الفواتير شغالة</div>
@@ -6253,7 +6301,7 @@ const app=new Proxy({
     const n=typed||String(accDraft.name||'').trim();
     if(!n)return;
     const lim=accDraft.credit?(Number(onlyNum(accDraft.limit))||0):0;
-    D.accounts.push({id:uid(),name:n,opening:lim,limit:lim,credit:!!accDraft.credit,
+    D.accounts.push({id:uid(),name:n,color:freeColor(),opening:lim,limit:lim,credit:!!accDraft.credit,
       atype:accDraft.atype||'cash',
       accNo:String(accDraft.accNo||'').trim()||undefined,
       last4:String(accDraft.last4||'').trim().slice(-4)||undefined,
@@ -6353,7 +6401,7 @@ const app=new Proxy({
       const amt=Number(onlyNum(x.opening))||0;
       const isCredit=x.kind==='credit';
       const id=uid();ids.push(id);
-      D.accounts.push({id:id,name:nm,opening:amt,scope:'me',atype:x.kind,
+      D.accounts.push({id:id,name:nm,color:freeColor(),opening:amt,scope:'me',atype:x.kind,
         credit:isCredit,limit:isCredit?amt:0,secured:[],
         stmtDay:isCredit?(Number(onlyNum(x.stmtDay))||20):undefined,
         graceDay:isCredit?15:undefined,
@@ -6361,7 +6409,7 @@ const app=new Proxy({
     });
     if(wel.office){
       D.officeOn=true;
-      D.accounts.push({id:'ocash',name:'كاش العهدة',opening:0,scope:'office',credit:false,limit:0,secured:[]});
+      D.accounts.push({id:'ocash',name:'كاش العهدة',color:freeColor(),opening:0,scope:'office',credit:false,limit:0,secured:[]});
     }else D.officeOn=false;
     D.monthMode=wel.monthMode==='cal'?'cal':'salary';
     if(wel.fx&&(wel.fxCurs||[]).length){D.fx.on=true;D.fx.curs=wel.fxCurs.slice();}
@@ -6632,6 +6680,7 @@ const app=new Proxy({
       promo:(subDraft.cycle!=='trial'&&subDraft.promo&&(Number(onlyNum(subDraft.promoAmt))||0)>0&&(Number(onlyNum(subDraft.promoN))||0)>0)
         ?{amount:Number(onlyNum(subDraft.promoAmt)),left:Number(onlyNum(subDraft.promoN))}:undefined,
       willRenew:subDraft.cycle==='trial'?!!subDraft.willRenew:undefined,
+      arr:(subDraft.cur!=='USD'&&subDraft.cycle!=='trial'&&typeof subDraft.arr==='boolean')?subDraft.arr:undefined,
       afterCycle:subDraft.cycle==='trial'?subDraft.afterCycle:undefined});
     subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
     showSub=false;save();render();
@@ -6649,7 +6698,8 @@ const app=new Proxy({
     const ppl=(s.people&&s.people.length)?s.people.map(p=>({name:p.name,amount:String(p.amount)})):[{name:'',amount:''}];
     sDraft={name:s.name,amount:String(s.amount||''),cur:s.cur||'EGP',cycle:s.cycle==='yearly'?'yearly':'monthly',
       next:s.next,at:s.at||'',split:!!(s.people&&s.people.length),people:ppl,
-      promo:!!(s.promo&&Number(s.promo.left)>0),promoAmt:s.promo?String(s.promo.amount):'',promoN:s.promo?String(s.promo.left):''};
+      promo:!!(s.promo&&Number(s.promo.left)>0),promoAmt:s.promo?String(s.promo.amount):'',promoN:s.promo?String(s.promo.left):'',
+      arr:s.arr,account:s.account};
     editSub=id;paySubFor=null;render();
   },
   cancelSubEdit(){editSub=null;render();},
@@ -6683,7 +6733,7 @@ const app=new Proxy({
     D.txns.unshift(t);
     if(!s.payments)s.payments=[];
     const pay={d:repDate||today(),t:t.id,paid:full,dup:true};
-    if(!usd&&isCreditAcc(s.account||'card')){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
+    if(!usd&&subArrOn(s)){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
     s.payments.push(pay);
     repFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
@@ -6716,7 +6766,7 @@ const app=new Proxy({
     D.txns.unshift(t);
     if(!s.payments)s.payments=[];
     const pay={d:d,t:t.id,paid:full};
-    if(!usd&&isCreditAcc(s.account||'card')){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
+    if(!usd&&subArrOn(s)){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
     s.payments.push(pay);
     s.amount=newAmt;delete s.promo;
     s.next=dAdd(d,s.cycle==='yearly'?12:1);
@@ -6742,6 +6792,7 @@ const app=new Proxy({
     s.myShare=null;
     const pa=Number(onlyNum(sDraft.promoAmt))||0,pn=Number(onlyNum(sDraft.promoN))||0;
     if(sDraft.promo&&pa>0&&pn>0)s.promo={amount:pa,left:pn};else delete s.promo;
+    if(typeof sDraft.arr==='boolean'&&s.cur!=='USD')s.arr=sDraft.arr;
     editSub=null;save();render();app.toast('اتعدل');
   },
   startFeeFix(id,m){m=m||'final';if(feeFor===id&&feeMode===m)feeFor=null;else{feeFor=id;feeMode=m;}feeDate=today();render();},
@@ -6780,6 +6831,7 @@ const app=new Proxy({
     }else{
       p.fee=0;p.feePending=false;p.feeTxn=undefined;
     }
+    s.arr=v>0;
     feeFor=null;save();render();app.toast('اتسجلت');
   },
   noFee(key){
@@ -6789,6 +6841,7 @@ const app=new Proxy({
     if(p.dup)p.settled=true;
     if(p.feeTxn)D.txns=D.txns.filter(x=>x.id!==p.feeTxn);
     p.fee=0;p.feePending=false;p.feeTxn=undefined;
+    s.arr=false;
     feeFor=null;save();render();
   },
   cancelFee(){feeFor=null;render();},
@@ -6807,7 +6860,7 @@ const app=new Proxy({
     if(!s.payments)s.payments=[];
     const pay={d:paySubDate,t:t.id,paid:full};
     promoStep(s,pay);paySubBal='';
-    if(s.cur!=='USD'&&isCreditAcc(s.account||'card')){
+    if(subArrOn(s)){
       const est=arrEst(full);
       if(est>0){pay.fee=est;pay.feePending=true;}
     }
@@ -7140,6 +7193,7 @@ const app=new Proxy({
   /* --- إعدادات --- */
   accCfgSet(id,k,v){if(!accCfg)accCfgInit();accCfg[id][k]=v;},
   accCfgCur(id,c){if(!accCfg)accCfgInit();accCfg[id].cur=c;render();},
+  accCfgColor(id,col){if(!accCfg)accCfgInit();accCfg[id].color=col;render();},
   accCfgType(id,t){
     if(!accCfg)accCfgInit();
     accCfg[id].atype=t;accCfg[id].credit=(t==='credit');
@@ -7184,6 +7238,7 @@ const app=new Proxy({
     D.accounts.filter(a=>a.id===id).forEach(a=>{const c=accCfg[a.id];if(!c)return;
       const nm=String(c.name||'').trim();
       if(nm)a.name=nm;
+      if(c.color&&ACOLORS.indexOf(c.color)>-1)a.color=c.color;
       a.credit=!!c.credit;
       a.atype=c.atype||a.atype||'cash';
       a.accNo=String(c.accNo||'').trim()||undefined;
@@ -7337,6 +7392,7 @@ const app=new Proxy({
     confirmKey='';ghState={busy:false,msg:''};render();
   },
   editKey(){showKeyEdit=true;confirmKey='';render();},
+  openLink(u){try{window.open(u,'_blank');}catch(e){}},
   cancelKeyEdit(){showKeyEdit=false;render();},
   clearKey(){
     try{localStorage.removeItem(AKEY);}catch(e){}
