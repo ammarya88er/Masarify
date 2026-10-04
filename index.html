@@ -185,6 +185,11 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .rt{display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;margin-top:6px;
   border-top:1px dashed #B9B3A6;font-weight:600;font-size:16px;font-family:var(--f-disp);}
 .rt span:last-child{font-family:var(--f-num);direction:ltr;}
+.rs{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px;color:var(--paper-ink);}
+.rs+.rs{border-top:1px dotted #CDC7B8;}
+.rs>span:last-child{font-family:var(--f-num);direction:ltr;font-weight:600;}
+.rs .rd{display:inline-flex;align-items:center;gap:2px;}
+.rs .rd input{width:72px;background:transparent;border:0;border-bottom:1px dashed #B9B3A6;font:inherit;color:inherit;text-align:left;padding:2px;}
 
 .drop{border:1.5px dashed var(--line);border-radius:22px;padding:44px 20px;text-align:center;
   background:var(--surf);cursor:pointer;}
@@ -609,6 +614,7 @@ function normalizeData(){
     }
   });
   if(!D.vouchers)D.vouchers=[];
+  if(!D.fuelSeen){D.fuelSeen={};(D.vehicles||[]).forEach(v=>{const f=fuelPair(v.id);if(f)D.fuelSeen[v.id]=f.t.id;});}
   if(D.cardDigits===undefined)D.cardDigits='';
   if(D.phone===undefined)D.phone='';
   /* الفاوتشرات القديمة كانت بنك واحد ثابت — بتتربط بأول حساب بنك عندك */
@@ -2125,13 +2131,13 @@ function promptText(){
   '- لو الصنف مالوش ماركة واضحة، اكتب نوعه بس (طماطم، عيش، بصل).\n'+
   '- لو الاسم في الفاتورة مختصر أو رموز، استنتج نوع المنتج من السياق واكتبه بالعربي.\n'+
   '- خليك ثابت: نفس المنتج ياخد نفس الاسم كل مرة.'+(scanKnownNames().length?' دي أسامي أصناف اشتريتها قبل كده — لو الصنف هو نفس المنتج بنفس الحجم، استخدم الاسم ده حرف بحرف:\n'+scanKnownNames().join('\n'):'')+'\n'+
-  '- لو فيه خصم حطه كصنف اسمه "خصم" بمبلغ بالسالب وتصنيف other.\n'+
+  '- لو فيه خصم على الفاتورة كلها، اكتبه في discount كرقم موجب، ومتحطوش صنف.\n'+
   '- لو فيه ضريبة أو خدمة حطها صنف مستقل بتصنيف other.\n'+
   '- الأرقام صافية من غير عملة ولا فواصل آلاف.\n'+
   '- لو صنف مش واضح، خمّن أقرب تصنيف منطقي.\n\n'+
   'رجّع JSON بس من غير أي كلام تاني ومن غير علامات كود:\n'+
   '- date: اكتب تاريخ الشراء زي ما هو مكتوب في الفاتورة بالظبط بأرقامه وعلاماته، من غير ما تغيّر ترتيبه. ولو مش مكتوب اكتب null.\n\n'+
-  '{"merchant":"اسم المحل أو null","date":"التاريخ زي ما هو مكتوب أو null","items":[{"name":"اسم الصنف","qty":1,"amount":0,"cat":"id"}],"total":0}';
+  '{"merchant":"اسم المحل أو null","date":"التاريخ زي ما هو مكتوب أو null","items":[{"name":"اسم الصنف","qty":1,"amount":0,"cat":"id"}],"discount":0,"total":0}';
 }
 async function shrink(file){
   const url=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('img'));r.readAsDataURL(file);});
@@ -2341,6 +2347,15 @@ function vehFuel(id){
       if(a.date!==b.date)return a.date<b.date?-1:1;
       return (Number(a._q)||0)-(Number(b._q)||0);
     });
+}
+/* آخر تفويلتين بقراية عداد: كام كيلو مشيت بينهم ÷ لترات التفويلة الأخيرة (اللي عوّضت المسافة دي) */
+function fuelPair(id){
+  const f=vehFuel(id).filter(t=>Number(t.odo)>0)
+    .sort((a,b)=>(Number(a.odo)-Number(b.odo))||(a.date<b.date?-1:a.date>b.date?1:0));
+  if(f.length<2)return null;
+  const t=f[f.length-1], km=Number(t.odo)-Number(f[f.length-2].odo), L=Number(t.liters)||0;
+  if(!(km>0)||!(L>0))return null;
+  return {t,km,L,kmpl:Math.round(km/L*100)/100,est:!!t.litersEst,n:f.length};
 }
 function vehStats(id){
   const fuels=vehFuel(id);
@@ -3153,6 +3168,20 @@ ${s.cycle==='trial'
       <button class="btn ghost" onclick="app.cancelOfee()">إلغاء</button>
     </div>`:''}`);
 
+  /* البنزين: اللتر مشّاك كام كيلو من التفويلة اللي قبلها — بيفضل لحد «شفتها» أو تفويلة جديدة */
+  if(book==='me'&&vehOn())(D.vehicles||[]).forEach(v=>{
+    const f=fuelPair(v.id);
+    if(!f||(D.fuelSeen||{})[v.id]===f.t.id)return;
+    const avg=f.n>2?vehStats(v.id).kmPerL:0;
+    rows.push(`
+    <div class="alert">
+      ${RAIL(4,f.t.date)}
+      <span class="g"><span class="t">بنزين — ${esc(v.name)}</span>
+        <span class="s" style="display:block"><span class="n">${fmt(f.km)}</span> كم على <span class="n">${fmt(f.L)}</span> لتر${f.est?' (تقريبي)':''}${avg?' · المتوسط <span class="n">'+fmt(avg)+'</span>':''}</span></span>
+      <div class="side"><span class="vl" style="white-space:nowrap"><span class="n">${fmt(f.kmpl)}</span> كم/لتر</span>
+        <button class="chip sm" onclick="app.fuelSeen('${v.id}')">شفتها</button></div>
+    </div>`);
+  });
   if(book==='me'&&(!D.lastBackup||daysTo(D.lastBackup)<-30))rows.push(`
     <div class="alert">
       ${RAIL(4,'')}
@@ -3700,6 +3729,25 @@ function itemLast(name,amount,qty){
 }
 /* خانة اسم الصنف بتكبر لسطرين لو الاسم طويل */
 function fitNm(el){if(!el||!el.style)return;el.style.height='auto';el.style.height=el.scrollHeight+'px';}
+/* أرقام الفاتورة: المجموع قبل الخصم، والخصم، والإجمالي بعده */
+function scanSums(){
+  const raw=Math.round((scan.items||[]).reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
+  const disc=Math.min(raw,Number(onlyNum(scan.disc||''))||0);
+  return {raw,disc,net:Math.max(0,Math.round((raw-disc)*100)/100)};
+}
+/* كل الأرقام اللي بتعتمد على الأصناف والخصم بتتحدث مع بعض من غير ما الشاشة تترسم تاني */
+function scanTotalsLive(){
+  const S=scanSums();
+  setText('rsum',fmt(S.raw));setText('rtot',fmt(S.net));
+  const b=document.getElementById('saveRec');if(b)b.textContent='احفظ الفاتورة — '+fmt(S.net)+' جنيه';
+  setText('scanshare',fmt(scanMyShare()));
+  if(scan.voucherId){
+    const v=(D.vouchers||[]).find(x=>x.id===scan.voucherId);
+    if(!v||Number(v.amount)>S.net)scan.voucherId='';
+  }
+  const box=document.getElementById('vchbox');
+  if(box&&book!=='office')box.innerHTML=vchPicker(scan.voucherId,S.net,'app.scanVch');
+}
 function scanMyShare(){
   const mine=(scan.items||[]).filter(i=>!i.off&&!i.who).reduce((a,i)=>a+(Number(i.amount)||0),0);
   const disc=Number(onlyNum(scan.disc||''))||0;
@@ -3736,7 +3784,9 @@ function vScan(){
           ${peopleNames().map(n=>`<button class="chip sm${it.who===n?' on':''}" onclick="app.setOwner(${k},'${jsArg(n)}')">${esc(n)}</button>`).join('')}
           <input class="f" style="margin:6px 0 0" placeholder="اسم جديد" onchange="app.setOwner(${k},this.value)">
         </div>`:''}`).join('')}
-        <div class="rt"><span>الإجمالي${(Number(onlyNum(scan.disc||''))||0)>0?' بعد الخصم':''}</span><span id="rtot">${fmt(Math.max(0,total-(Number(onlyNum(scan.disc||''))||0)))}</span></div>
+        <div class="rs"><span>المجموع</span><span id="rsum">${fmt(scanSums().raw)}</span></div>
+        <div class="rs"><span>خصم</span><span class="rd">−<input id="rdisc" aria-label="الخصم" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${esc(scan.disc||'')}" onfocus="this.select()" oninput="app.scanDisc(numFix(this,1))"></span></div>
+        <div class="rt"><span>الإجمالي</span><span id="rtot">${fmt(scanSums().net)}</span></div>
       </div>
 
       <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">ضيف صنف ناقص</button>
@@ -3759,8 +3809,6 @@ function vScan(){
           <button class="btn ghost" style="margin-top:0" onclick="app.scanPersonAdd()">ضيف شخص</button>
           <div class="hint">بيتقسم على المبلغ اللي ليك بعد ما تشيل أصناف الناس والعهدة. نصيبك هيطلع <span class="n" id="scanshare">${fmt(scanMyShare())}</span> جنيه.</div>
         `:''}`:''}
-      ${needsTxn?'':`<label class="f">خصم على الفاتورة (اختياري)</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(scan.disc||'')}" oninput="app.scanDisc(numFix(this,1))">`}
       ${book!=='office'&&!needsTxn?`<div class="hint">دوس على «ليا» جنب أي صنف عشان تخليه ${officeOn()?esc(toBook())+' أو ':''}لحد تاني.</div>`:''}
 
       ${(function(){const nt=needsTxn&&D.txns.find(x=>x.id===needsTxn);return nt&&nt.account?'':`<label class="f">الفاتورة دي اتدفعت من إيه؟ <b>*</b></label>
@@ -3781,7 +3829,7 @@ function vScan(){
         ${itemSuggestions('app.scanItemPick')}
         <label class="f">التصنيف <b>*</b></label>
         ${pickRow('socat2',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat')}
-      `:needsTxn?'':`<div id="vchbox">${vchPicker(scan.voucherId,total,'app.scanVch')}</div>`}
+      `:needsTxn?'':`<div id="vchbox">${vchPicker(scan.voucherId,scanSums().net,'app.scanVch')}</div>`}
 
       <label class="f">اسم المحل (اختياري)</label>
       <input class="f" value="${esc(scan.merchant)}" oninput="app.scanMerchant(this.value)">
@@ -3790,7 +3838,7 @@ function vScan(){
       ${dateField(scan.date,'app.scanDate')}
       ${scan.dateWarn?'<div class="note warn">اتأكد من التاريخ — ماقدرتش أقراه بثقة.</div>':''}`}
 
-      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))&&(book==='office'||!(scan.items||[]).some(i=>i.off)||((scan.oitem||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(total)} جنيه</button>
+      <button class="btn" id="saveRec" ${scan.account&&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))&&(book==='office'||!(scan.items||[]).some(i=>i.off)||((scan.oitem||scan.merchant||'').trim()&&scan.ocat))?'':'disabled'} onclick="app.saveReceipt()">احفظ الفاتورة — ${fmt(scanSums().net)} جنيه</button>
       <button class="btn ghost" onclick="app.cancelScan()">إلغاء</button>
     </div>`;
   }
@@ -6011,8 +6059,12 @@ const app=new Proxy({
       const r=await readReceipt(await shrink(f));
       const items=(r.items||[]).map(i=>{const q=Number(i.qty)||1;
         return {name:String(i.name||'صنف'),amount:Number(i.amount)||0,cat:catOf(i.cat).id,qty:q>1?q:undefined};});
+      /* الخصم بيتكتب في سطر «خصم» — ولو جه كصنف بالسالب اسمه خصم بينتقل له */
+      let dsc=Math.max(0,Number(r.discount)||0);
+      for(let k=items.length-1;k>=0;k--){
+        if(/^خصم/.test(items[k].name.trim())&&items[k].amount<0){dsc+=-items[k].amount;items.splice(k,1);}}
       if(!items.length)throw new Error('empty');
-      scan.items=items;scan.merchant=r.merchant||(nt&&nt.place)||'';scan.account=(nt&&nt.account)||'';
+      scan.items=items;scan.disc=dsc>0?String(Math.round(dsc*100)/100):'';scan.merchant=r.merchant||(nt&&nt.place)||'';scan.account=(nt&&nt.account)||'';
       if(nt){scan.date=nt.date;scan.dateWarn=false;}
       else{const sd=scanDateRead(r.date);scan.date=sd.date;scan.dateWarn=!sd.sure;}
       scan.match=nt?'':scanMatch(items,scan.date);scan.matchYes=false;
@@ -6028,15 +6080,7 @@ const app=new Proxy({
   },
   iset(k,f,v){
     scan.items[k][f]=f==='amount'?(Number(onlyNum(v))||0):f==='qty'?((Number(onlyNum(v))||1)>1?Number(onlyNum(v)):undefined):v;
-    const t=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
-    const el=document.getElementById('rtot');if(el)el.textContent=fmt(t);
-    const b=document.getElementById('saveRec');if(b)b.textContent='احفظ الفاتورة — '+fmt(t)+' جنيه';
-    if(scan.voucherId){
-      const v=(D.vouchers||[]).find(x=>x.id===scan.voucherId);
-      if(!v||Number(v.amount)>t)scan.voucherId='';
-    }
-    const box=document.getElementById('vchbox');
-    if(box)box.innerHTML=vchPicker(scan.voucherId,t,'app.scanVch');
+    scanTotalsLive();
   },
   /* زي «الصق صورة من الحافظة»: بياخد رسالة البنك من الحافظة ويقراها على طول */
   async pasteSms(){
@@ -6116,14 +6160,7 @@ const app=new Proxy({
   scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;setText('scanshare',fmt(scanMyShare()));}},
   scanPersonAdd(){if(!scan.people)scan.people=[];scan.people.push({name:'',amount:''});render();},
   scanPersonDel(i){if(scan.people)scan.people.splice(i,1);if(!scan.people.length)scan.people.push({name:'',amount:''});render();},
-  scanDisc(v){
-    scan.disc=v;
-    const raw=scan.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
-    const net=Math.max(0,Math.round((raw-(Number(onlyNum(v))||0))*100)/100);
-    setText('rtot',fmt(net));
-    const box=document.getElementById('vchbox');
-    if(box&&book!=='office')box.innerHTML=vchPicker(scan.voucherId,net,'app.scanVch');
-  },
+  scanDisc(v){scan.disc=v;scanTotalsLive();},
 
   scanAccount(id){scan.account=id;render();},
   scanMatchSet(v){
@@ -6131,7 +6168,7 @@ const app=new Proxy({
     scan.matchYes=!!v;needsTxn=v?t.id:null;
     /* على الخصم الأصناف كلها بتتسجل عليه — التقسيم والقسيمة والخصم مش بيتطبقوا */
     if(v){scan.account=t.account||scan.account;scan.date=t.date;scan.dateWarn=false;
-      (scan.items||[]).forEach(i=>{i.off=false;i.who='';});scan.split=false;scan.voucherId='';scan.disc='';ownerFor=null;}
+      (scan.items||[]).forEach(i=>{i.off=false;i.who='';});scan.split=false;scan.voucherId='';ownerFor=null;}
     render();
   },
   saveReceipt(){
@@ -6166,8 +6203,8 @@ const app=new Proxy({
       if(t){
         if(!t.account)t.account=scan.account;
         const all=(scan.items||[]).map(i=>({name:i.name,amount:Number(i.amount)||0,cat:i.cat,qty:i.qty}));
-        const s=Math.round(all.reduce((a,i)=>a+i.amount,0)*100)/100;
-        t.items=all;t.cat=(all[0]&&all[0].cat)||t.cat;
+        const s=Math.round((all.reduce((a,i)=>a+i.amount,0)-sdisc)*100)/100;
+        t.items=all;t.cat=(all[0]&&all[0].cat)||t.cat;t.discount=sdisc||undefined;
         t.merchant=scan.merchant||t.merchant;
         t.place=scan.merchant||t.place;
         t.needsDiff=(Math.abs(s-Number(t.amount))>0.005)?s:undefined;
@@ -6468,6 +6505,7 @@ const app=new Proxy({
   },
   goPayCard(id){rememberY();tab='wallet';wtab='accounts';alertsOpen=false;
     payCard={id:id,mode:'full',amount:'',from:'',date:today()};editAcct=null;render();window.scrollTo(0,0);},
+  fuelSeen(vid){const f=fuelPair(vid);if(!f)return;if(!D.fuelSeen)D.fuelSeen={};D.fuelSeen[vid]=f.t.id;save();render();},
   seeDue(id,due){const a=D.accounts.find(x=>x.id===id);if(a){a.dueSeen={due:due,q:Number(D._qmax||0)};save();render();}},
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
