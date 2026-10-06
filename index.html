@@ -528,7 +528,7 @@ let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 let insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
-let accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',sec:false,secured:[],
+let accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',stamp:true,stampRate:'0.05',sec:false,secured:[],
   secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
 let payCard={id:null,mode:'full',amount:'',from:'bank',date:today()};
 let eTxn=null;
@@ -538,7 +538,7 @@ function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   name:a.name,credit:!!a.credit,atype:a.atype||'cash',limit:a.limit?String(a.limit):'',
   accNo:a.accNo||'',last4:a.last4||'',
   stmtDay:String(a.stmtDay||20),graceDay:String(a.graceDay||15),
-  insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),cur:a.cur||'EGP',color:aColor(a.id)});}
+  insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),stampRate:String(a.stampRate!==undefined?a.stampRate:0.05),cur:a.cur||'EGP',color:aColor(a.id)});}
 let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:'cert'};
 let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',split:false,people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null, vchMsg='';
@@ -717,6 +717,8 @@ function normalizeData(){
       if(!a.graceDay)a.graceDay=Number(D.graceDay)||15;
       if(a.insure===undefined)a.insure=true;
       if(a.insureRate===undefined)a.insureRate=(D.insureRate===undefined?0.9:Number(D.insureRate));
+      if(a.stamp===undefined)a.stamp=true;
+      if(a.stampRate===undefined)a.stampRate=0.05;
     }
     if(!a.credit)a.limit=0;
     if(!a.secured)a.secured=[];
@@ -1164,6 +1166,49 @@ function insuranceAll(){
       {insFeeFor(a,cur);changed=true;}
   });
   if(!D._insFix1){D._insFix1=1;changed=true;}
+  if(changed){sortTxns();save();}
+}
+/* ضريبة الدمغة: كل ٣ شهور (١ يناير/أبريل/يوليو/أكتوبر)، نسبة من أعلى مبلغ كان عليك للكارت
+   في أي يوم خلال الربع اللي فات. تقديرية لحد ما تأكدها، زي التأمين. */
+const qStart=m=>{const p=m.split('-').map(Number);return p[0]+'-'+pad2(Math.floor((p[1]-1)/3)*3+1);};
+const qAdd=(m,n)=>mAdd(m,3*n);
+const stampRate=a=>(a&&a.stamp===false)?0:(Number(a&&a.stampRate)||0);
+const QNAMES=['يناير لمارس','أبريل ليونيو','يوليو لسبتمبر','أكتوبر لديسمبر'];
+const qLabel=m=>{const p=m.split('-').map(Number);return QNAMES[Math.floor((p[1]-1)/3)]+' '+p[0];};
+/* أعلى مبلغ كان عليك للكارت من يوم from لحد قبل يوم to — بنفس قواعد رصيد الكشف */
+function cardMaxOwed(a,from,to){
+  const eff=t=>{
+    const v=Number(t.amount)||0;
+    if(t.to===a.id&&t.kind==='transfer')return inAmt(t);
+    if(t.account!==a.id||t.pending||(t.refundSince&&!t.refundDone))return 0;
+    if(t.kind==='expense'||t.kind==='transfer')return -v;
+    if(t.kind==='income'||t.kind==='float'||t.kind==='yield')return v;
+    if(t.kind==='settle')return t.dir==='in'?v:-v;
+    return 0;
+  };
+  let bal=(Number(a.opening)||0)+(Number(a.openingOffice)||0);
+  const byDay={};
+  D.txns.forEach(t=>{const e=eff(t);if(!e)return;if(t.date<from)bal+=e;else if(t.date<to)byDay[t.date]=(byDay[t.date]||0)+e;});
+  const lim=Number(a.limit)||0, ins=insRemainOn(a.id);
+  let mx=lim-bal-ins;
+  Object.keys(byDay).sort().forEach(d=>{bal+=byDay[d];mx=Math.max(mx,lim-bal-ins);});
+  return Math.round(Math.max(0,mx)*100)/100;
+}
+function stampAll(){
+  let changed=false;const cur=qStart(monthOf(today()));
+  (D.accounts||[]).filter(a=>a.credit&&!a.closed&&stampRate(a)>0).forEach(a=>{
+    if(!a.stampLast){a.stampLast=cur;changed=true;return;}
+    let q=qAdd(a.stampLast,1),g=0;
+    while(q<=cur&&g++<40){
+      const done=D.txns.some(t=>t.account===a.id&&t.kind==='expense'&&monthOf(t.date)===q&&(t.stampFee||/دمغة/.test(String(t.note||''))));
+      if(!done){
+        const prev=qAdd(q,-1), fee=Math.floor(cardMaxOwed(a,prev+'-01',q+'-01')*stampRate(a))/100;
+        if(fee>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',account:a.id,
+          date:q+'-01',stampFee:true,pending:true,note:'ضريبة دمغة — '+a.name+' — '+qLabel(prev)});
+      }
+      a.stampLast=q;changed=true;q=qAdd(q,1);
+    }
+  });
   if(changed){sortTxns();save();}
 }
 /* تأمين شهر m: نسبة من اللي عليك للكارت يوم آخر كشف قبله — تقديري لحد ما تأكده */
@@ -2739,7 +2784,7 @@ function alertsPanel(){
     <div class="alert">
       ${RAIL(2,t.date)}
       <span class="g"><span class="t">${esc(T.title)}</span>
-        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':t.insFee?'تأمين · تقديري':t.insInt?'فايدة قسط · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
+        <span class="s" style="display:block">${T.extra?esc(T.extra)+' · ':''}${t.arrFee?'مصاريف تدبير · تقديري':t.insFee?'تأمين · تقديري':t.stampFee?'ضريبة دمغة · تقديري':t.insInt?'فايدة قسط · تقديري':money(t.usd,'USD')+' · '+(t.hold?'محجوز':'تقديري')} · ${dLabel(t.date)}</span></span>
       <div class="side"><span class="vl" style="white-space:nowrap">${money(t.amount,'EGP')}</span>
       ${canHoldFix(t)?`<button class="chip sm${fixFor===t.id&&fixMode==='hold'?' on':''}" onclick="app.startFix('${t.id}','hold')">محجوز</button>`:''}
       <button class="chip sm${fixFor===t.id&&fixMode!=='hold'?' on':''}" onclick="app.startFix('${t.id}','final')">ظبّط</button></div>
@@ -3226,7 +3271,7 @@ function txnRow(t,noDate){
   <div class="tx" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
     <span class="g"><span class="t">${esc(title)}</span>${(t.book==='office'&&t.item&&t.note&&t.note!==t.item)?`<span class="s" style="display:block">${esc(t.note)}</span>`:''}
-      <span class="s" style="display:block">${noDate?'':dLabel(t.date)+' · '}${t.paidBy?'دفعها '+esc(t.paidBy):esc(accName(t.account))}${(t.book||'me')==='me'&&t.kind==='income'&&!t.repay&&(t.note||t.merchant)&&(t.note||t.merchant)!==icatOf(t).label?' · '+esc(icatOf(t).label):''}${t.kind==='income'&&t.from?' · من '+esc(t.from):''}${t.debt?' · عليك '+esc(toName(t.from)):''}${t.debtPay?' · سداد '+esc(toName(t.from)):''}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.gam?' · جمعية':''}${(t.kind==='transfer'&&t.toAmt!==undefined)?' · وصل '+fmt(t.toAmt)+' '+esc(fxName(accCur(t.to))):''}${t.fxGain?' · فرق <span class="n" dir="ltr">'+(t.fxGain>0?'+':'−')+fmt(Math.abs(t.fxGain))+'</span>':''}${t.certBuy?' · شراء شهادة':''}${t.certBack?' · صرف شهادة':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${noDate?'':dLabel(t.date)+' · '}${t.paidBy?'دفعها '+esc(t.paidBy):esc(accName(t.account))}${(t.book||'me')==='me'&&t.kind==='income'&&!t.repay&&(t.note||t.merchant)&&(t.note||t.merchant)!==icatOf(t).label?' · '+esc(icatOf(t).label):''}${t.kind==='income'&&t.from?' · من '+esc(t.from):''}${t.debt?' · عليك '+esc(toName(t.from)):''}${t.debtPay?' · سداد '+esc(toName(t.from)):''}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.stampFee?' · دمغة':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.gam?' · جمعية':''}${(t.kind==='transfer'&&t.toAmt!==undefined)?' · وصل '+fmt(t.toAmt)+' '+esc(fxName(accCur(t.to))):''}${t.fxGain?' · فرق <span class="n" dir="ltr">'+(t.fxGain>0?'+':'−')+fmt(Math.abs(t.fxGain))+'</span>':''}${t.certBuy?' · شراء شهادة':''}${t.certBack?' · صرف شهادة':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt||t.stampFee)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${isFxAcc(t.account)?'<small style="font-size:11px">'+esc(fxName(accCur(t.account)))+'</small> ':''}${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -4195,7 +4240,12 @@ function wAccounts(){
         ${yesNo('accins',accDraft.insure,'app.accPickIns')}
         ${accDraft.insure?`<label class="f">نسبة التأمين ٪</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(accDraft.insureRate)}" oninput="app.accSet('insureRate',numFix(this,1))">
-          <div class="hint">بتتحسب على المستحق الشهر ده بس، مش على المبلغ المقسط.</div>`:''}`:''}
+          <div class="hint">بتتحسب على المستحق الشهر ده بس، مش على المبلغ المقسط.</div>`:''}
+        <label class="f">فيه ضريبة دمغة؟</label>
+        ${yesNo('accstamp',accDraft.stamp,'app.accPickStamp')}
+        ${accDraft.stamp?`<label class="f">نسبة الدمغة ٪</label>
+          <input class="f" type="text" inputmode="decimal" value="${esc(accDraft.stampRate)}" oninput="app.accSet('stampRate',numFix(this,1))">
+          <div class="hint">كل ٣ شهور، على أعلى مبلغ كان عليك للكارت خلال الربع.</div>`:''}`:''}
       <button class="btn" onclick="app.addAccount()">ضيف الحساب</button>
     </div>
   </div>`;
@@ -4936,10 +4986,15 @@ function vSettings(){
           <input class="f" type="text" inputmode="numeric" value="${esc(c.stmtDay!==undefined?c.stmtDay:String(a.stmtDay||20))}" oninput="app.accCfgSet('${a.id}','stmtDay',numFix(this,0))">
           <label class="f">آخر يوم للسداد</label>
           <input class="f" type="text" inputmode="numeric" value="${esc(c.graceDay!==undefined?c.graceDay:String(a.graceDay||15))}" oninput="app.accCfgSet('${a.id}','graceDay',numFix(this,0))">
-          <label class="f">رسوم تأمين</label>
+          <label class="f">فيه رسوم تأمين؟</label>
           ${yesNo('insure'+a.id,a.insure!==false,"((v)=>app.setInsure('"+a.id+"',v))")}
           ${a.insure!==false?`<label class="f">نسبة التأمين ٪</label>
             <input class="f" type="text" inputmode="decimal" value="${esc(c.insureRate!==undefined?c.insureRate:String(a.insureRate!==undefined?a.insureRate:0.9))}" oninput="app.accCfgSet('${a.id}','insureRate',numFix(this,1))">`:''}
+          <label class="f">فيه ضريبة دمغة؟</label>
+          ${yesNo('stamp'+a.id,a.stamp!==false,"((v)=>app.setStamp('"+a.id+"',v))")}
+          ${a.stamp!==false?`<label class="f">نسبة الدمغة ٪</label>
+            <input class="f" type="text" inputmode="decimal" value="${esc(c.stampRate!==undefined?c.stampRate:String(a.stampRate!==undefined?a.stampRate:0.05))}" oninput="app.accCfgSet('${a.id}','stampRate',numFix(this,1))">
+            <div class="hint">كل ٣ شهور، على أعلى مبلغ كان عليك للكارت خلال الربع.</div>`:''}
           ${(D.certs||[]).length?`<label class="f" style="margin:14px 0 8px">مضمون بأنهي شهادات؟</label>
             <div class="chips">${D.certs.filter(ct=>!ct.redeemed&&!certHeldBy(ct.id,a.id)).map(ct=>`<button class="chip sm${(a.secured||[]).indexOf(ct.id)>-1?' on':''}" onclick="app.toggleSecured('${a.id}','${ct.id}')">${esc(ct.name)} · <span class="n">${fmt(ct.amount)}</span></button>`).join('')}</div>
             ${(a.secured||[]).length?`<div class="hint">إجمالي الضمان <span class="n">${fmt(securedTotal(a))}</span> · ٨٤٪ منه = <span class="n">${fmt(Math.round(securedTotal(a)*0.84))}</span></div>`:''}`:''}`:''}
@@ -5263,7 +5318,7 @@ function render(){
   if(bb)bb.classList.add('on');
   const lb=document.querySelector('header .lbl');
   if(lb)lb.textContent=book==='me'?'إجمالي اللي معاك':'رصيد العهدة';
-  if(_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}try{insuranceAll();}catch(e){}try{cardInsAll();}catch(e){}}
+  if(_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}try{insuranceAll();}catch(e){}try{stampAll();}catch(e){}try{cardInsAll();}catch(e){}}
   const b=balances(book);
   const own=accountsFor(book).filter(a=>!a.credit&&!isSave(a));
   const vals=own.map(a=>Math.max(0,(b[a.id]||0)*fxRate(accCur(a.id))));
@@ -6324,6 +6379,7 @@ const app=new Proxy({
       saveYearDate:today(),saveWithdraw:''});}if(t!=='bank')accDraft.accNo='';if(t==='cash'||t==='wallet')accDraft.last4='';render();},
   accPickSec(v){accDraft.sec=v;if(!v)accDraft.secured=[];render();},
   accPickIns(v){accDraft.insure=v;render();},
+  accPickStamp(v){accDraft.stamp=v;render();},
   accPayFrom(v){accDraft.payFrom=(v==='none')?'':v;render();},
   accToggleCert(id){
     if(certHeldBy(id,null))return;
@@ -6346,12 +6402,14 @@ const app=new Proxy({
       graceDay:accDraft.credit?clampDay(Number(onlyNum(accDraft.graceDay))||15):undefined,
       insure:accDraft.credit?!!accDraft.insure:undefined,
       insureRate:accDraft.credit?(accDraft.insure?(Number(onlyNum(accDraft.insureRate))||0):0):undefined,
+      stamp:accDraft.credit?!!accDraft.stamp:undefined,
+      stampRate:accDraft.credit?(accDraft.stamp?(Number(onlyNum(accDraft.stampRate))||0):0):undefined,
       secured:accDraft.credit&&accDraft.sec?accDraft.secured.slice():[],
       payFrom:accDraft.credit?(accDraft.payFrom||''):undefined});
     {const na=D.accounts[D.accounts.length-1], c=(fxOn()&&FXTYPES.indexOf(na.atype)>-1&&accDraft.cur&&accDraft.cur!=='EGP')?accDraft.cur:'';
       if(c){na.cur=c;na.scope='me';na.openRate=fxRate(c)||undefined;}}
     if(accDraft.atype==='save'){const na=D.accounts[D.accounts.length-1];na.scope='me';applySaveCfg(na,accDraft);}
-    accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',sec:false,secured:[],
+    accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',stamp:true,stampRate:'0.05',sec:false,secured:[],
       secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
     accCfg=null;
     save();render();
@@ -6442,7 +6500,7 @@ const app=new Proxy({
         credit:isCredit,limit:isCredit?amt:0,secured:[],
         stmtDay:isCredit?(Number(onlyNum(x.stmtDay))||20):undefined,
         graceDay:isCredit?15:undefined,
-        insure:isCredit?true:undefined,insureRate:isCredit?0.9:undefined});
+        insure:isCredit?true:undefined,insureRate:isCredit?0.9:undefined,stamp:isCredit?true:undefined,stampRate:isCredit?0.05:undefined});
     });
     if(wel.office){
       D.officeOn=true;
@@ -7262,6 +7320,7 @@ const app=new Proxy({
     confirmKey='';save();render();app.toast('اتوقف');
   },
   reopenCard(id){const a=D.accounts.find(x=>x.id===id);if(!a)return;a.closed=false;delete a.closedOn;save();render();app.toast('رجع');},
+  setStamp(id,v){const a=D.accounts.find(x=>x.id===id);if(a){a.stamp=v;save();render();}},
   setInsure(id,v){const a=D.accounts.find(x=>x.id===id);if(a){a.insure=v;save();render();}},
   toggleSecured(accId,certId){
     const a=D.accounts.find(x=>x.id===accId);if(!a)return;
@@ -7290,6 +7349,8 @@ const app=new Proxy({
         a.graceDay=clampDay(Number(onlyNum(c.graceDay))||15);
         if(a.insure===undefined)a.insure=true;
         a.insureRate=a.insure?(Number(onlyNum(c.insureRate))||0):0;
+        if(a.stamp===undefined)a.stamp=true;
+        a.stampRate=a.stamp?(c.stampRate!==undefined?(Number(onlyNum(c.stampRate))||0):(Number(a.stampRate)||0.05)):0;
       }});
     accOpen=null;accCfgInit();save();app.toast('اتحفظ');render();
   },
