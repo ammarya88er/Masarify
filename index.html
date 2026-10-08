@@ -105,7 +105,7 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
         font-size:15px;font-family:var(--f-disp);font-weight:600;}
 .tx .g{flex:1;min-width:0;}
 .tx .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-  font-size:14px;line-height:1.45;white-space:normal;word-break:break-word;}
+  font-size:14px;line-height:1.8;white-space:normal;word-break:break-word;}
 .tx .a{flex:none;}
 .tx .s{font-size:11px;color:var(--muted);margin-top:3px;}
 .tx .a{font-family:var(--f-num);font-size:14.5px;font-weight:600;white-space:nowrap;direction:ltr;}
@@ -552,7 +552,7 @@ let needsTxn=null;
 let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''};
 let retFor=null, retAcct='', retDate=today();
 let fixMode='final', feeMode='final', feeEd=null, feeAsk=null;
-let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null;
+let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null, certEarly=null;
 let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false, incsOpen=false;
 let setsOpen={}, accOpen=null, setSub=null, catEdit=null;
@@ -1952,6 +1952,23 @@ function catchUp(){
   return {n:n,tot:tot};
 }
 
+/* العائد الجاي نزل قبل ميعاده: بيتسجل بتاريخه ومبلغه الحقيقي، وميعاده بيتعدّى */
+function certEarlyOk(c){
+  if(!c||c.redeemed)return false;
+  const d=certNext(c);
+  if(c.end&&d>c.end)return false;
+  const n=daysTo(d);return n>0&&n<=7;
+}
+function certPayEarly(c,date,amt){
+  const due=certNext(c);
+  const t={id:uid(),book:'me',kind:isSave((D.accounts||[]).find(a=>a.id===c.account))?'yield':'income',
+    amount:Math.round(amt*100)/100,account:c.account,date:date,note:c.name+' — عائد'};
+  D.txns.unshift(t);
+  c.covered=monthOf(due);
+  if(!c.payments)c.payments=[];
+  c.payments.push({d:date,t:t.id,due:due});
+  return t;
+}
 /* --- اشتراكات --- */
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
 const subCost=s=>s.cur==='USD'?subPrice(s)*D.rate:subPrice(s);
@@ -4798,6 +4815,16 @@ function wCerts(){
         ${delBtn('cert'+c.id,`app.delCert('${c.id}')`)}
       </div>
       ${certEdit===c.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+        ${certEarlyOk(c)?`<label class="f" style="margin-top:12px">عائد ${dayLabel(certNext(c))} نزل بدري؟</label>
+        ${yesNo('cey'+c.id,certEarly===c.id,'app.certEarlyYN')}`:''}
+        ${certEarly===c.id&&certEarlyOk(c)?`
+        <label class="f">نزل يوم</label>
+        <input class="f" id="cerd" type="date" value="${today()}" max="${today()}">
+        <label class="f">نزل كام؟</label>
+        <input class="f" id="cera" type="text" inputmode="decimal" value="${n2(c.monthly)}" onfocus="this.select()" oninput="numFix(this,1)">
+        <div class="hint">مش هيتسجل تاني في يومه، والمبلغ ده للشهر ده بس.</div>
+        <button class="btn" onclick="app.confirmCertEarly('${c.id}')">سجّل العائد</button>
+        <button class="btn ghost" onclick="app.cancelCertEdit()">إلغاء</button>`:`
         <label class="f" style="margin-top:12px">العائد الشهري</label>
         <input class="f" id="cmo" type="text" inputmode="decimal" value="${c.monthly}" oninput="numFix(this,1)">
         <label class="f">المبلغ</label>
@@ -4817,7 +4844,7 @@ function wCerts(){
           :`<label class="f">كسرتها؟</label>
             <input class="f" id="cpen" type="text" inputmode="decimal" placeholder="غرامة الكسر (اختياري)" oninput="numFix(this,1)">
             <button class="btn ghost" onclick="app.breakCert('${c.id}')">كسرتها — المبلغ رجع ${esc(accName(c.bank||c.account))}</button>`}
-        <button class="btn ghost" onclick="app.cancelCertEdit()">إلغاء</button>
+        <button class="btn ghost" onclick="app.cancelCertEdit()">إلغاء</button>`}
       </div>`:''}`).join('')}</div>`:'<div class="empty" style="padding:18px 10px">مفيش حاجة مسجلة.</div>'}
 
   </div>`;
@@ -7251,8 +7278,18 @@ const app=new Proxy({
     D.txns.forEach(t=>{if(t.veh===id)t.veh=undefined;});
     vehTab='';confirmKey='';save();render();
   },
-  startCertEdit(id){certEdit=certEdit===id?null:id;render();},
-  cancelCertEdit(){certEdit=null;render();},
+  startCertEdit(id){certEdit=certEdit===id?null:id;certEarly=null;render();},
+  cancelCertEdit(){certEdit=null;certEarly=null;render();},
+  certEarlyYN(v){certEarly=v?certEdit:null;render();},
+  confirmCertEarly(cid){
+    const c=(D.certs||[]).find(x=>x.id===cid);if(!certEarlyOk(c))return;
+    const el=document.getElementById('cerd'), d=(el&&el.value)||today(), amt=numVal('cera');
+    const last=(c.payments||[]).slice(-1)[0];
+    if(d>today()||d<=((last&&last.d)||c.start)){app.toast('التاريخ مش مظبوط');return;}
+    if(!(amt>0))return;
+    certPayEarly(c,d,amt);
+    certEarly=null;certEdit=null;sortTxns();save();render();app.toast('اتسجل');
+  },
   saveCertEdit(id){
     const c=D.certs.find(x=>x.id===id);if(!c)return;
     const mo=numVal('cmo'), am=numVal('camt');
