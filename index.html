@@ -523,7 +523,8 @@ function autoId(kind,owner,period){
   if(!(typeof D!=='undefined'&&D&&D.txns&&D.txns.some(t=>t.id===b)))return b;
   let i=2;while(D.txns.some(t=>t.id===b+':'+i))i++;return b+':'+i;
 }
-const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* أي كلام بيظهر: الأرقام العربي بتتعرض إنجليزي */
+const esc=s=>toEn(String(s==null?'':s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* نص جوه onclick بين '…': بيهرب العلامات عشان الأسامي اللي فيها ' متبوظش الزرار */
 const jsArg=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 
@@ -537,9 +538,9 @@ let insEdit=null, iDraft={};
 let showIns=false, showCert=false, showSub=false;
 let showGam=false, gamEdit=null, gamAct=null, gamDraft=null;
 const gamNew=()=>({name:'',role:'member',amount:'',months:'',start:monthOf(today()),turn:'',prePaid:'',payMode:'day',day:'5',account:'',members:[{name:'',turn:''}]});
-const newDraft=()=>({kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''});
+const newDraft=()=>({kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''});
 const newDraftO=()=>({kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''});
-let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+let draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
 let book=(function(){try{return localStorage.getItem(BKEY)==='office'?'office':'me';}catch(e){return 'me';}})();
 let draftO={kind:'expense',amount:'',account:'',to:'',item:'',ocat:'',date:today(),note:'',dir:'take',mine:false,mineAmt:'',place:'',hasFee:false,feeAmt:'',paid:'',diffTo:'',onote:'',toMe:false,cardFrom:'',cardTo:'',mineFrom:''};
 let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
@@ -800,6 +801,14 @@ function normalizeData(){
     });
     D._icfix1=1;
   }
+  /* الأرقام العربي في الكلام المتسجل بتبقى إنجليزي (مرة واحدة) */
+  if(!D._digits1){
+    const fx=v=>typeof v==='string'&&/[٠-٩۰-۹]/.test(v)?toEn(v):v;
+    (D.txns||[]).forEach(t=>{['note','item','place','merchant','fuelType','from','dl'].forEach(k=>{if(t[k]!==undefined)t[k]=fx(t[k]);});
+      (t.items||[]).forEach(i=>{i.name=fx(i.name);});});
+    (D.owed||[]).forEach(o=>{o.note=fx(o.note);o.who=fx(o.who);});
+    D._digits1=1;
+  }
   /* عمليات اتمسحت كل سطورها بأي طريقة: بنشيل خاناتها */
   if(D.ops){const live={};OPCOLS.forEach(c=>(D[c]||[]).forEach(x=>{if(x&&x.op)live[x.op]=1;}));
     Object.keys(D.ops).forEach(k=>{if(!live[k])delete D.ops[k];});}
@@ -870,7 +879,7 @@ const openOwed=()=>(D.owed||[]).filter(o=>!o.got);
    - السداد: settle خارج (debtPay). اللي عليك = السلف ناقص السداد، بيتحسب من
      الحركات نفسها، فالتعديل والمسح بيظبطوا نفسهم.
    ========================================================================== */
-const normTxt=x=>String(x||'').toLowerCase()
+const normTxt=x=>toEn(String(x||'')).toLowerCase()
   .replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
   .replace(/چ/g,'ج').replace(/ڤ/g,'ف').replace(/پ/g,'ب').replace(/گ/g,'ك').replace(/ژ/g,'ز').replace(/ؤ/g,'و').replace(/ئ/g,'ي')
   .replace(/[\u064B-\u0652\u0640]/g,'');
@@ -1060,7 +1069,7 @@ function icatSuggest(note,from,amt,opt){
 }
 const ocatOf=id=>(D.ocats||[]).find(c=>c.id===id)||{id:'',label:'—'};
 const defOcat=()=>{const l=D.ocats||[];const c=l.find(x=>x.id==='shared')||l[0];return (c&&c.id)||'';};
-const fuelPrice=ft=>Number(ft==='٩٥'?D.p95:D.p92)||0;
+const fuelPrice=ft=>Number(toEn(ft)==='95'?D.p95:D.p92)||0;
 /* نسبة مصاريف التدبير التقديرية على مشتريات الكارت بالجنيه */
 const ARRRATE=3;
 const isCreditAcc=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return !!(a&&a.credit);};
@@ -3502,7 +3511,7 @@ function txnRow(t,noDate){
       /* ملاحظات بند المكتب: في الدفترين، من نفس الحركة */
       const o=t.book==='office'?t:(t.link?D.txns.find(x=>x.link===t.link&&x.book==='office'&&x.kind==='expense'):null);
       return (o&&o.item&&o.note&&o.note!==o.item)?`<span class="s" style="display:block">${esc(o.note)}</span>`:'';})()}
-      <span class="s" style="display:block">${noDate?'':dLabel(t.date)+' · '}${t.paidBy?'دفعها '+esc(t.paidBy):esc(accName(t.account))}${(t.book||'me')==='me'&&t.kind==='income'&&!t.repay&&(t.note||t.merchant)&&(t.note||t.merchant)!==icatOf(t).label?' · '+esc(icatOf(t).label):''}${t.kind==='income'&&t.from?' · من '+esc(t.from):''}${t.debt?' · عليك '+esc(toName(t.from)):''}${t.debtPay?' · سداد '+esc(toName(t.from)):''}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.stampFee?' · دمغة':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.gam?' · جمعية':''}${(t.kind==='transfer'&&t.toAmt!==undefined)?' · وصل '+fmt(t.toAmt)+' '+esc(fxName(accCur(t.to))):''}${t.fxGain?' · فرق <span class="n" dir="ltr">'+(t.fxGain>0?'+':'−')+fmt(Math.abs(t.fxGain))+'</span>':''}${t.certBuy?' · شراء شهادة':''}${t.certBack?' · صرف شهادة':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt||t.stampFee)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+t.fuelType:'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
+      <span class="s" style="display:block">${noDate?'':dLabel(t.date)+' · '}${t.paidBy?'دفعها '+esc(t.paidBy):esc(accName(t.account))}${(t.book||'me')==='me'&&t.kind==='income'&&!t.repay&&(t.note||t.merchant)&&(t.note||t.merchant)!==icatOf(t).label?' · '+esc(icatOf(t).label):''}${t.kind==='income'&&t.from?' · من '+esc(t.from):''}${t.debt?' · عليك '+esc(toName(t.from)):''}${t.debtPay?' · سداد '+esc(toName(t.from)):''}${t.to?' ← '+esc(accName(t.to)):''}${t.place?' · '+esc(t.place):''}${t.book==='office'&&t.ocat?' · '+esc(ocatOf(t.ocat).label):''}${t.fromOffice?' · من العهدة':''}${t.items&&t.items.length?' · '+t.items.length+' صنف':''}${t.usd?' · $'+fmt(t.usd)+(t.pending?(t.hold?' (محجوز)':' (تقديري)'):''):''}${(t.arrFee&&t.pending)?' · تقديري':''}${t.refundSince?' · مستني مرتجع':''}${t.refundDone?' · اترد':''}${t.fxDiff?' · فرق':''}${t.kind==='yield'?' · عايد':''}${t.insFee?' · تأمين':''}${t.stampFee?' · دمغة':''}${t.flIn?' · من العهدة':''}${t.flOut?' · سداد للعهدة':''}${t.swap?' · تبديل':''}${t.gam?' · جمعية':''}${(t.kind==='transfer'&&t.toAmt!==undefined)?' · وصل '+fmt(t.toAmt)+' '+esc(fxName(accCur(t.to))):''}${t.fxGain?' · فرق <span class="n" dir="ltr">'+(t.fxGain>0?'+':'−')+fmt(Math.abs(t.fxGain))+'</span>':''}${t.certBuy?' · شراء شهادة':''}${t.certBack?' · صرف شهادة':''}${t.insInt?' · فايدة قسط':''}${((t.insFee||t.insInt||t.stampFee)&&t.pending)?' (تقديري)':''}${t.lent?' · فلوس ليك':''}${t.discount?' · خصم '+fmt(t.discount):''}${t.real?' · الفعلي '+fmt(t.real):''}${t.liters?' · '+fmt(t.liters)+' لتر'+(t.fuelType?' '+toEn(t.fuelType):'')+(t.litersEst?' (تقريبي)':''):''}${t.odo?' · عداد '+fmt(t.odo):''}${t.voucher?' · فاوتشر '+fmt(t.voucher.amount):''}</span></span>
     <span class="a" style="color:${color}">${isFxAcc(t.account)?'<small style="font-size:11px">'+esc(fxName(accCur(t.account)))+'</small> ':''}${inc?'+':tr?'':'−'}${fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
@@ -3943,7 +3952,7 @@ function vAdd(){
       ${(D.vehicles||[]).length>1?`<label class="f">أنهي مركبة؟</label>
         ${pickRow('veh',D.vehicles.map(v=>({id:v.id,label:esc(v.name)})),draft.veh,'app.setVeh',1)}`:''}
       ${draft.cat==='fuel'?`<label class="f">نوع البنزين</label>
-        ${pickRow('fuelType',['٩٢','٩٥'].map(f=>({id:f,label:toEn(f)})),draft.fuelType,'app.setFuelType',1)}
+        ${pickRow('fuelType',['92','95'].map(f=>({id:f,label:f})),toEn(draft.fuelType),'app.setFuelType',1)}
         <label class="f">كام لتر؟ (اختياري)</label>
         <input class="f" type="text" inputmode="decimal" value="${esc(draft.liters)}" oninput="app.dset('liters',numFix(this,1))">
         ${String(draft.liters||'').trim()?'':`<div class="hint">${fuelPrice(draft.fuelType)>0
@@ -5687,7 +5696,7 @@ function legacyOp(t){
     note:t.note||'',date:t.date,place:t.place||'',from:t.from||'',icatPicked:true,salary:!!t.salary,icat:t.icat||''});
   if(disc){d.hasDisc=true;d.discAmt=n2(disc);}
   if(t.voucher)d.voucherId=t.voucher.id;
-  if(t.veh){d.veh=t.veh;d.fuelType=t.fuelType||'٩٢';d.odo=t.odo?String(t.odo):'';if(t.liters&&!t.litersEst)d.liters=String(t.liters);}
+  if(t.veh){d.veh=t.veh;d.fuelType=toEn(t.fuelType||'92');d.odo=t.odo?String(t.odo):'';if(t.liters&&!t.litersEst)d.liters=String(t.liters);}
   const ow=(D.owed||[]).filter(o=>o.srcTxn===t.id);
   if(ow.length&&t.kind==='expense'){
     d.owed=true;d.owedKind=ow.every(o=>o.lent)?'lent':'share';
@@ -6517,7 +6526,7 @@ const app=new Proxy({
       if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
         account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
       sortTxns();save();
-      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+      draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
       render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
     }
     if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
@@ -6625,7 +6634,7 @@ const app=new Proxy({
       });
     }
     sortTxns();save();
-    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'٩٢',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
+    draft={kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''};
     render();window.scrollTo(0,0);app.toast('اتحفظت');
   },
   toggleRefundWait(e,id){
