@@ -722,6 +722,7 @@ function normalizeData(){
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
   if(!D._autoSince)D._autoSince=today();
+  if(!D._pendSince)D._pendSince=today();
   (D.certs||[]).forEach(c=>{
     if(c.bank===undefined){const a=(D.accounts||[]).find(x=>x.id===c.account);
       c.bank=(a&&a.atype==='bank'&&!a.credit)?a.id:'';c.legacy=true;}
@@ -859,6 +860,13 @@ function normalizeData(){
     (D.owed||[]).forEach(o=>{if(!o.lent)fix(o);});
     (D.subs||[]).forEach(s=>(s.dues||[]).forEach(fix));
     D._lent1=1;
+  }
+  /* عائد شهادة كان اتمسح قبل التحديث ده (آخر شهر من غير حركة): بيرجع «مستني العائد» (مرة واحدة) */
+  if(!D._certp1){
+    const ids={};(D.txns||[]).forEach(t=>ids[t.id]=1);
+    (D.certs||[]).forEach(c=>{const ps=c.payments||[],p=ps[ps.length-1];
+      if(p&&(!p.t||!ids[p.t])&&monthOf(p.due||p.d)===c.covered){ps.pop();c.covered=mAdd(c.covered,-1);}});
+    D._certp1=1;
   }
   /* عمليات اتمسحت كل سطورها بأي طريقة: بنشيل خاناتها */
   if(D.ops){const live={};OPCOLS.forEach(c=>(D[c]||[]).forEach(x=>{if(x&&x.op)live[x.op]=1;}));
@@ -1685,8 +1693,7 @@ function runAuto(){
   ac.forEach(r=>pushNote('اتسجل اشتراك '+esc(r.name)+' بـ<span class="n">'+fmt(r.amount)+'</span> جنيه'+(r.usd?' (تقديري)':'')+' · '+dLabel(r.date)+'.',r.sid,r.t));
   const af=accFeesAuto();
   af.forEach(r=>pushNote('اتسجل '+esc(r.f.name)+' على '+esc(r.a.name)+' بـ<span class="n">'+fmt(r.t.amount)+'</span> جنيه · '+dLabel(r.date)+'.',undefined,r.t.id,{acc:r.a.id,fid:r.f.id}));
-  const cu=catchUp();
-  if(cu.n)pushNote('اتقيد '+plural(cu.n,'عائد واحد','عائدين','عوائد','عائد')+' بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');
+  const cu={n:0};
   const tr=autoTrials();
   if(cardInsAdvance())save();
   if(tr.length)pushNote('خلصت تجربة '+tr.map(esc).join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
@@ -2048,25 +2055,29 @@ function autoTrials(){
   return done;
 }
 
+/* الاشتراك في يومه بيستنى «اتخصم»؛ لو اليوم عدّى من غير ما تدوس (ومادستش «لسه») بيتسجل بتاريخ يومه */
 function chargedAlready(s){
-  // عدّى وقت الخصم؟
-  if(daysTo(s.next)<0)return true;
-  if(daysTo(s.next)>0)return false;
-  if(!s.at)return true;
-  const p=String(s.at).split(':');
-  const n=new Date();
-  return (n.getHours()*60+n.getMinutes())>=((Number(p[0])||0)*60+(Number(p[1])||0));
+  return daysTo(s.next)<0&&s.held!==s.next;
 }
 function chargeSub(s,d){
   const usd=s.cur==='USD'?subPrice(s):0;
   const full=usd?Math.round(usd*D.rate*100)/100:subPrice(s);
   if(!(full>0))return null;
-  const t={id:autoId('sub',s.id,d),book:'me',kind:'expense',amount:full,
-    cat:s.cat||'subs',account:subAcc(s),date:d,note:s.name,
+  /* الخصم ده اتسجل خلاص من رسالة البنك: نربطه بالاشتراك بدل ما نسجله مرتين */
+  const used={};(D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t)used[p.t]=1;}));
+  const acc=subAcc(s);
+  let twin=usd?smsUsdTwin(acc,usd,d):null;
+  if(!twin){const c=D.txns.filter(x=>(x.book||'me')==='me'&&x.kind==='expense'&&x.fromSms&&x.account===acc&&!x.usd
+      &&Math.abs((Number(x.amount)||0)-full)<0.005&&x.date>=dayShift(d,-1)&&x.date<=dayShift(d,1));
+    twin=c.length===1?c[0]:null;}
+  if(twin&&used[twin.id])twin=null;
+  const t=twin||{id:autoId('sub',s.id,d),book:'me',kind:'expense',amount:full,
+    cat:s.cat||'subs',account:acc,date:d,note:s.name,
     usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
-  D.txns.unshift(t);
+  if(twin){if(!twin.cat||twin.cat==='other')twin.cat=s.cat||'subs';if(!twin.note)twin.note=s.name;}
+  else D.txns.unshift(t);
   if(!s.payments)s.payments=[];
-  const pay={d:d,t:t.id,paid:full,auto:true};
+  const pay={d:t.date||d,t:t.id,paid:Number(t.amount)||full,auto:true};
   promoStep(s,pay);
   if(subArrOn(s)){
     const est=arrEst(full);
@@ -2094,9 +2105,8 @@ function autoCharge(){
   const done=[];
   (D.subs||[]).forEach(s=>{
     if(s.cycle==='trial'||subEnded(s))return;
-    /* بيتسجل لوحده بس لو محدد ساعة، ومن غير ما يرجع لدفعات فاتت قبل ما الميزة تشتغل */
-    if(!s.at)return;
-    if(String(s.next||'')<D._autoSince)return;
+    /* من غير ما يرجع لدفعات فاتت قبل ما الميزة تشتغل (الاشتراكات من غير ساعة: من بعد التحديث ده) */
+    if(String(s.next||'')<(s.at?D._autoSince:(D._pendSince||today())))return;
     let guard=0;
     while(guard++<24&&chargedAlready(s)){
       const d=s.next;
@@ -2108,10 +2118,12 @@ function autoCharge(){
   if(done.length){sortTxns();save();}
   return done;
 }
-function catchUp(){
+/* العوائد اللي فاتت بتتسجل لوحدها بس وقت إضافة الشهادة (ids)؛ غير كده العائد بيستنى «نزل» */
+function catchUp(ids){
   let n=0,tot=0;
+  if(!ids)return {n:0,tot:0};
   (D.certs||[]).forEach(c=>{
-    if(c.redeemed)return;
+    if(c.redeemed||ids.indexOf(c.id)<0)return;
     let guard=0;
     while(guard++<200){
       const d=certNext(c);
@@ -2131,13 +2143,15 @@ function catchUp(){
   return {n:n,tot:tot};
 }
 
-/* العائد الجاي نزل قبل ميعاده: بيتسجل بتاريخه ومبلغه الحقيقي، وميعاده بيتعدّى */
+/* العائد بيستنى لحد ما تقول «نزل» (من قبل ميعاده بأسبوع)، وبيتسجل بتاريخه ومبلغه الحقيقي */
 function certEarlyOk(c){
   if(!c||c.redeemed)return false;
   const d=certNext(c);
   if(c.end&&d>c.end)return false;
-  const n=daysTo(d);return n>0&&n<=7;
+  return daysTo(d)<=7;
 }
+/* العائد جه ميعاده ولسه مانزلش */
+const certWaiting=c=>certEarlyOk(c)&&daysTo(certNext(c))<=0;
 function certPayEarly(c,date,amt){
   const due=certNext(c);
   const t={id:uid(),book:'me',kind:isSave((D.accounts||[]).find(a=>a.id===c.account))?'yield':'income',
@@ -2180,6 +2194,7 @@ const subDups=s=>(s.payments||[]).filter(p=>p.dup&&!p.settled);
 const openDues=s=>(s.dues||[]).filter(d=>!d.got);
 const subEnded=s=>!!s.cancelAtEnd&&daysTo(s.next)<=0;
 function beforeChargeTime(s){
+  return false;
   if(!s.at||daysTo(s.next)!==0)return false;
   const p=String(s.at).split(':');
   const hh=Number(p[0])||0, mm=Number(p[1])||0;
@@ -3265,12 +3280,22 @@ function alertsPanel(){
     <div class="alert">
       ${RAIL(daysTo(s.next)<=0?1:3,s.next+' '+(s.at||''))}
       <span class="g"><span class="t">${esc(s.name)}</span>
-        <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):cycleLabel(s)} · ${whenLabel(s.next)}${(s.promo&&Number(s.promo.left)===0&&!s.promo.done)?' · الدفعة دي بالسعر العادي':''}</span></span>
+        <span class="s" style="display:block">${s.cycle==='trial'?(daysTo(s.next)<=0?(s.willRenew?'التجربة خلصت — حوّلها لاشتراك':'التجربة خلصت — كنت هتلغيها'):'التجربة بتنتهي'):(daysTo(s.next)<=0?'مستني الخصم':cycleLabel(s))} · ${whenLabel(s.next)}${(s.promo&&Number(s.promo.left)===0&&!s.promo.done)?' · الدفعة دي بالسعر العادي':''}</span></span>
       <div class="side">${s.cycle==='trial'?'':`<span class="vl" style="white-space:nowrap">${money(subPrice(s),s.cur)}</span>`}
 ${s.cycle==='trial'
         ?`<button class="chip sm" onclick="app.${(s.willRenew&&daysTo(s.next)<=0)?'convertNow':'goSubs'}('${s.id}')">${(s.willRenew&&daysTo(s.next)<=0)?'حوّلها':'شوفها'}</button>`
-        :(daysTo(s.next)<=0?`<button class="chip sm" onclick="app.paySub('${s.id}')">سجّل الدفع</button>`:'')}
+        :(daysTo(s.next)<=0?`<button class="chip sm on" onclick="app.subCharged('${s.id}')">اتخصم</button>${s.held===s.next?'':`<button class="chip sm" onclick="app.subHold('${s.id}')">لسه</button>`}`:'')}
       ${daysTo(s.next)>0?`<button class="chip sm" onclick="app.hideSubAlert('${s.id}')">شفتها</button>`:''}</div>
+    </div>`));
+
+  /* عائد شهادة جه ميعاده ومستني «نزل» */
+  if(book==='me')(D.certs||[]).filter(certWaiting).forEach(c=>rows.push(`
+    <div class="alert">
+      ${RAIL(1,certNext(c))}
+      <span class="g"><span class="t">${esc(c.name)}</span>
+        <span class="s" style="display:block">مستني العائد · ${whenLabel(certNext(c))}</span></span>
+      <div class="side"><span class="vl" style="color:var(--mint);white-space:nowrap">${money(c.monthly,'EGP')}</span>
+      <button class="chip sm on" onclick="app.certPayOpen('${c.id}',1)">نزل</button></div>
     </div>`));
 
   if(book==='me')(D.vouchers||[]).filter(v=>vchOpen(v)&&v.expiry&&daysTo(v.expiry)<=14).forEach(v=>rows.push(`
@@ -4812,10 +4837,6 @@ function wSubs(){
       ${subDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
       ${promoFields(subDraft,'app.subSet','app.subPick','subpromo')}
 
-      <label class="f">ساعة الخصم (اختياري)</label>
-      <input class="f" type="time" value="${esc(subDraft.at||'')}" onchange="app.subSetAt(this.value)">
-      <div class="hint">لو حددت ساعة، الدفعة هتتسجل لوحدها بعد الساعة دي، وهيطلعلك إشعار.</div>
-      <div class="hint">لو كتبتها، الاشتراك هيتسجل تلقائيًا أول ما تفتح البرنامج بعد الساعة دي. ولو سيبتها فاضية هيتسجل أول ما يعدي يوم الخصم.</div>
       <label class="f">الاشتراك ده متقسم مع ناس؟</label>
       ${yesNo('subsplit',subDraft.split,"((v)=>app.subPick('split',v))",'لأ، كله عليا')}
       ${subDraft.split?`
@@ -4861,7 +4882,7 @@ function wSubs(){
         ${(!trial&&s.promo&&Number(s.promo.left)>0)?`<div class="hint" style="margin-top:6px">سعر مخفض — العادي <span class="n">${fmt(s.amount)}</span> من دفعة ${dayLabel(promoEndDate(s.next,s.cycle,s.promo.left))}</div>`:''}
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted);margin-top:10px">
           ${(function(){const td=!subEnded(s)&&daysTo(s.next)===0;
-            return `<span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف'):cycleLabel(s)+' · الجاي')} ${td?'<b style="color:var(--clay);font-weight:500">النهارده</b>':(s.cancelAtEnd&&!subEnded(s)?'يوم ':'')+dayLabel(s.next)}${(!trial&&s.at)?' الساعة '+hhmm(s.at):''}</span>
+            return `<span>${trial?'التجربة بتنتهي':(s.cancelAtEnd?(subEnded(s)?'اتوقف يوم':'هيقف'):cycleLabel(s)+' · الجاي')} ${td?'<b style="color:var(--clay);font-weight:500">النهارده</b>':(s.cancelAtEnd&&!subEnded(s)?'يوم ':'')+dayLabel(s.next)}</span>
           ${td?'':`<span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>`}`;})()}
         </div>
         ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
@@ -4933,9 +4954,6 @@ function wSubs(){
           <label class="f">الخصم الجاي</label>
           <input class="f" type="date" value="${sDraft.next}" onchange="app.sdPick('next',this.value)">
 
-          <label class="f">ساعة الخصم (اختياري)</label>
-          <input class="f" type="time" value="${esc(sDraft.at||'')}" onchange="app.sdSetAt(this.value)">
-          <div class="hint">لو حددت ساعة، الدفعة هتتسجل لوحدها بعد الساعة دي، وهيطلعلك إشعار.</div>
           ${promoFields(sDraft,'app.sdSet','app.sdPick','sdpromo')}
 
           <label class="f">متقسم مع ناس؟</label>
@@ -5213,19 +5231,27 @@ function wCerts(){
         <span class="rail" style="background:#46C2A8"></span>
         <span class="nm">${esc(c.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
           <span style="display:block"><span class="n">${fmt(c.amount)}</span>${c.bank?' · '+esc(accName(c.bank)):''}</span>
-          <span style="display:block">${c.redeemed?'اتصرفت '+dLabel(c.redeemedOn):'العائد الجاي '+dayLabel(certNext(c))}</span>
+          <span style="display:block">${c.redeemed?'اتصرفت '+dLabel(c.redeemedOn):(certWaiting(c)?'<b style="color:var(--clay);font-weight:500">مستني العائد</b> من '+dayLabel(certNext(c)):'العائد الجاي '+dayLabel(certNext(c)))}</span>
           ${(!c.redeemed&&c.end)?`<span style="display:block">تجديد ${dayLabel(c.end)}</span>`:''}
           ${(!c.redeemed&&certSecuredBy(c))?`<span style="display:block">ضامنة ${esc(certSecuredBy(c).name)}</span>`:''}</span></span>
         <span class="vl" style="color:var(--mint)">${c.redeemed?'—':fmt(c.monthly)}</span>
       </div>
       <div class="chips" style="padding:0 16px 14px;margin-top:-4px;border-bottom:1px solid var(--line)">
+        ${certEarlyOk(c)?`<button class="chip sm${certWaiting(c)||certEarly===c.id?' on':''}" onclick="app.certPayOpen('${c.id}')">نزل؟</button>`:''}
         ${c.redeemed?'':`<button class="chip sm" onclick="app.startCertEdit('${c.id}')">${certEdit===c.id?'إخفاء':'عدّل'}</button>`}
         <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('cert'+c.id,`app.delCert('${c.id}')`)}</span>
       </div>
+      ${(certEarly===c.id&&certEarlyOk(c))?`<div style="padding:4px 16px 18px;background:var(--surf2)">
+        <label class="f" style="margin-top:12px">عائد ${dayLabel(certNext(c))} نزل يوم</label>
+        <input class="f" id="cerd" type="date" value="${certNext(c)<today()?certNext(c):today()}" max="${today()}">
+        <label class="f">نزل كام؟</label>
+        <input class="f" id="cera" type="text" inputmode="decimal" value="${n2(c.monthly)}" onfocus="this.select()" oninput="numFix(this,1)">
+        <div class="hint">المبلغ ده للشهر ده بس، والعائد الجاي هيستناك في ميعاده.</div>
+        <button class="btn" onclick="app.confirmCertEarly('${c.id}')">سجّل العائد</button>
+        <button class="btn ghost" onclick="app.certPayOpen('${c.id}')">إلغاء</button>
+      </div>`:''}
       ${certEdit===c.id?`<div style="padding:4px 16px 18px;background:var(--surf2)">
-        ${certEarlyOk(c)?`<label class="f" style="margin-top:12px">عائد ${dayLabel(certNext(c))} نزل بدري؟</label>
-        ${yesNo('cey'+c.id,certEarly===c.id,'app.certEarlyYN')}`:''}
-        ${certEarly===c.id&&certEarlyOk(c)?`
+        ${false?`
         <label class="f">نزل يوم</label>
         <input class="f" id="cerd" type="date" value="${today()}" max="${today()}">
         <label class="f">نزل كام؟</label>
@@ -6487,7 +6513,8 @@ const app=new Proxy({
     if(n.fee){D.txns=D.txns.filter(x=>x.id!==n.t);save();render();return;}
     const s=(D.subs||[]).find(x=>x.id===n.sid);
     const last=s&&s.payments&&s.payments[s.payments.length-1];
-    if(last&&last.t===n.t)app.undoSubPay(n.sid);else{save();render();}
+    /* التراجع عن تسجيل لوحده: الاشتراك يرجع «مستني الخصم» ومايتسجلش لوحده تاني */
+    if(last&&last.t===n.t){app.undoSubPay(n.sid);if(s)s.held=s.next;save();render();}else{save();render();}
   },
   go(t){if(t!=='scan')needsTxn=null;
     if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();if(scan.stage==='review')scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};}
@@ -6673,8 +6700,11 @@ const app=new Proxy({
     (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>!has(d.srcTxn)||d.got||(Number(d.gotAmount)||0)>0);
       /* دفعة اشتراك اتمسحت حركتها: الدفعة تفضل (عشان مايتسجلش تاني) ومن غير مصاريف تدبير مستنية */
       (s.payments||[]).forEach(p=>{if(has(p.t)){delete p.t;if(p.feePending){delete p.feePending;delete p.fee;}}});});
-    /* عائد شهادة اتمسح: الشهر يفضل متعلّم (عشان مايتسجلش تاني) */
-    (D.certs||[]).forEach(c=>(c.payments||[]).forEach(p=>{if(has(p.t))delete p.t;}));
+    /* عائد شهادة اتمسح: لو آخر عائد، الشهر بيرجع «مستني العائد»؛ لو عائد قديم، الشهر يفضل متعلّم */
+    (D.certs||[]).forEach(c=>{const ps=c.payments||[];
+      for(let k=ps.length-1;k>=0;k--){const p=ps[k];if(!has(p.t))continue;
+        const m=monthOf(p.due||p.d);
+        if(k===ps.length-1&&m===c.covered){ps.splice(k,1);c.covered=mAdd(m,-1);}else delete p.t;}});
     /* دفعة قسط اتمسحت: القسط يرجع مش مدفوع */
     (D.installments||[]).forEach(i=>{const ps=i.payments||[];
       if(!ps.some(p=>p.t&&has(p.t)))return;
@@ -7814,6 +7844,14 @@ const app=new Proxy({
     tab='wallet';wtab='subs';render();
     setTimeout(()=>{const el=document.getElementById('sub-'+id);if(el)el.scrollIntoView({block:'center'});},60);
   },
+  /* الاشتراك اتخصم النهارده: بالجنيه بيتسجل على طول، وبالدولار بيفتح خانة المحجوز */
+  subCharged(id){const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial'||daysTo(s.next)>0)return;
+    /* متأخر أكتر من يوم من غير «لسه»: بيتسجل بيوم ميعاده، غير كده بالنهارده */
+    const d=(daysTo(s.next)<0&&s.held!==s.next)?s.next:today();
+    if(s.cur==='USD'){app.paySub(id);paySubDate=d;render();return;}
+    paySubDate=d;app.confirmPaySub(id);},
+  /* لسه ماتخصمش: بيفضل مستني ومش هيتسجل لوحده آخر اليوم */
+  subHold(id){const s=D.subs.find(x=>x.id===id);if(!s)return;s.held=s.next;save();render();app.toast('هيفضل مستنيك');},
   toggleAddAcc(){showAddAcc=!showAddAcc;render();},
   toggleSubMore(id){subMore=subMore===id?null:id;confirmKey='';render();},
   startSubEdit(id){
@@ -7910,7 +7948,7 @@ const app=new Proxy({
     const amt=Number(onlyNum(sDraft.amount))||0;
     if(amt>0)s.amount=amt;
     if(sDraft.next&&sDraft.next!==s.next){s.next=sDraft.next;s.day=Number(s.next.slice(8,10))||undefined;}
-    s.cur=sDraft.cur;s.cycle=sDraft.cycle;s.at=sDraft.at||'';
+    s.cur=sDraft.cur;s.cycle=sDraft.cycle;
     if(sDraft.account&&(D.accounts||[]).some(a=>a.id===sDraft.account))s.account=sDraft.account;
     s.people=sDraft.split
       ?sDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:String(p.name||'').trim()||'حد',amount:Number(onlyNum(p.amount))}))
@@ -7980,7 +8018,10 @@ const app=new Proxy({
     const usd=s.cur==='USD'?subPrice(s):0;
     const hold=usd?holdFromBal(subAcc(s),paySubBal,0):0;
     const full=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):subPrice(s);
-    const t={id:uid(),book:'me',kind:'expense',amount:full,
+    /* دفعة الميعاد الحالي بنفس رقم التسجيل التلقائي: لو جهاز تاني سجّلها لوحده مايتكررش بعد المزامنة */
+    const dueNow=daysTo(s.next)<=0;
+    const tid=(dueNow&&!D.txns.some(x=>x.id===autoId('sub',s.id,s.next)))?autoId('sub',s.id,s.next):uid();
+    const t={id:tid,book:'me',kind:'expense',amount:full,
       cat:s.cat||'subs',account:subAcc(s),date:paySubDate,note:s.name,
       usd:usd||undefined,rate:usd?(hold>0?Math.round(hold/usd*100)/100:D.rate):undefined,
       hold:hold>0?true:undefined,pending:usd?true:undefined};
@@ -8270,11 +8311,13 @@ const app=new Proxy({
   startCertEdit(id){certEdit=certEdit===id?null:id;certEarly=null;render();},
   cancelCertEdit(){certEdit=null;certEarly=null;render();},
   certEarlyYN(v){certEarly=v?certEdit:null;render();},
+  certPayOpen(id,force){certEarly=(certEarly===id&&!force)?null:id;certEdit=null;tab='wallet';wtab='certs';render();},
   confirmCertEarly(cid){
     const c=(D.certs||[]).find(x=>x.id===cid);if(!certEarlyOk(c))return;
     const el=document.getElementById('cerd'), d=(el&&el.value)||today(), amt=numVal('cera');
     const last=(c.payments||[]).slice(-1)[0];
-    if(d>today()||d<=((last&&last.d)||c.start)){app.toast('التاريخ مش مظبوط');return;}
+    /* مايبقاش بعد النهارده، ولا قبل ميعاده بأكتر من أسبوع، ولا قبل آخر عائد اتسجل */
+    if(d>today()||d<dayShift(certNext(c),-7)||d<((last&&last.d)||c.start)){app.toast('التاريخ مش مظبوط');return;}
     if(!(amt>0))return;
     certPayEarly(c,d,amt);
     certEarly=null;certEdit=null;sortTxns();save();render();app.toast('اتسجل');
@@ -8317,7 +8360,7 @@ const app=new Proxy({
       const lg=certDraft.lastGot===undefined?certLastDue(certDraft):certDraft.lastGot;
       if(lg&&/^\d{4}-\d{2}$/.test(lg))c.covered=lg;}
     certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:certDraft.type};showCert=false;
-    const cu=catchUp();save();
+    const cu=catchUp([c.id]);save();
     if(cu.n)pushNote('اتقيد '+plural(cu.n,'عائد واحد','عائدين','عوائد','عائد')+' بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');save();
     render();
   },
