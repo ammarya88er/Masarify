@@ -200,6 +200,27 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .rl .pa{flex:0 0 34px;min-height:34px;}
 .rl .who{min-height:34px;min-width:44px;}
 .rl .x{min-width:40px;min-height:34px;margin-inline-start:auto;}
+/* الصنف في سطر واحد: العدد جنب الاسم، والتصنيف وتغيّر السعر تحته صغير، والسعر من غير خط */
+.rl.r1{flex-wrap:nowrap;align-items:center;gap:6px}
+.rl.r1 .nmb{flex:1 1 auto;min-width:0}
+.rl.r1 .nml{display:flex;align-items:center;gap:4px}
+.rl.r1 .qx{border:0!important;padding:0!important;min-height:0!important;font-size:11px;color:#B5AE9F}
+.rl.r1 .qx.on{color:#5C5648;font-weight:600}
+.rl.r1 .qx input{width:14px;font-size:11px}
+.rl.r1 .nm{flex:1;width:auto}
+.rl.r1 .sub{display:flex;gap:8px;align-items:center;margin-top:2px}
+.rl.r1 .ct{border:0!important;padding:0!important;min-height:0!important;font-size:11px;color:#6E6759}
+.rl.r1 .pa2{background:none;border:0;padding:0;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+.rl.r1 .ct{white-space:nowrap}
+.rl.r1 .pa2.up{color:#C0503F}.rl.r1 .pa2.down{color:#23835F}
+.rl.r1 input.vl{border:0!important;flex:0 0 64px;width:64px}
+.rl.r1 .who{min-height:32px;min-width:40px}
+.rl.r1 .x{min-width:30px;margin:0!important}
+.rl.r1 .ct.ph{color:#B5AE9F}
+.rl.r1 .ct,.rl.r1 .pa2{padding:7px 0!important;margin:-7px 0}
+.rl.r1 .who{max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rl.r1 input.vl{flex:0 0 72px;width:72px}
+.rl.r1 .qx input{width:18px}
 .rt{display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;margin-top:6px;
   border-top:1px dashed #B9B3A6;font-weight:600;font-size:16px;font-family:var(--f-disp);}
 .rt span:last-child{font-family:var(--f-num);direction:ltr;}
@@ -3014,54 +3035,80 @@ function applyTheme(){
 }
 try{applyTheme();const mq=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)');
   if(mq&&mq.addEventListener)mq.addEventListener('change',applyTheme);}catch(e){}
-/* ملخص الشهر كصورة تتبعت */
-async function monthCanvas(){
-  const M=monthStats(), cv=document.createElement('canvas');
-  if(!cv||!cv.getContext)return null;
-  /* الطول على قد المحتوى: التصنيفات (لحد ٤) والحاجات التانية تحتها */
-  const W=1080,H=700+Math.max(1,Math.min(4,M.byCat.length))*105+40+3*52+80;cv.width=W;cv.height=H;
-  const x=cv.getContext('2d');
-  await canvasFonts();
-  const C=CV, AR=CV.AR, DS=CV.DS, NM=CV.NM;
-  x.fillStyle=C.bg;x.fillRect(0,0,W,H);x.direction='rtl';x.textBaseline='alphabetic';
-  const R=W-80, L=80;
-  const txt=(t,px,py,font,col,al,ltr)=>{x.font=font;x.fillStyle=col;x.direction=ltr?'ltr':'rtl';x.textAlign=al||'right';x.fillText(t,px,py);};
-  const box=(bx,by,bw,bh,rr)=>{x.beginPath();if(x.roundRect)x.roundRect(bx,by,bw,bh,rr);else x.rect(bx,by,bw,bh);x.fillStyle=C.surf;x.fill();};
-  txt('مصاريفي',R,110,'500 30px '+AR,C.muted);
-  txt('ملخص الشهر',R,190,'700 68px '+DS,C.text);
-  txt(M.title,R,245,'500 32px '+AR,C.muted);
-  const diff=Math.round((M.earned-M.spent)*100)/100;
-  const st=[['المصروف',M.spent,C.clay],['الدخل',M.earned,C.mint],['الفرق',diff,diff<0?C.clay:C.mint]];
-  const bw=(W-2*L-2*24)/3;
-  st.forEach((s,i)=>{const bx=R-(i+1)*bw-i*24;box(bx,290,bw,170,26);
-    txt((s[1]<0?'−':'')+fmt(Math.abs(Math.round(s[1]))),bx+bw/2,380,'600 44px '+NM,s[2],'center',1);
-    txt(s[0],bx+bw/2,428,'500 28px '+AR,C.muted,'center');});
-  const say=!M.earned?'لسه ماسجلتش دخل في الفترة دي.'
-    :diff>=0?(M.running?'لحد دلوقتي فاضلك '+fmt(Math.round(diff))+' جنيه.':'الشهر ده قفل على خير — فضلك '+fmt(Math.round(diff))+' جنيه.')
-    :(M.running?'لحد دلوقتي الصرف سابق الدخل بـ '+fmt(Math.round(-diff))+' جنيه.':'الشهر ده الصرف سبق الدخل بـ '+fmt(Math.round(-diff))+' جنيه.');
-  txt(say,R,535,'600 36px '+AR,C.text);
-  txt('راح فين',R,630,'700 40px '+DS,C.text);
-  const top=M.byCat.slice(0,4);
-  if(!top.length)txt('مفيش مصاريف مسجلة.',R,700,'500 30px '+AR,C.muted);
-  top.forEach(([id,v],i)=>{const c=catOf(id), y=700+i*105;
-    txt(c.label,R,y,'500 32px '+AR,C.text);
-    txt(fmt(Math.round(v))+'  ·  '+Math.round(v/M.gross*100)+'%',L,y,'600 30px '+NM,c.color,'left',1);
-    x.fillStyle=C.line;x.fillRect(L,y+24,R-L,12);
-    const w=(R-L)*Math.max(0,Math.min(1,v/M.max));x.fillStyle=c.color;x.fillRect(R-w,y+24,w,12);});
-  /* حاجات تانية عن الشهر */
-  const ex=M.mt.filter(t=>t.kind==='expense'), byDay={};
-  ex.forEach(t=>byDay[t.date]=(byDay[t.date]||0)+mySpend(t));
-  const big=Object.entries(byDay).sort((a,b)=>b[1]-a[1])[0];
-  const facts=[];
-  if(ex.length)facts.push('سجلت '+plural(ex.length,'مصروف واحد','مصروفين','مصاريف','مصروف'));
-  if(big)facts.push('أكتر يوم صرفت فيه: '+shortDay(big[0])+' ('+fmt(Math.round(big[1]))+')');
-  if(M.byInc.length){const i0=M.byInc[0][0];facts.push('أغلب دخلك من: '+(i0==='fx'?'فرق عملة':((D.icats||[]).find(c=>c.id===i0)||DEF_ICATS[1]).label));}
-  const fy=700+Math.max(1,top.length)*105+40;
-  facts.forEach((f,i)=>txt('•  '+f,R,fy+i*52,'500 30px '+AR,C.muted));
-  txt(dayLabel(today()),L,H-50,'500 24px '+AR,C.muted,'left');
-  return cv;
+/* ---------- ملخص الشهر ----------
+   بيظهر لوحده لما تسجل المرتب، عن الشهر اللي خلص. فيه المصروف والدخل والباقي،
+   وكل التصنيفات، و«ممكن تقلل من»: حاجات عالية جوه تصنيفها (اتجابت ٣ مرات أو أكتر،
+   أو أكتر من ربع التصنيف) — من غير الأقساط والفواتير والاشتراكات وفلوس الناس. */
+let sumOpen=false;
+const SUM_SKIP=['installment','lentcat','bills','subs','fees'];
+/* الشهر اللي خلص: الفترة اللي قبل آخر مرتب (أو الشهر اللي فات لو الشهور بالتقويم والمرتب نزل الشهر ده) */
+function lastDonePeriod(){
+  const pers=salaryPeriods();
+  if(pers){if(pers.length<2)return null;const p=pers[1];
+    return {key:p.key,from:p.from,to:p.to,title:'الشهر من '+shortDay(p.from)+' لـ '+shortDay(p.to)};}
+  const cm=monthOf(today());
+  if(!D.txns.some(t=>(t.book||'me')==='me'&&t.kind==='income'&&t.salary&&monthOf(t.date)===cm))return null;
+  const pm=mAdd(cm,-1);
+  return {key:'m:'+pm,from:pm+'-01',to:dayShift(cm+'-01',-1),title:mLabel(pm)};
 }
-/* أرقام الشهر اللي مختاره في الرئيسية — بتستخدمها الرئيسية وصورة الملخص */
+/* الفترة المختارة في «حركة الشهر» */
+function monthRange(){
+  const pers=salaryPeriods();
+  if(pers){const p=pers.find(x=>x.key===month)||pers[0];return {key:p.key,from:p.from,to:p.to};}
+  const m=/^\d{4}-\d{2}$/.test(month)?month:monthOf(today());
+  return {key:'m:'+m,from:m+'-01',to:dayShift(mAdd(m,1)+'-01',-1)};
+}
+/* أصناف المصروف اللي ليك (من غير نصيب الناس)، بنفس توزيع breakdown */
+function itemParts(t){
+  const g=grossOf(t);let parts;
+  if(!(t.items&&t.items.length))parts=[{cat:t.cat||'other',name:String(t.note||t.merchant||t.place||'').trim(),n:1,amount:g}];
+  else{const raw=t.items.reduce((a,i)=>a+(Number(i.amount)||0),0), r=raw>0?g/raw:1;
+    parts=t.items.filter(i=>!i.who).map(i=>({cat:i.cat||'other',name:String(i.name||'').trim(),n:Math.max(1,Number(i.qty)||1),amount:(Number(i.amount)||0)*r}));}
+  const mine=parts.reduce((a,p)=>a+p.amount,0), sh=Math.min(shareOut(t),mine);
+  if(sh>0.005&&mine>0){const k=1-sh/mine;parts.forEach(p=>{p.amount*=k;});}
+  return parts;
+}
+function periodSummary(from,to){
+  const mt=D.txns.filter(t=>(t.book||'me')==='me'&&t.date>=from&&t.date<=to);
+  const ex=mt.filter(t=>t.kind==='expense');
+  const r2=x=>Math.round(x*100)/100;
+  const spent=r2(ex.reduce((a,t)=>a+mySpend(t),0));
+  const earned=r2(mt.filter(t=>t.kind==='income'&&!t.repay).reduce((a,t)=>a+egpOf(t),0)+mt.reduce((a,t)=>a+(Number(t.fxGain)||0),0));
+  const cm={};ex.forEach(t=>breakdown(t).forEach(x=>cm[x.cat]=(cm[x.cat]||0)+x.amount));
+  const byCat=Object.entries(cm).filter(x=>x[1]>0.005).sort((a,b)=>b[1]-a[1]);
+  /* «اتجاب كام مرة» = عدد المرات اللي اشتريته فيها (مش العدد جوه الفاتورة) */
+  const im={};ex.forEach(t=>{const seen={};itemParts(t).forEach(p=>{if(!p.name||SUM_SKIP.indexOf(p.cat)>-1)return;
+    const k=p.cat+'|'+pk(p.name);if(!im[k])im[k]={name:p.name,cat:p.cat,n:0,amount:0};if(!seen[k]){im[k].n++;seen[k]=1;}im[k].amount+=p.amount;});});
+  const kinds={};Object.values(im).forEach(i=>kinds[i.cat]=(kinds[i.cat]||0)+1);
+  const high=Object.values(im).filter(i=>{const ct=cm[i.cat]||0;
+    return i.amount>=50&&(i.n>=3||(kinds[i.cat]>=2&&ct>0&&i.amount>ct*0.25));})
+    .map(i=>({name:i.name,cat:i.cat,n:i.n,amount:r2(i.amount),pct:Math.round(i.amount/(cm[i.cat]||1)*100)}))
+    .sort((a,b)=>b.amount-a.amount).slice(0,8);
+  return {spent,earned,left:r2(earned-spent),byCat,high,gross:byCat.reduce((a,x)=>a+x[1],0)||1,max:byCat.length?byCat[0][1]:1};
+}
+function sumBody(P){
+  const S=periodSummary(P.from,P.to);
+  return `<div class="stats" style="margin-top:6px">
+      <div class="stat"><b style="color:var(--clay)">${fmt(Math.round(S.spent))}</b><span>صرفت</span></div>
+      <div class="stat"><b style="color:var(--mint)">${fmt(Math.round(S.earned))}</b><span>دخلك</span></div>
+      <div class="stat"><b style="color:${S.left<0?'var(--clay)':'var(--mint)'}">${fmt(Math.round(Math.abs(S.left)))}</b><span>${S.left<0?'صرفت زيادة':'فاضل'}</span></div>
+    </div>
+    <h4 style="font-size:13px;margin:18px 0 10px">صرفت على إيه</h4>
+    ${S.byCat.length?S.byCat.map(([id,v])=>{const c=catOf(id);return `
+      <div class="cat">
+        <div class="cat-t"><span>${esc(c.label)}</span>
+          <span class="r"><span class="pc">${Math.round(v/S.gross*100)}%</span>
+          <span class="am" style="color:${c.color}">${fmt(Math.round(v*100)/100)}</span></span></div>
+        <div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,(v/S.max)*100))}%;background:${c.color}"></div></div>
+      </div>`;}).join(''):'<div class="empty">مفيش مصاريف في الفترة دي.</div>'}
+    <h4 style="font-size:13px;margin:18px 0 6px">ممكن تقلل من</h4>
+    ${S.high.length?`<div class="hint" style="margin:0 0 8px">حاجات اتجابت كتير أو واخدة جزء كبير من تصنيفها.</div>
+      <div class="panel">${S.high.map(i=>`<div class="arow">
+        <span class="nm">${esc(i.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${esc(catOf(i.cat).label)} · ${i.n>1?plural(i.n,'مرة','مرتين','مرات','مرة')+' · ':''}${i.pct}% من التصنيف</span></span>
+        <span class="vl n">${fmt(i.amount)}</span></div>`).join('')}</div>`
+      :'<div class="hint">مفيش حاجة عالية على تصنيفها في الفترة دي.</div>'}`;
+}
+/* أرقام الشهر اللي مختاره في الرئيسية */
 function monthStats(){
   const mine=D.txns.filter(t=>(t.book||'me')==='me');
   const pers=salaryPeriods();
@@ -3100,10 +3147,14 @@ function vHome(){
   const mine=D.txns.filter(t=>(t.book||'me')==='me');
   const {mt,pills,periodNote,spent,earned,byCat,gross,max,byInc,ginc,imax}=monthStats();
 
+  const done=lastDonePeriod();
   return `
   ${autoNoteHtml()}
   ${installHtml()}
   ${alertsPanel()}
+  ${(done&&D.sumSeen!==done.key)?`<div class="sec" style="margin-top:24px">
+    <div class="sec-h"><h3>ملخص ${esc(done.title)}</h3><button class="chip sm" aria-label="اقفل" onclick="app.sumHide('${done.key}')">✕</button></div>
+    ${sumBody(done)}</div>`:''}
 
   <div class="sec" style="margin-top:24px">
     <div class="panel">${accountsFor('me').map(a=>acctRow(a,b)).join('')}</div>
@@ -3117,7 +3168,8 @@ function vHome(){
       <div class="stat"><b style="color:var(--mint)">${fmt(earned)}</b><span>الدخل</span></div>
       <div class="stat"><b style="color:${earned-spent<0?'var(--clay)':'var(--mint)'}">${fmt(earned-spent)}</b><span>الفرق</span></div>
     </div>
-    <button class="btn ghost" onclick="app.shareMonth()">ابعت ملخص الشهر كصورة</button>
+    <button class="btn ghost" onclick="app.sumToggle()">${sumOpen?'اقفل ملخص الشهر':'ملخص الشهر'}</button>
+    ${sumOpen?sumBody(monthRange()):''}
   </div>
 
   <div class="sec">
@@ -4297,15 +4349,14 @@ function vScan0(){
       <div class="receipt">
         <div class="rh"><b>${esc(scan.merchant||(scan.manual?'فاتورة بإيدك':'فاتورة'))}</b><div style="direction:rtl;font-family:var(--f-body)">${scan.date?dayLabel(scan.date)+' · ':''}${nItems(scan.items.length)}</div></div>
         ${scan.items.map((it,k)=>`
-        <div class="rl">
-          <textarea class="nm" rows="1" aria-label="اسم الصنف" placeholder="اسم الصنف" oninput="app.iset(${k},'name',this.value);fitNm(this)" onchange="app.itemNameDone(${k})">${esc(it.name)}</textarea>
-          <input class="vl" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${Number(it.amount)?it.amount:''}" onfocus="this.select()" oninput="app.iset(${k},'amount',numFix(this,1))">
-          <span class="br"></span>
-          <span class="qx${Number(it.qty)>1?' on':''}" dir="ltr">×<input aria-label="العدد" type="text" inputmode="numeric" value="${Number(it.qty)||1}" onfocus="this.select()" oninput="app.iset(${k},'qty',numFix(this,0))" onchange="app.qtyDone()"></span>
-          <span class="ct${it.cat?'':' ph'}">${it.cat?esc(catOf(it.cat).label):'التصنيف'}<select aria-label="التصنيف" onchange="app.setItemCat(${k},this.value)">
+        <div class="rl r1">
+          <div class="nmb">
+            <div class="nml"><span class="qx${Number(it.qty)>1?' on':''}" dir="ltr">×<input aria-label="العدد" type="text" inputmode="numeric" value="${Number(it.qty)||1}" onfocus="this.select()" oninput="app.iset(${k},'qty',numFix(this,0))" onchange="app.qtyDone()"></span><textarea class="nm" rows="1" aria-label="اسم الصنف" placeholder="اسم الصنف" oninput="app.iset(${k},'name',this.value);fitNm(this)" onchange="app.itemNameDone(${k})">${esc(it.name)}</textarea></div>
+            <div class="sub"><span class="ct${it.cat?'':' ph'}">${it.cat?esc(catOf(it.cat).label):'التصنيف'} ▾<select aria-label="التصنيف" onchange="app.setItemCat(${k},this.value)">
             ${it.cat?'':'<option value="" selected disabled hidden>التصنيف</option>'}${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${esc(c.label)}</option>`).join('')}
-          </select></span>
-          ${(function(){const h=itemLast(it.name,it.amount,it.qty);return h&&Math.abs(h.pct)>=1?`<button class="pa ${h.pct>0?'up':'down'}" aria-label="${h.pct>0?'السعر زاد':'السعر قل'}" onclick="app.priceFor(${k})">${h.pct>0?'↑':'↓'}</button>`:'';})()}
+          </select></span>${(function(){const h=itemLast(it.name,it.amount,it.qty);return h&&Math.abs(h.pct)>=1?`<button class="pa2 ${h.pct>0?'up':'down'}" aria-label="${h.pct>0?'السعر زاد':'السعر قل'}" onclick="app.priceFor(${k})">${h.pct>0?'↑ أغلى':'↓ أرخص'}</button>`:'';})()}</div>
+          </div>
+          <input class="vl" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${Number(it.amount)?it.amount:''}" onfocus="this.select()" oninput="app.iset(${k},'amount',numFix(this,1))">
           ${needsTxn?'':`<button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?esc(bookName()):(it.who?esc(it.who):'ليا')}</button>`}
           <button class="x" onclick="app.delItem(${k})">×</button>
         </div>
@@ -7639,7 +7690,8 @@ const app=new Proxy({
   setTheme(v){try{localStorage.setItem(TKEY,v);}catch(e){}applyTheme();render();},
   async doInstall(){if(!installEvt)return;const e=installEvt;installEvt=null;try{e.prompt();await e.userChoice;}catch(x){}render();},
   noInstall(){try{localStorage.setItem('masareef:noinstall',today());}catch(e){}render();},
-  async shareMonth(){shareCanvas(await monthCanvas(),'masareef-summary.png','ملخص الشهر');},
+  sumHide(k){D.sumSeen=k;save();render();},
+  sumToggle(){sumOpen=!sumOpen;render();},
   async shareReport(from,to){shareCanvas(await reportCanvas(officeReport(from||periodFrom(),to||closeTo)),'masareef-report.png','تقرير عهدة '+bookName());},
   welAdd(kind){
     const map={cash:['كاش','كاش'],bank:['حساب بنكي','حساب بنكي'],
@@ -8665,7 +8717,7 @@ const app=new Proxy({
     if(!v){book='me';try{localStorage.setItem(BKEY,'me');}catch(e){}}
     save();render();
   },
-  setMonthMode(m){D.monthMode=m;month='';save();render();},
+  setMonthMode(m){D.monthMode=m;month=m==='cal'?monthOf(today()):'';save();render();},
   saveOfeeLimit(){
     const v=numVal('ofeelim');
     if(v>0){D.ofeeLimit=v;setsOpen={};save();app.toast('اتحفظ');}
