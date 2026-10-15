@@ -140,6 +140,7 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .money span{position:absolute;inset-inline-end:22px;top:50%;transform:translateY(-50%);
   color:var(--muted);font-size:13px;}
 .chips{display:flex;flex-wrap:wrap;gap:8px;}
+.chips+.chips{margin-top:8px;}
 .chip{border:1px solid var(--line);background:var(--surf);color:var(--tx2);border-radius:12px;
   padding:8px 12px;font:inherit;font-size:12.5px;cursor:pointer;transition:.15s;}
 .chip.on{background:var(--accent);color:var(--on);border-color:var(--accent);font-weight:600;}
@@ -3891,6 +3892,15 @@ function draftIcat(){
   if(draft.salary===undefined&&!draft.icat)return '';
   return draft.salary?'salary':(draft.icat||'other_in');
 }
+/* «فيه جزء من كاش العهدة؟» بيظهر بس لما يبقى ليه معنى: بتدفع من حساب كاش وفيه فلوس في كاش العهدة
+   (أو الحركة اللي بتعدلها كان فيها جزء منها) */
+function floatAsk(){
+  if(draft.fromFloat)return true;
+  const a=D.accounts.find(x=>x.id===draft.account);
+  if(!a||a.atype!=='cash')return false;
+  const ob=balances('office');
+  return officeAccs().some(x=>x.scope==='office'&&x.atype==='cash'&&(ob[x.id]||0)>0.005);
+}
 /* صف التصنيف: لو اتختار لوحده من آخر مرة بيتكتب كده */
 const catRowHtml=()=>pickRow('cat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),draft.cat,'app.setCat')
   +((draft.cat&&draft.catAuto&&!draft.catPicked)?'<div class="hint">اتختار من آخر مرة سجلت حاجة زيها — غيّره لو مش هو.</div>':'');
@@ -4121,7 +4131,7 @@ function vAdd0(){
       <div id="catrow">${catRowHtml()}</div>`:''}
 
     ${(k==='expense'&&!fxA&&draft.account!=='__other__'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
-      ${officeOn()?`<label class="f">فيه جزء من كاش العهدة؟</label>
+      ${(officeOn()&&floatAsk())?`<label class="f">فيه جزء من كاش العهدة؟</label>
       ${yesNo('fromFloat',draft.fromFloat,'app.setFromFloat')}
       ${draft.fromFloat&&officeAccs().length>1?`<label class="f">خدته من أنهي حساب في العهدة؟</label>
         ${pickRow('floatAcct',officeAccs().map(a=>({id:a.id,label:esc(a.name)})),draft.floatAcct||officeCashId(),'app.setFloatAcct',1)}`:''}
