@@ -3036,11 +3036,12 @@ function applyTheme(){
 try{applyTheme();const mq=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)');
   if(mq&&mq.addEventListener)mq.addEventListener('change',applyTheme);}catch(e){}
 /* ---------- ملخص الشهر ----------
-   بيظهر لوحده لما تسجل المرتب، عن الشهر اللي خلص. فيه المصروف والدخل والباقي،
-   وكل التصنيفات، و«ممكن تقلل من»: حاجات عالية جوه تصنيفها (اتجابت ٣ مرات أو أكتر،
-   أو أكتر من ربع التصنيف) — من غير الأقساط والفواتير والاشتراكات وفلوس الناس. */
-let sumOpen=false;
-const SUM_SKIP=['installment','lentcat','bills','subs','fees'];
+   لما تسجل المرتب بيظهر سطر صغير «ملخص الشهر اللي فات جاهز» تفتحه وقت ما تحب.
+   فيه المصروف والدخل والباقي، وكل التصنيفات، و«ممكن تقلل من»: حاجات بقت عادة —
+   اتشرت مرتين على الأقل، و٥٠ جنيه أو أكتر، و(٣ مرات و١٠٪ من تصنيفها أو أكتر من ربعه).
+   من غير الأقساط والفواتير والاشتراكات وفلوس الناس والرسوم والبنزين والصيانة والدوا والأجهزة والتبرعات. */
+let sumOpen=false, sumNew=false;
+const SUM_SKIP=['installment','lentcat','bills','subs','fees','fuel','repair','health','devices','donation'];
 /* الشهر اللي خلص: الفترة اللي قبل آخر مرتب (أو الشهر اللي فات لو الشهور بالتقويم والمرتب نزل الشهر ده) */
 function lastDonePeriod(){
   const pers=salaryPeriods();
@@ -3081,7 +3082,8 @@ function periodSummary(from,to){
     const k=p.cat+'|'+pk(p.name);if(!im[k])im[k]={name:p.name,cat:p.cat,n:0,amount:0};if(!seen[k]){im[k].n++;seen[k]=1;}im[k].amount+=p.amount;});});
   const kinds={};Object.values(im).forEach(i=>kinds[i.cat]=(kinds[i.cat]||0)+1);
   const high=Object.values(im).filter(i=>{const ct=cm[i.cat]||0;
-    return i.amount>=50&&(i.n>=3||(kinds[i.cat]>=2&&ct>0&&i.amount>ct*0.25));})
+    /* عادة مش مرة واحدة: اتشرت مرتين على الأقل، ومش مبلغ صغير جوه تصنيفها */
+    return i.amount>=50&&i.n>=2&&ct>0&&((i.n>=3&&i.amount>=ct*0.1)||(kinds[i.cat]>=2&&i.amount>ct*0.25));})
     .map(i=>({name:i.name,cat:i.cat,n:i.n,amount:r2(i.amount),pct:Math.round(i.amount/(cm[i.cat]||1)*100)}))
     .sort((a,b)=>b.amount-a.amount).slice(0,8);
   return {spent,earned,left:r2(earned-spent),byCat,high,gross:byCat.reduce((a,x)=>a+x[1],0)||1,max:byCat.length?byCat[0][1]:1};
@@ -3153,8 +3155,10 @@ function vHome(){
   ${installHtml()}
   ${alertsPanel()}
   ${(done&&D.sumSeen!==done.key)?`<div class="sec" style="margin-top:24px">
-    <div class="sec-h"><h3>ملخص ${esc(done.title)}</h3><button class="chip sm" aria-label="اقفل" onclick="app.sumHide('${done.key}')">✕</button></div>
-    ${sumBody(done)}</div>`:''}
+    <div class="sec-h" style="${sumNew?'':'margin-bottom:0'}"><h3 style="font-size:14px">ملخص الشهر اللي فات جاهز</h3>
+      <span style="display:flex;gap:8px"><button class="chip sm${sumNew?' on':''}" onclick="app.sumNewToggle()">${sumNew?'اقفله':'افتحه'}</button>
+      <button class="chip sm" aria-label="شيله" onclick="app.sumHide('${done.key}')">✕</button></span></div>
+    ${sumNew?`<div class="hint" style="margin:-4px 0 10px">${esc(done.title)}</div>${sumBody(done)}`:''}</div>`:''}
 
   <div class="sec" style="margin-top:24px">
     <div class="panel">${accountsFor('me').map(a=>acctRow(a,b)).join('')}</div>
@@ -7690,8 +7694,9 @@ const app=new Proxy({
   setTheme(v){try{localStorage.setItem(TKEY,v);}catch(e){}applyTheme();render();},
   async doInstall(){if(!installEvt)return;const e=installEvt;installEvt=null;try{e.prompt();await e.userChoice;}catch(x){}render();},
   noInstall(){try{localStorage.setItem('masareef:noinstall',today());}catch(e){}render();},
-  sumHide(k){D.sumSeen=k;save();render();},
+  sumHide(k){D.sumSeen=k;sumNew=false;save();render();},
   sumToggle(){sumOpen=!sumOpen;render();},
+  sumNewToggle(){sumNew=!sumNew;render();},
   async shareReport(from,to){shareCanvas(await reportCanvas(officeReport(from||periodFrom(),to||closeTo)),'masareef-report.png','تقرير عهدة '+bookName());},
   welAdd(kind){
     const map={cash:['كاش','كاش'],bank:['حساب بنكي','حساب بنكي'],
