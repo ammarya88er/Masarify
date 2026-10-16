@@ -795,6 +795,11 @@ function normalizeData(){
   if(D.lastClose===undefined)D.lastClose='';
   if(D.lastBackup===undefined)D.lastBackup='';
   /* كاش العهدة بيتعمل مرة واحدة بس؛ لو مسحته مابيرجعش */
+  /* أسامي الأصناف: حروف مخفية ومسافات غريبة (من قراءة الصور) كانت بتخلي نفس الاسم يبان اسمين */
+  if(!D._nmclean){const fx=i=>{if(i&&typeof i.name==='string'){const c=cleanNm(i.name);if(c!==i.name)i.name=c;}};
+    (D.txns||[]).forEach(t=>(t.items||[]).forEach(fx));Object.values(D.ops||{}).forEach(o=>{if(o&&o.d&&Array.isArray(o.d.items))o.d.items.forEach(fx);});
+    if(Array.isArray(D.nameNo))D.nameNo=[...new Set(D.nameNo.map(k=>{const p=String(k).split('||');return p.length===2?[cleanNm(p[0]),cleanNm(p[1])].sort().join('||'):k;}))];
+    D._nmclean=1;}
   if(!D._ocash1){if(D.accounts.length&&!D.accounts.some(a=>a.id==='ocash'))D.accounts.push({id:'ocash',name:'كاش العهدة',opening:0,scope:'office'});D._ocash1=1;}
   D.accounts.forEach(a=>{if(!a.scope)a.scope=(a.id==='bank'?'both':a.id==='ocash'?'office':'me');});
   D.txns.forEach(t=>{if(!t.book)t.book='me';});
@@ -4305,6 +4310,8 @@ function catSuggest(note,place){
    والكلام العام زي «مشروب طاقة»، ونوحّد الإملاء زي أ/ا وة/ه وغ/ج).
    حجمين مختلفين (١٠٠ جرام و٢٠٠ جرام) مش شبه بعض عشان مقارنة الأسعار.
    الاقتراح بيوحّد على الأكتر تكرار، ولو واحد فيه الحجم والتاني لأ فعلى اللي فيه الحجم. */
+/* اسم الصنف من غير حروف مخفية ولا مسافات زيادة، وأرقامه إنجليزي — شكله زي ما هو */
+const cleanNm=x=>toEn(String(x==null?'':x)).replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u0640\u061C\u00AD]/g,'').replace(/[\s\u00A0]+/g,' ').trim();
 const NM_UNITS=['جرام','جم','جرامات','كيلو','كجم','لتر','مل','ملي','kg','g','gm','ml','l','بيضات','بيضه','قطعه','قطع'];
 const NM_UNIT1={'جم':'جرام','جرامات':'جرام','g':'جرام','gm':'جرام','كجم':'كيلو','kg':'كيلو','ملي':'مل','ml':'مل','l':'لتر','بيضه':'بيضات','قطع':'قطعه'};
 const NM_GEN=['مشروب','طاقه'];
@@ -4328,8 +4335,9 @@ function nameIndex(){
   const key=D._sv+'|'+D.txns.length+'|'+(D.nameNo||[]).length;
   if(_nmIdx&&_nmKey===key)return _nmIdx;
   const m={};
-  D.txns.forEach(t=>{if((t.book||'me')!=='me')return;(t.items||[]).forEach(i=>{const n=String(i.name||'').trim();if(!n||i.who)return;
-    if(!m[n])m[n]={name:n,n:0,cats:{}};m[n].n++;const c=i.cat||'other';m[n].cats[c]=(m[n].cats[c]||0)+1;});});
+  D.txns.forEach(t=>{if((t.book||'me')!=='me')return;(t.items||[]).forEach(i=>{const n=cleanNm(i.name);if(!n||i.who)return;
+    if(!m[n])m[n]={name:n,n:0,cats:{},last:null};m[n].n++;const c=i.cat||'other';m[n].cats[c]=(m[n].cats[c]||0)+1;
+    const u=(Number(i.amount)||0)/(Number(i.qty)||1);if(u>0&&(!m[n].last||t.date>m[n].last.d))m[n].last={d:t.date,p:Math.round(u*100)/100};});});
   Object.values(m).forEach(x=>{x.cat=Object.keys(x.cats).sort((a,b)=>x.cats[b]-x.cats[a])[0];x.info=nmInfo(x.name);x.size=!!x.info.size;});
   _nmIdx=m;_nmKey=key;_nmPairs=null;return m;
 }
@@ -4352,7 +4360,7 @@ function simPairs(){
 /* وانت بتكتب صنف: اسم قديم شبهه يبقى أحسن منه */
 let simNoSet={};
 function simFor(name,cat){
-  name=String(name||'').trim();if(!name||!cat||simNoSet[toEn(name)])return null;
+  name=cleanNm(name);if(!name||!cat||simNoSet[name])return null;
   const idx=nameIndex(), inf=nmInfo(name), me=idx[name]||{name:name,n:0,size:!!inf.size};
   let best=null;
   Object.values(idx).forEach(x=>{if(x.name===name||x.cat!==cat||!nmSimilar(x.info,inf)||nmIsNo(x.name,name))return;
@@ -5823,8 +5831,9 @@ function vSettings(){
     ${(function(){const P=simPairs();return setCard('',[setSec('names','أسامي الأصناف',P.length?plural(P.length,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح'):'',()=>`
       <p class="hint" style="margin-top:0">أسامي في فواتيرك شكلها نفس الحاجة. لو وحّدتها، الاسم بيتغيّر في كل الفواتير القديمة، ومقارنة الأسعار والملخص بيحسبوها حاجة واحدة.</p>
       ${P.length?P.map(p=>`<div class="simp">
-        <div><b><bdi>${esc(p.to.name)}</bdi></b> <span class="mut">${plural(p.to.n,'مرة','مرتين','مرات','مرة')}</span></div>
-        <div><bdi>${esc(p.from.name)}</bdi> <span class="mut">${plural(p.from.n,'مرة','مرتين','مرات','مرة')} · ${esc(catOf(p.to.cat).label)}</span></div>
+        <div><b><bdi>${esc(p.to.name)}</bdi></b> <span class="mut">${plural(p.to.n,'مرة','مرتين','مرات','مرة')}${p.to.last?' · آخر سعر <span class="n">'+fmt(p.to.last.p)+'</span>':''}</span></div>
+        <div><bdi>${esc(p.from.name)}</bdi> <span class="mut">${plural(p.from.n,'مرة','مرتين','مرات','مرة')}${p.from.last?' · آخر سعر <span class="n">'+fmt(p.from.last.p)+'</span>':''}</span></div>
+        <div class="mut">${esc(catOf(p.to.cat).label)}</div>
         <div class="chips" style="margin-top:10px">
           <button class="chip sm on" onclick="app.nameMerge('${jsArg(p.from.name)}','${jsArg(p.to.name)}','${p.to.cat}')">وحّدهم على «${esc(p.to.name)}»</button>
           <button class="chip sm" onclick="app.nameMerge('${jsArg(p.to.name)}','${jsArg(p.from.name)}','${p.to.cat}')">على «${esc(p.from.name)}»</button>
@@ -6438,6 +6447,7 @@ function opWrap(o,f,k,args){
   const form=OPFORMS[k];
   /* نوع الدخل اللي اتعرف لوحده بيتثبت في العملية، وعلامة «اخترت التصنيف بنفسك» مش من الخانات */
   if(!editOp&&form==='entry'&&draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();if(g){draft.salary=g==='salary';draft.icat=g==='salary'?'':g;draft.icatPicked=true;}}
+  if(form==='receipt'&&scan&&Array.isArray(scan.items))scan.items.forEach(i=>{if(i&&typeof i.name==='string')i.name=cleanNm(i.name);});
   const spec=JSON.parse(JSON.stringify(form==='entry'?draft:form==='office'?draftO:scan));
   delete spec.catPicked;delete spec.catAuto;
   const inl=editInline, inlNm=inlineFocusName();
@@ -7444,12 +7454,12 @@ const app=new Proxy({
   },
   /* خلصت كتابة اسم الصنف: لو مالوش تصنيف، ياخد تصنيفه من آخر مرة */
   simUse(k,n){const it=scan.items[k];if(!it)return;it.name=n;if(!it.cat){const g=itemCatSuggest(n);if(g)it.cat=g;}render();},
-  simNo(n){simNoSet[toEn(String(n||'').trim())]=1;render();},
+  simNo(n){simNoSet[cleanNm(n)]=1;render();},
   /* بيغيّر اسم الصنف في كل الفواتير القديمة (والعمليات عشان التعديل بعدين) */
   nameMerge(from,to,cat){
-    const f=String(from).trim();let c=0;
+    const f=cleanNm(from);let c=0;
     /* فلوسي بس، ونفس التصنيف بس */
-    const fix=i=>{if(i&&!i.off&&String(i.name||'').trim()===f&&(!cat||(i.cat||'other')===cat)){i.name=to;c++;}};
+    const fix=i=>{if(i&&!i.off&&cleanNm(i.name)===f&&(!cat||(i.cat||'other')===cat)){i.name=to;c++;}};
     D.txns.forEach(t=>{if((t.book||'me')==='me')(t.items||[]).forEach(fix);});
     Object.values(D.ops||{}).forEach(o=>{if(o&&o.d&&(o.b||'me')==='me'&&Array.isArray(o.d.items))o.d.items.forEach(fix);});
     _nmIdx=null;if(c)_undoLbl='وحّدت «'+f+'» على «'+to+'»';save();render();app.toast(c?'اتوحّدوا على «'+to+'»':'مفيش حاجة اتغيّرت');},
@@ -7457,7 +7467,7 @@ const app=new Proxy({
   goNames(){app.go('settings');setsOpen={names:true};render();},
   itemNameDone(k){const it=scan.items[k];if(!it)return;
     /* السطر الجديد والمسافات الزيادة جوه الاسم بيبقوا مسافة واحدة */
-    const cl=String(it.name||'').replace(/\s+/g,' ').trim();if(cl!==it.name){it.name=cl;if(it.cat)render();}
+    const cl=cleanNm(it.name);if(cl!==it.name){it.name=cl;if(it.cat)render();}
     if(it.cat)return;const g=itemCatSuggest(it.name);if(g){it.cat=g;render();}},
   iset(k,f,v){
     scan.items[k][f]=f==='amount'?(Number(onlyNum(v))||0):f==='qty'?((Number(onlyNum(v))||1)>1?Number(onlyNum(v)):undefined):v;
@@ -7578,6 +7588,7 @@ const app=new Proxy({
   saveReceipt(){
     if(!scanSaveOk())return;
     scan.items=(scan.items||[]).filter(i=>!itemBlank(i));
+    scan.items.forEach(i=>{if(typeof i.name==='string')i.name=cleanNm(i.name);});
     const items=scan.items;
     const offItems=items.filter(i=>i.off);
     const whoItems=items.filter(i=>!i.off&&i.who);
