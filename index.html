@@ -221,6 +221,14 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .rl.r1 .who{max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rl.r1 input.vl{flex:0 0 72px;width:72px}
 .rl.r1 .qx input{width:18px}
+.detail .d.hl{background:rgba(232,160,60,.16);border-radius:8px;padding-inline:8px;margin-inline:-8px;font-weight:600}
+.mrow{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.mrow .mut{color:var(--muted);font-size:11.5px;margin-top:3px}
+.mrow .mnext{font-size:12.5px;font-weight:600;display:block}
+.mrow.due .mnext{color:var(--clay)}
+.mman{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);padding:0 0 8px}
+.mman .simx{background:none;border:1px solid var(--line);border-radius:99px;color:var(--muted);font:inherit;font-size:11px;padding:4px 10px;cursor:pointer}
+.mlog{background:var(--surf2);border-radius:12px;padding:4px 12px 12px;margin:4px 0 8px}
 .simp{padding:12px 2px;border-bottom:1px solid var(--line);font-size:14px;line-height:1.7}
 .simp .mut{color:var(--muted);font-size:12px}
 .simp .simn{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0}
@@ -638,7 +646,7 @@ let ghState={busy:false,msg:''}, showGhHelp=false, showKeyEdit=false;
 let paySubFor=null, paySubDate=today(), dueFor=null, dueAcct='';
 let ownerFor=null;
 let needsTxn=null;
-let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''};
+let vehTab='', showVeh=false, vehRename=null, vehDraft={kind:'سكوتر',name:''}, mLogFor=null, mLogDraft={}, mCfgOpen=false;
 let retFor=null, retAcct='', retDate=today();
 let fixMode='final', feeMode='final', feeEd=null, feeAsk=null;
 let feeFor=null, loanFor=false, refundFor=null, refundAcct='', refundTo='', certEdit=null, certEarly=null;
@@ -802,6 +810,8 @@ function normalizeData(){
     (D.txns||[]).forEach(t=>(t.items||[]).forEach(fx));Object.values(D.ops||{}).forEach(o=>{if(o&&o.d&&Array.isArray(o.d.items))o.d.items.forEach(fx);});
     if(Array.isArray(D.nameNo))D.nameNo=[...new Set(D.nameNo.map(k=>{const p=String(k).split('||');return p.length===2?[cleanNm(p[0]),cleanNm(p[1])].sort().join('||'):k;}))];
     D._nmclean=1;}
+  /* إعدادات الصيانة الافتراضية لكل مركبة */
+  (D.vehicles||[]).forEach(v=>{if(!v.maint)v.maint=mDef();});
   if(!D._ocash1){if(D.accounts.length&&!D.accounts.some(a=>a.id==='ocash'))D.accounts.push({id:'ocash',name:'كاش العهدة',opening:0,scope:'office'});D._ocash1=1;}
   D.accounts.forEach(a=>{if(!a.scope)a.scope=(a.id==='bank'?'both':a.id==='ocash'?'office':'me');});
   D.txns.forEach(t=>{if(!t.book)t.book='me';});
@@ -2820,6 +2830,65 @@ function fuelPair(id){
   if(!(km>0)||!(L>0))return null;
   return {t,km,L,kmpl:Math.round(km/L*100)/100,est:!!t.litersEst,n:f.length};
 }
+/* ---------- صيانة المركبة: زيت الموتور، زيت الفتيس، فلتر الهوا ----------
+   آخر مرة بتيجي من مصاريف «صيانة وإصلاح» (الكلام في الملاحظة أو الأصناف)، أو من «سجّل آخر مرة».
+   العداد من المصروف، ولو مش مكتوب بيتقدّر من تعبئات البنزين اللي قبله وبعده.
+   الجاي = آخر مرة مقرّبة لأقرب ١٠٠ + كل كام كيلو. الفلتر ممكن يمشي مع الزيت: مرة تغيير ومرة تنضيف. */
+const MPARTS=[['oil','زيت الموتور'],['gear','زيت الفتيس'],['filter','فلتر الهوا']];
+const mDef=()=>({oil:800,gear:3000,filter:'oil',filterKm:'',warn:100});
+const vehMcfg=v=>Object.assign(mDef(),v&&v.maint||{});
+function maintParts(txt){
+  /* زيوت وفلاتر تانية (فرامل، سلسلة، فلتر زيت/بنزين) مش من التلاتة دول */
+  const n=normTxt(txt).replace(/زيت\s*(ال)?(فرامل|سلسله|باكم)/g,' ').replace(/فلتر\s*(ال)?(زيت|بنزين|سولار|تكييف|مكيف)/g,' ');
+  const out=[], GR=/زيت\s*(ال)?(فتيس|جير|تروس|كامبيو)/g;
+  if(/زيت/.test(n)&&/فتيس|جير|تروس|كامبيو/.test(n))out.push({part:'gear'});
+  /* زيت الموتور: «زيت» لوحدها (بعد ما نشيل «زيت الفتيس»)، أو «زيت الموتور» */
+  if(/زيت/.test(n.replace(GR,' ')))out.push({part:'oil'});
+  if(/فلتر/.test(n))out.push({part:'filter',act:/(تنضيف|تنظيف|نضافه|نضفت|اتنضف|غسيل)\s*(ال)?فلتر|فلتر(\s*(ال)?هوا?ء?)?\s*(اتنضف|تنضيف|تنظيف|غسيل)/.test(n)?'clean':'change'});
+  return out;
+}
+/* قراءة العداد يوم معين: من المصروف نفسه، وإلا تقدير من التعبئات اللي قبله وبعده */
+function odoAt(vid,date){
+  const rs=vehTxns(vid).filter(t=>Number(t.odo)>0).map(t=>({d:t.date,o:Number(t.odo)})).sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:a.o-b.o);
+  const same=rs.filter(r=>r.d===date);if(same.length)return {o:same[same.length-1].o,est:true};
+  const bef=rs.filter(r=>r.d<date).pop(), aft=rs.find(r=>r.d>date);
+  if(bef&&aft){const dd=x=>new Date(x+'T00:00:00').getTime();const k=(dd(date)-dd(bef.d))/(dd(aft.d)-dd(bef.d));return {o:Math.round(bef.o+(aft.o-bef.o)*k),est:true};}
+  return null;
+}
+function maintEvents(vid){
+  const one=(D.vehicles||[]).length===1, ev=[];
+  D.txns.forEach(t=>{if((t.book||'me')!=='me'||t.kind!=='expense')return;
+    if(!(t.veh===vid||(one&&!t.veh&&t.cat==='repair')))return;
+    if(t.cat!=='repair'&&!(t.items||[]).some(i=>i.cat==='repair'))return;
+    const txt=[t.note,t.merchant].concat((t.items||[]).filter(i=>t.cat==='repair'||i.cat==='repair').map(i=>i.name)).join(' ');
+    maintParts(txt).forEach(p=>{let o=Number(t.odo)||0,est=false;if(!o){const a=odoAt(vid,t.date);if(a){o=a.o;est=true;}}
+      ev.push({part:p.part,act:p.act,date:t.date,odo:o,est:est,txn:t.id});});});
+  const v=(D.vehicles||[]).find(x=>x.id===vid);
+  ((v&&v.maintLog)||[]).forEach(m=>ev.push({part:m.part,act:m.act,date:m.date,odo:Number(m.odo)||0,est:false,man:m.id}));
+  return ev.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(a.odo||0)-(b.odo||0));
+}
+function vehOdo(vid){
+  const v=(D.vehicles||[]).find(x=>x.id===vid);
+  return Math.max(0,...vehTxns(vid).map(t=>Number(t.odo)||0),...((v&&v.maintLog)||[]).map(m=>Number(m.odo)||0));
+}
+const rnd100=x=>Math.round(x/100)*100;
+function vehMaint(vid){
+  const v=(D.vehicles||[]).find(x=>x.id===vid);const c=vehMcfg(v), ev=maintEvents(vid), cur=vehOdo(vid);
+  const last=p=>ev.filter(e=>e.part===p).pop()||null;
+  const out={cur:cur,warn:Number(c.warn)||0,rows:[]};
+  const oil=last('oil'), gear=last('gear'), fil=last('filter');
+  const nextOf=(l,every)=>(l&&l.odo&&Number(every)>0)?rnd100(l.odo)+Number(every):0;
+  const oilNext=nextOf(oil,c.oil);
+  out.rows.push({part:'oil',label:'زيت الموتور',last:oil,next:oilNext});
+  out.rows.push({part:'gear',label:'زيت الفتيس',last:gear,next:nextOf(gear,c.gear)});
+  if(c.filter==='oil'){
+    /* الفلتر مع الزيت: الجاي عكس آخر مرة */
+    const act=fil&&fil.act==='change'?'clean':'change';
+    out.rows.push({part:'filter',label:'فلتر الهوا',last:fil,next:oilNext,act:act,withOil:true});
+  }else out.rows.push({part:'filter',label:'فلتر الهوا',last:fil,next:nextOf(fil,c.filterKm),act:'change'});
+  out.rows.forEach(r=>{r.due=!!(r.next&&cur&&cur>=r.next-out.warn);r.over=r.next&&cur?cur-r.next:0;});
+  return out;
+}
 function vehStats(id){
   const fuels=vehFuel(id);
   const withOdo=fuels.filter(t=>Number(t.odo)>0);
@@ -3236,6 +3305,16 @@ function alertsPanel(){
   let rows=[];
   const _dupT={};(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{_dupT[p.t]=1;}));
   /* أسامي أصناف شبه بعض: سطر واحد يودّيك تراجعها */
+  /* الصيانة: قبل الكيلو الجاي بشوية */
+  if(book==='me'&&vehOn())(D.vehicles||[]).forEach(v=>{const M=vehMaint(v.id);
+    M.rows.filter(r=>r.due&&!(r.withOil&&M.rows[0].due)).forEach(r=>{
+      const fil=r.part==='oil'?M.rows.find(x=>x.withOil&&x.due):null;
+      rows.push(`<div class="alert">
+      ${RAIL(r.over>=0?2:3,'')}
+      <span class="g"><span class="t">${r.label}${fil?' و'+(fil.act==='clean'?'تنضيف':'تغيير')+' الفلتر':''} ${r.over>=0?'جه ميعاده':'قرّب'}${(D.vehicles||[]).length>1?' — '+esc(v.name):''}</span>
+        <span class="s" style="display:block">${r.withOil?(r.act==='clean'?'تنضيف':'تغيير')+' · ':''}الغيار عند <span class="n">${fmt(r.next)}</span> · العداد <span class="n">${fmt(M.cur)}</span>${r.over>0?' · عدّى بـ<span class="n">'+fmt(r.over)+'</span> كم':''}</span></span>
+      <div class="side"><button class="chip sm" onclick="app.goVeh&&app.goVeh('${v.id}')">شوف</button></div>
+    </div>`);});});
   if(book==='me'){const n=simGroups().length;if(n)rows.push(`<div class="alert">
       ${RAIL(4,'')}
       <span class="g"><span class="t">أسامي أصناف شبه بعض</span>
@@ -3756,7 +3835,7 @@ function txnRow(t,noDate){
     <span class="a" style="color:${color}">${isFxAcc(t.account)?'<small style="font-size:11px">'+esc(fxName(accCur(t.account)))+'</small> ':''}${(!inc&&!tr&&Number(t.amount)<0)?'+'+fmt(-Number(t.amount)):(inc?'+':tr?'':'−')+fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
-    ${(editOp&&editInline===t.id)?'':(t.items||[]).map((i,ik)=>`<div class="d" data-ik="${ik}"><span>${esc(i.name)}${Number(i.qty)>1?' <span dir="ltr">×'+i.qty+'</span>':''} <span style="color:${catOf(i.cat).color}">· ${catOf(i.cat).label}</span></span><span class="n">${fmt(i.amount)}</span></div>`).join('')}
+    ${(editOp&&editInline===t.id)?'':(t.items||[]).map((i,ik)=>`<div class="d${openItem===t.id+':'+ik?' hl':''}" data-ik="${ik}"><span>${esc(i.name)}${Number(i.qty)>1?' <span dir="ltr">×'+i.qty+'</span>':''} <span style="color:${catOf(i.cat).color}">· ${catOf(i.cat).label}</span></span><span class="n">${fmt(i.amount)}</span></div>`).join('')}
     ${(function(){
       if(editOp&&editInline===t.id)return `<div class="inedit">${inlineForm()}</div>`;
       const locked=t.closeSet||((t.book==='office')&&(t.kind==='settle'||(D.lastClose&&t.date<=D.lastClose)));
@@ -5381,6 +5460,50 @@ function wIns(){
 }
 
 /* --- المحفظة: مركباتي --- */
+/* قسم الصيانة جوه كارت المركبة */
+function maintHtml(v){
+  const M=vehMaint(v.id), c=vehMcfg(v);
+  const actL=a=>a==='clean'?'تنضيف':'تغيير';
+  const row=r=>{
+    const l=r.last;
+    const every=r.part==='oil'?c.oil:r.part==='gear'?c.gear:c.filterKm;
+    const lastTxt=l?`آخر ${r.part==='filter'?actL(l.act):'مرة'} ${l.odo?'عند <span class="n">'+fmt(l.odo)+'</span>'+(l.est?' تقريبًا':''):'(العداد مش متسجل)'} · ${dLabel(l.date)}`:'مفيش مرة متسجلة';
+    const nextTxt=r.next?`${r.withOil?actL(r.act)+' مع الزيت ':''}الجاي عند <span class="n">${fmt(r.next)}</span>`
+      :r.withOil?`${actL(r.act)} مع غيار الزيت الجاي`:!(Number(every)>0)?'حدد كل كام كيلو':!l?'سجّل آخر مرة عشان أحسب الجاي':'سجّل العداد عشان أحسب الجاي';
+    return `<div class="mrow${r.due?' due':''}">
+      <div><b>${r.label}</b><span class="mut" style="display:block">${lastTxt}</span></div>
+      <div style="text-align:left"><span class="mnext">${nextTxt}</span>
+        <button class="chip sm" style="margin-top:6px" onclick="app.mLogOpen('${v.id}','${r.part}')">سجّل آخر مرة</button></div>
+    </div>
+    ${((v.maintLog||[]).filter(m=>m.part===r.part)).map(m=>`<div class="mman"><span>سجلتها بإيدك: ${r.part==='filter'?actL(m.act)+' ':''}عند <span class="n">${fmt(m.odo)}</span> · ${dLabel(m.date)}</span>
+      <button class="simx" aria-label="امسح" onclick="app.mLogDel('${v.id}','${m.id}')">امسح</button></div>`).join('')}
+    ${mLogFor===v.id+':'+r.part?`<div class="mlog">
+      ${r.part==='filter'?pickRow('mlogact',[{id:'change',label:'تغيير'},{id:'clean',label:'تنضيف'}],mLogDraft.act||'change','app.mLogAct',1):''}
+      <label class="f">العداد كان كام؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(mLogDraft.odo||'')}" oninput="app.mLogSet('odo',numFix(this,0))">
+      <label class="f">إمتى؟</label>
+      ${dateField(mLogDraft.date||today(),'app.mLogDate')}
+      <div class="chips" style="margin-top:10px"><button class="chip sm on" onclick="app.mLogSave()">احفظ</button><button class="chip sm" onclick="app.mLogOpen('','')">إلغاء</button></div>
+    </div>`:''}`;};
+  return `<div class="maint">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px">
+      <span style="font-family:var(--f-disp);font-size:14px;font-weight:600">الصيانة</span>
+      <button class="chip sm${mCfgOpen?' on':''}" onclick="app.mCfgToggle()">كل كام كيلو</button></div>
+    ${mCfgOpen?`<div class="mlog">
+      <label class="f">زيت الموتور كل كام كيلو؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.oil||''))}" onchange="app.mCfgSet('${v.id}','oil',numFix(this,0))">
+      <label class="f">زيت الفتيس كل كام كيلو؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.gear||''))}" onchange="app.mCfgSet('${v.id}','gear',numFix(this,0))">
+      <label class="f">فلتر الهوا</label>
+      ${pickRow('mfil',[{id:'oil',label:'مع الزيت: مرة تغيير ومرة تنضيف'},{id:'km',label:'كل كام كيلو'}],c.filter,"((x)=>app.mCfgSet('"+v.id+"','filter',x))",1)}
+      ${c.filter==='km'?`<input class="f" style="margin-top:8px" type="text" inputmode="numeric" placeholder="كل كام كيلو" value="${esc(String(c.filterKm||''))}" onchange="app.mCfgSet('${v.id}','filterKm',numFix(this,0))">`:''}
+      <label class="f">فكّرني قبلها بكام كيلو؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.warn||''))}" onchange="app.mCfgSet('${v.id}','warn',numFix(this,0))">
+      <div class="hint">الجاي بيتحسب من آخر مرة مقرّبة لأقرب 100 كيلو.</div>
+    </div>`:''}
+    ${M.rows.map(row).join('')}
+  </div>`;
+}
 function wVeh(){
   const list=D.vehicles||[];
   const cur=list.find(v=>v.id===vehTab)||list[0];
@@ -5416,6 +5539,7 @@ function wVeh(){
           <span style="display:block">${s.lastFix?`آخر صيانة ${dLabel(s.lastFix.date)} · <span class="n">${fmt(s.lastFix.amount)}</span>${s.lastFix.odo?' عند <span class="n">'+fmt(s.lastFix.odo)+'</span> كم':''}`:'مفيش صيانات مسجلة'}</span>
           ${s.odo?`<span style="display:block">آخر قراءة عداد <span class="n">${fmt(s.odo)}</span> كم</span>`:''}
         </div>
+        ${maintHtml(cur)}
         <label class="f">رخصة المركبة</label>
         <input class="f" type="date" value="${cur.regExp||''}" onchange="app.setVehDate('${cur.id}','regExp',this.value)">
         <div class="chips" style="margin-top:12px">
@@ -5609,16 +5733,33 @@ function logList(){
     list.forEach(t=>{
       const b=t.kind==='expense'?breakdown(t):[];
       const n=(t.items||[]).length;
-      (t.items||[]).forEach((i,k)=>{if(b[k]&&b[k].cat===fCat)ents.push({t,i,k,date:t.date,amt:r2(b[k].amount)});});
+      const nq=normTxt(q).trim(), tHay=normTxt([t.note,t.merchant,t.item,t.place,t.from,t.date,catOf(t.cat).label].join(' '));
+      const nameHit=i=>!nq||normTxt(i.name+' '+catOf(i.cat).label).indexOf(nq)>-1||tHay.indexOf(nq)>-1;
+      (t.items||[]).forEach((i,k)=>{if(b[k]&&b[k].cat===fCat&&nameHit(i))ents.push({t,i,k,date:t.date,amt:r2(b[k].amount)});});
       /* اللي مش صنف (المصروف كله أو نصيب الناس فيه) سطر بالحركة */
       const rest=b.slice(n).filter(p=>p.cat===fCat).reduce((a,p)=>a+p.amount,0);
-      if(Math.abs(rest)>0.004||(!n&&t.kind!=='expense'))ents.push({t,date:t.date,amt:r2(rest)});
+      if((Math.abs(rest)>0.004||(!n&&t.kind!=='expense'))&&(!nq||!n||tHay.indexOf(nq)>-1))ents.push({t,date:t.date,amt:r2(rest)});
     });
     const s2=ents.reduce((a,e)=>a+e.amt,0);
     return ents.length
       ?`<div class="hint" style="margin:-6px 0 12px">${ents.some(e=>e.i)?plural(ents.length,'سطر واحد','سطرين','سطور','سطر'):nTx(ents.length)} · ${s2<0?'راجع':'مصروف'} <span class="n">${fmt(Math.abs(Math.round(s2*100)/100))}</span></div>`+logDaysItems(ents)
       :'<div class="empty">مفيش نتايج.</div>';
   }
+  /* البحث عن صنف: كل مرة اشتريته فيها سطر لوحده بسعره (والفاتورة بتفتح تحته)؛
+     اللي لقيناه في اسم المحل أو الملاحظة بيفضل الحركة كلها */
+  {const nq=normTxt(q).trim();
+  if(nq&&book==='me'&&fDir!=='in'&&fDir!=='tr'&&!(fAcct&&isFxAcc(fAcct))){
+    const r2=x=>Math.round(x*100)/100, ents=[];let hit=false;
+    list.forEach(t=>{
+      const base=normTxt([t.note,t.merchant,t.item,t.place,t.from,t.date,catOf(t.cat).label,t.kind==='income'?icatOf(t).label:''].join(' '));
+      const its=(t.items||[]).map((i,k)=>({i,k})).filter(x=>normTxt(x.i.name).indexOf(nq)>-1);
+      if(its.length&&base.indexOf(nq)<0){hit=true;const b=t.kind==='expense'?breakdown(t):[];
+        its.forEach(x=>ents.push({t,i:x.i,k:x.k,date:t.date,amt:r2(b[x.k]?b[x.k].amount:Number(x.i.amount)||0)}));}
+      else ents.push({t,date:t.date,amt:t.kind==='expense'?mySpend(t):0,whole:1});
+    });
+    if(hit){const s2=r2(ents.reduce((a,e)=>a+e.amt,0));
+      return `<div class="hint" style="margin:-6px 0 12px">${plural(ents.length,'سطر واحد','سطرين','سطور','سطر')} · مصروف <span class="n">${fmt(s2)}</span></div>`+logDaysItems(ents);}
+  }}
   const sum=list.reduce((a,t)=>{
     const v=fxL?(t.account===fAcct?Number(t.amount)||0:inAmt(t)):egpOf(t);
     if(fDir==='in')return a+(txnIn(t)?v:0);
@@ -5667,7 +5808,7 @@ function logDaysItems(ents){
   return days.map(g=>{
     const out=Math.round(g.l.reduce((a,e)=>a+e.amt,0)*100)/100;
     return `<div class="dayh"><b>${dLabel(g.d)}</b><span>${out>0?'<span style="color:var(--clay)">مصروف <span class="n">'+fmt(out)+'</span></span>':out<0?'<span style="color:var(--mint)">راجع <span class="n">'+fmt(-out)+'</span></span>':''}</span></div>`
-      +g.l.map(e=>e.i?itemRow(e):(Math.abs(e.amt-mySpend(e.t))>0.004&&e.t.kind==='expense'?shareRow(e):txnRow(e.t,1)+logItemHits(e.t))).join('');
+      +g.l.map(e=>e.i?itemRow(e):(!e.whole&&Math.abs(e.amt-mySpend(e.t))>0.004&&e.t.kind==='expense'?shareRow(e):txnRow(e.t,1)+logItemHits(e.t))).join('');
   }).join('');
 }
 /* السجل متقسم بالأيام، وجنب كل يوم إجماليه */
@@ -6856,14 +6997,14 @@ const app=new Proxy({
     /* التراجع عن تسجيل لوحده: الاشتراك يرجع «مستني الخصم» ومايتسجلش لوحده تاني */
     if(last&&last.t===n.t){app.undoSubPay(n.sid);if(s)s.held=s.next;save();render();}else{save();render();}
   },
-  go(t){if(t!=='scan')needsTxn=null;editInline=null;
+  go(t){if(t!=='scan')needsTxn=null;editInline=null;openItem=null;
     if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();if(scan.stage==='review')scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};}
     rememberY();renderLock=0;renderPending=false;undoAsk=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};setSub=null;catEdit=null;openRow={};if(t==='settings')accCfgInit();render();restoreY();},
   setWtab(w){rememberY();wtab=w;payFor=null;convFor=null;editAcct=null;render();restoreY();},
   setMonth(m){month=m;render();},
   search(v){q=v;document.getElementById('loglist').innerHTML=logList();
     const x=document.getElementById('qx');if(x&&x.style)x.style.display=v?'block':'none';},
-  clearQ(){q='';render();},
+  clearQ(){q='';openItem=null;render();},
   setF(k,v){if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;
     if(k==='dir'){const g=x=>x==='in'?'in':(x===''||x==='out')?'out':'tr';if(g(v)!==g(fDir))fCat='';fDir=v;}
     render();},
@@ -8689,9 +8830,24 @@ const app=new Proxy({
     if(n)v.name=n;
     vehRename=null;save();render();app.toast('اتغير');
   },
+  mCfgToggle(){mCfgOpen=!mCfgOpen;render();},
+  mCfgSet(id,k,val){const v=(D.vehicles||[]).find(x=>x.id===id);if(!v)return;v.maint=vehMcfg(v);
+    v.maint[k]=(k==='filter')?val:(Number(onlyNum(val))||'');save();render();},
+  mLogOpen(id,part){mLogFor=id?id+':'+part:null;mLogDraft={date:today(),odo:'',act:'change'};render();},
+  mLogSet(k,v){mLogDraft[k]=v;},
+  mLogDel(id,mid){const v=(D.vehicles||[]).find(x=>x.id===id);if(!v||!v.maintLog)return;v.maintLog=v.maintLog.filter(m=>m.id!==mid);save();render();},
+  mLogAct(a){mLogDraft.act=a;render();},
+  mLogDate(d){mLogDraft.date=d;render();},
+  mLogSave(){if(!mLogFor)return;const [id,part]=mLogFor.split(':');const v=(D.vehicles||[]).find(x=>x.id===id);
+    const o=Number(onlyNum(mLogDraft.odo))||0;if(!v||!o){app.toast('اكتب العداد');return;}
+    if(!v.maintLog)v.maintLog=[];
+    v.maintLog.push({id:uid(),part:part,date:mLogDraft.date||today(),odo:o,act:part==='filter'?(mLogDraft.act||'change'):undefined});
+    mLogFor=null;save();render();app.toast('اتسجل');},
   setVehDate(id,k,v){const x=D.vehicles.find(y=>y.id===id);if(x){x[k]=v;save();render();}},
   setLicExp(v){D.licExp=v;save();render();},
-  goVeh(){tab='wallet';wtab='veh';render();window.scrollTo(0,0);},
+  goVeh(id){if(typeof id==='string'&&id)vehTab=id;editInline=null;
+    if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();if(scan.stage==='review')scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};}
+    tab='wallet';wtab='veh';render();window.scrollTo(0,0);},
   delVeh(id){
     D.vehicles=(D.vehicles||[]).filter(v=>v.id!==id);
     D.txns.forEach(t=>{if(t.veh===id)t.veh=undefined;});
