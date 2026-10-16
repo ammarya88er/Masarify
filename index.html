@@ -221,6 +221,11 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .rl.r1 .who{max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rl.r1 input.vl{flex:0 0 72px;width:72px}
 .rl.r1 .qx input{width:18px}
+.simp{padding:12px 2px;border-bottom:1px solid var(--line);font-size:14px;line-height:1.7}
+.simp .mut{color:var(--muted);font-size:12px}
+.rl.simh{border:0;padding:0 0 8px;margin-top:-2px;font-size:12px;color:#6B6558;gap:6px}
+.rl.simh .simc{background:#E7E2D6;border:1px solid #CDC7B8;border-radius:99px;padding:6px 12px;font:inherit;font-size:12px;color:#2E3B33;cursor:pointer;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rl.simh .simx{background:none;border:0;color:#9A9384;font-size:14px;margin-inline-start:auto;min-width:32px;min-height:30px;cursor:pointer}
 .rt{display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;margin-top:6px;
   border-top:1px dashed #B9B3A6;font-weight:600;font-size:16px;font-family:var(--f-disp);}
 .rt span:last-child{font-family:var(--f-num);direction:ltr;}
@@ -584,7 +589,7 @@ function autoId(kind,owner,period){
 /* أي كلام بيظهر: الأرقام العربي بتتعرض إنجليزي */
 const esc=s=>toEn(String(s==null?'':s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* نص جوه onclick بين '…': بيهرب العلامات عشان الأسامي اللي فيها ' متبوظش الزرار */
-const jsArg=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+const jsArg=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r\n|[\r\n\u2028\u2029]/g,'\\n'));
 
 /* ==========================================================================
    3) الحالة والتخزين
@@ -916,7 +921,7 @@ function normalizeData(){
   }
 }
 function save(){
-  D._sv=Date.now();
+  D._sv=Date.now();_nmIdx=null;
   try{localStorage.setItem(SKEY,JSON.stringify(D));}
   catch(e){alert('مقدرتش أحفظ. لو الصفحة مفتوحة في تصفح خاص، اقفلها وافتحها عادي.');}
   scheduleGhPush();
@@ -3079,7 +3084,7 @@ function periodSummary(from,to){
   const byCat=Object.entries(cm).filter(x=>x[1]>0.005).sort((a,b)=>b[1]-a[1]);
   /* «اتجاب كام مرة» = عدد المرات اللي اشتريته فيها (مش العدد جوه الفاتورة) */
   const im={};ex.forEach(t=>{const seen={};itemParts(t).forEach(p=>{if(!p.name||SUM_SKIP.indexOf(p.cat)>-1)return;
-    const k=p.cat+'|'+pk(p.name);if(!im[k])im[k]={name:p.name,cat:p.cat,n:0,amount:0};if(!seen[k]){im[k].n++;seen[k]=1;}im[k].amount+=p.amount;});});
+    const k=p.cat+'|'+(nmInfo(p.name).w.slice().sort().join(' ')||pk(p.name));/* نفس الحاجة بحجم مختلف = حاجة واحدة */if(!im[k])im[k]={name:p.name,cat:p.cat,n:0,amount:0};if(!seen[k]){im[k].n++;seen[k]=1;}im[k].amount+=p.amount;});});
   const kinds={};Object.values(im).forEach(i=>kinds[i.cat]=(kinds[i.cat]||0)+1);
   const high=Object.values(im).filter(i=>{const ct=cm[i.cat]||0;
     /* عادة مش مرة واحدة: اتشرت مرتين على الأقل، ومش مبلغ صغير جوه تصنيفها */
@@ -3223,6 +3228,13 @@ const RAIL=(g,d)=>'<span class="rail" data-g="'+g+'" data-d="'+esc(String(d||'')
 function alertsPanel(){
   let rows=[];
   const _dupT={};(D.subs||[]).forEach(s=>subDups(s).forEach(p=>{_dupT[p.t]=1;}));
+  /* أسامي أصناف شبه بعض: سطر واحد يودّيك تراجعها */
+  if(book==='me'){const n=simPairs().length;if(n)rows.push(`<div class="alert">
+      ${RAIL(4,'')}
+      <span class="g"><span class="t">أسامي أصناف شبه بعض</span>
+        <span class="s" style="display:block">${plural(n,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح')} توحّدهم</span></span>
+      <div class="side"><button class="chip sm" onclick="app.goNames()">راجعها</button></div>
+    </div>`);}
   if(book==='me')D.txns.filter(t=>t.pending&&!_dupT[t.id]).forEach(t=>{const T=txnTitle(t);rows.push(`
     <div class="alert">
       ${RAIL(2,t.date)}
@@ -4287,6 +4299,71 @@ function catSuggest(note,place){
   return '';
 }
 /* تصنيف صنف في الفاتورة من آخر مرة اشتريته */
+/* ---------- أسامي الأصناف اللي شبه بعض ----------
+   اسمين شبه بعض لو في نفس التصنيف، وكلام واحد منهم كله جوه التاني (بعد ما نشيل الوزن والحجم
+   والكلام العام زي «مشروب طاقة»، ونوحّد الإملاء زي أ/ا وة/ه وغ/ج).
+   حجمين مختلفين (١٠٠ جرام و٢٠٠ جرام) مش شبه بعض عشان مقارنة الأسعار.
+   الاقتراح بيوحّد على الأكتر تكرار، ولو واحد فيه الحجم والتاني لأ فعلى اللي فيه الحجم. */
+const NM_UNITS=['جرام','جم','جرامات','كيلو','كجم','لتر','مل','ملي','kg','g','gm','ml','l','بيضات','بيضه','قطعه','قطع'];
+const NM_UNIT1={'جم':'جرام','جرامات':'جرام','g':'جرام','gm':'جرام','كجم':'كيلو','kg':'كيلو','ملي':'مل','ml':'مل','l':'لتر','بيضه':'بيضات','قطع':'قطعه'};
+const NM_GEN=['مشروب','طاقه'];
+function nmInfo(name){
+  const n=normTxt(String(name||'').trim()).replace(/٫/g,'.').replace(/غ/g,'ج').replace(/[\/.+&«»"'×*]+(?!\d)/g,' ');
+  const sizes=[];
+  n.replace(/(\d+(?:\.\d+)?)\s*([^\s\d،,]+)?/g,(m,a,u)=>{if(u&&NM_UNITS.indexOf(u)>-1)sizes.push(a+(NM_UNIT1[u]||u));return '';});
+  const w=[...new Set(n.replace(/\d+(?:\.\d+)?/g,' ').split(/[\s،,\-—()]+/).filter(x=>x.length>1&&NM_UNITS.indexOf(x)<0&&NM_GEN.indexOf(x)<0))];
+  return {w:w,size:sizes.sort().join(' ')};
+}
+function nmSimilar(a,b){
+  const A=(typeof a==='object')?a:nmInfo(a),B=(typeof b==='object')?b:nmInfo(b);
+  if(!A.w.length||!B.w.length)return false;
+  if(A.size&&B.size&&A.size!==B.size)return false;
+  const [s,l]=A.w.length<=B.w.length?[A.w,B.w]:[B.w,A.w];
+  return s.every(x=>l.indexOf(x)>-1);
+}
+let _nmIdx=null,_nmKey='',_nmPairs=null,_undoLbl='';
+/* كل اسم صنف في فواتيرك: اتسجل كام مرة، وتصنيفه الأكتر */
+function nameIndex(){
+  const key=D._sv+'|'+D.txns.length+'|'+(D.nameNo||[]).length;
+  if(_nmIdx&&_nmKey===key)return _nmIdx;
+  const m={};
+  D.txns.forEach(t=>{if((t.book||'me')!=='me')return;(t.items||[]).forEach(i=>{const n=String(i.name||'').trim();if(!n||i.who)return;
+    if(!m[n])m[n]={name:n,n:0,cats:{}};m[n].n++;const c=i.cat||'other';m[n].cats[c]=(m[n].cats[c]||0)+1;});});
+  Object.values(m).forEach(x=>{x.cat=Object.keys(x.cats).sort((a,b)=>x.cats[b]-x.cats[a])[0];x.info=nmInfo(x.name);x.size=!!x.info.size;});
+  _nmIdx=m;_nmKey=key;_nmPairs=null;return m;
+}
+const nmNoKey=(a,b)=>[a,b].sort().join('||');
+const nmIsNo=(a,b)=>(D.nameNo||[]).indexOf(nmNoKey(a,b))>-1;
+/* الاسم اللي يتوحّد عليه: اللي فيه الحجم، وبعدين الأكتر تكرار، وبعدين الأطول */
+const nmBetter=(x,y)=>x.size!==y.size?(x.size?x:y):x.n!==y.n?(x.n>y.n?x:y):(x.name.length>=y.name.length?x:y);
+function simPairs(){
+  const idx=nameIndex();if(_nmPairs)return _nmPairs;
+  const byCat={}, out=[];Object.values(idx).forEach(x=>(byCat[x.cat]=byCat[x.cat]||[]).push(x));
+  Object.values(byCat).forEach(L=>{
+  for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++){const a=L[i],b=L[j];
+    if(!nmSimilar(a.info,b.info)||nmIsNo(a.name,b.name))continue;
+    const to=nmBetter(a,b);out.push({to:to,from:to===a?b:a});}});
+  /* كل اسم بيتقترح مرة واحدة بس، على أحسن اسم شبهه */
+  const best={};out.forEach(p=>{const k=p.from.name, o=best[k];
+    if(!o||(p.to.n>o.to.n)||(p.to.n===o.to.n&&p.to.name.length>o.to.name.length))best[k]=p;});
+  return (_nmPairs=Object.values(best).sort((x,y)=>(y.to.n+y.from.n)-(x.to.n+x.from.n)));
+}
+/* وانت بتكتب صنف: اسم قديم شبهه يبقى أحسن منه */
+let simNoSet={};
+function simFor(name,cat){
+  name=String(name||'').trim();if(!name||!cat||simNoSet[toEn(name)])return null;
+  const idx=nameIndex(), inf=nmInfo(name), me=idx[name]||{name:name,n:0,size:!!inf.size};
+  let best=null;
+  Object.values(idx).forEach(x=>{if(x.name===name||x.cat!==cat||!nmSimilar(x.info,inf)||nmIsNo(x.name,name))return;
+    if(nmBetter(x,me)!==x)return;
+    if(!best||x.n>best.n)best=x;});
+  return best;
+}
+function simHint(it,k){
+  const c=simFor(it.name,it.cat);if(!c)return '';
+  return `<div class="rl simh"><span>قصدك</span><button class="simc" onclick="app.simUse(${k},'${jsArg(c.name)}')">${esc(c.name)} · ${plural(c.n,'مرة','مرتين','مرات','مرة')}</button><span>؟</span>
+    <button class="simx" aria-label="لأ" onclick="app.simNo('${jsArg(it.name)}')">✕</button></div>`;
+}
 function itemCatSuggest(name){
   const n=normTxt(String(name||'').trim());if(!n)return '';
   let best=null;
@@ -4364,6 +4441,7 @@ function vScan0(){
           ${needsTxn?'':`<button class="who${it.off?' on off':it.who?' on':''}" onclick="app.pickOwner(${k})">${it.off?esc(bookName()):(it.who?esc(it.who):'ليا')}</button>`}
           <button class="x" onclick="app.delItem(${k})">×</button>
         </div>
+        ${simHint(it,k)}
         ${priceFor===k?(function(){const h=itemLast(it.name,it.amount,it.qty);return h?`<div class="rl" style="border:0;padding-top:0;font-size:12px;color:#6B6558">
           آخر مرة <span class="n">&nbsp;${fmt(h.price)}&nbsp;</span>${h.place?' في '+esc(h.place):''} · ${dLabel(h.date)} (<span dir="ltr">${h.pct>0?'+':''}${h.pct}%</span>)</div>`:'';})():''}
         ${ownerFor===k?`<div class="rl" style="border:0;padding-top:0;flex-wrap:wrap;gap:6px">
@@ -5741,6 +5819,16 @@ function vSettings(){
       </div>
     `:''}
         `)])}
+    ${(function(){const P=simPairs();return setCard('',[setSec('names','أسامي الأصناف',P.length?plural(P.length,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح'):'',()=>`
+      <p class="hint" style="margin-top:0">أسامي في فواتيرك شكلها نفس الحاجة. لو وحّدتها، الاسم بيتغيّر في كل الفواتير القديمة، ومقارنة الأسعار والملخص بيحسبوها حاجة واحدة.</p>
+      ${P.length?P.map(p=>`<div class="simp">
+        <div><b><bdi>${esc(p.to.name)}</bdi></b> <span class="mut">${plural(p.to.n,'مرة','مرتين','مرات','مرة')}</span></div>
+        <div><bdi>${esc(p.from.name)}</bdi> <span class="mut">${plural(p.from.n,'مرة','مرتين','مرات','مرة')} · ${esc(catOf(p.to.cat).label)}</span></div>
+        <div class="chips" style="margin-top:10px">
+          <button class="chip sm on" onclick="app.nameMerge('${jsArg(p.from.name)}','${jsArg(p.to.name)}','${p.to.cat}')">وحّدهم على «${esc(p.to.name)}»</button>
+          <button class="chip sm" onclick="app.nameMerge('${jsArg(p.to.name)}','${jsArg(p.from.name)}','${p.to.cat}')">على «${esc(p.from.name)}»</button>
+          <button class="chip sm" onclick="app.nameNo('${jsArg(p.to.name)}','${jsArg(p.from.name)}')">دول مختلفين</button>
+        </div></div>`).join(''):'<div class="hint">مفيش أسامي شبه بعض دلوقتي.</div>'}`)]);})()}
     ${setCard('',[setSec('cats','التصنيفات',D.cats.length+' مصروف · '+D.icats.length+' دخل'+(officeOn()?' · '+D.ocats.length+' '+bookName():''),()=>`
       ${subRow('mine','تصنيفات المصروف',plural(D.cats.length,'تصنيف واحد','تصنيفين','تصنيفات','تصنيف'),()=>`
 
@@ -6071,7 +6159,7 @@ function undoRecord(k,pre,ui){
   if(jeq(a,b))return;
   const txChanged=!jeq(a.txns,b.txns);
   if(!txChanged&&!_lastToast)return;
-  lastUndo={pre:pre,post:post,ui:ui,label:undoLabel(a,b)||_lastToast||'آخر تعديل'};
+  lastUndo={pre:pre,post:post,ui:ui,label:_undoLbl||undoLabel(a,b)||_lastToast||'آخر تعديل'};_undoLbl='';
   undoShown=true;
   showUndoToast();
   if(tab==='log')bgRender();
@@ -6087,7 +6175,10 @@ function undoLabel(a,b){
     :String(x.item||x.note||x.merchant||x.place||(x.kind==='expense'?catOf(x.cat).label:x.kind==='income'?'دخل':'تحويل')).slice(0,40);
   const add=(b.txns||[]).find(x=>!A[x.id]);if(add&&!(a.txns||[]).some(x=>!B[x.id]))return 'سجّلت '+nm(add);
   const del=(a.txns||[]).find(x=>!B[x.id]);if(del&&!add)return 'مسحت '+nm(del);
-  const ch=(b.txns||[]).find(x=>A[x.id]&&!jeq(A[x.id],x));if(ch||add)return 'عدّلت '+nm(ch||add);
+  const chs=(b.txns||[]).filter(x=>A[x.id]&&!jeq(A[x.id],x)), ch=chs[0];
+  /* تعديل في كذا حركة مرة واحدة (زي توحيد اسم): الاسم بييجي من رسالة العملية */
+  if(chs.length>1&&!add&&!del)return '';
+  if(ch||add)return 'عدّلت '+nm(ch||add);
   return '';
 }
 /* ---------- العملية الواحدة ----------
@@ -7312,7 +7403,22 @@ const app=new Proxy({
     render();
   },
   /* خلصت كتابة اسم الصنف: لو مالوش تصنيف، ياخد تصنيفه من آخر مرة */
-  itemNameDone(k){const it=scan.items[k];if(!it||it.cat)return;const g=itemCatSuggest(it.name);if(g){it.cat=g;render();}},
+  simUse(k,n){const it=scan.items[k];if(!it)return;it.name=n;if(!it.cat){const g=itemCatSuggest(n);if(g)it.cat=g;}render();},
+  simNo(n){simNoSet[toEn(String(n||'').trim())]=1;render();},
+  /* بيغيّر اسم الصنف في كل الفواتير القديمة (والعمليات عشان التعديل بعدين) */
+  nameMerge(from,to,cat){
+    const f=String(from).trim();let c=0;
+    /* فلوسي بس، ونفس التصنيف بس */
+    const fix=i=>{if(i&&!i.off&&String(i.name||'').trim()===f&&(!cat||(i.cat||'other')===cat)){i.name=to;c++;}};
+    D.txns.forEach(t=>{if((t.book||'me')==='me')(t.items||[]).forEach(fix);});
+    Object.values(D.ops||{}).forEach(o=>{if(o&&o.d&&(o.b||'me')==='me'&&Array.isArray(o.d.items))o.d.items.forEach(fix);});
+    _nmIdx=null;if(c)_undoLbl='وحّدت «'+f+'» على «'+to+'»';save();render();app.toast(c?'اتوحّدوا على «'+to+'»':'مفيش حاجة اتغيّرت');},
+  nameNo(a,b){if(!D.nameNo)D.nameNo=[];const k=nmNoKey(a,b);if(D.nameNo.indexOf(k)<0)D.nameNo.push(k);_nmIdx=null;save();render();},
+  goNames(){app.go('settings');setsOpen={names:true};render();},
+  itemNameDone(k){const it=scan.items[k];if(!it)return;
+    /* السطر الجديد والمسافات الزيادة جوه الاسم بيبقوا مسافة واحدة */
+    const cl=String(it.name||'').replace(/\s+/g,' ').trim();if(cl!==it.name){it.name=cl;if(it.cat)render();}
+    if(it.cat)return;const g=itemCatSuggest(it.name);if(g){it.cat=g;render();}},
   iset(k,f,v){
     scan.items[k][f]=f==='amount'?(Number(onlyNum(v))||0):f==='qty'?((Number(onlyNum(v))||1)>1?Number(onlyNum(v)):undefined):v;
     scanTotalsLive();
