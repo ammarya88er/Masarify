@@ -688,8 +688,10 @@ function hasOfficeData(){
 const officeOn=()=>D.officeOn!==false;
 function normalizeData(){
   if(!D||!D.accounts)D=JSON.parse(JSON.stringify(DEFAULT));
+  /* ترحيلات الأسامي والتصنيفات بتحصل مرة واحدة بس: لو مسحت تصنيف أو غيّرت اسم بعدها مايرجعش */
+  const once=!D._cats2;
   const bk=D.accounts.find(a=>a.id==='bank');
-  if(bk&&bk.name==='حساب البنك')bk.name='حساب CIB';
+  if(once&&bk&&bk.name==='حساب البنك')bk.name='حساب CIB';
   if(!D._vcash1){if(D.accounts.length&&!D.accounts.some(a=>a.id==='vcash'))D.accounts.push({id:'vcash',name:'فودافون كاش',opening:0});D._vcash1=1;}
   if(!D.installments)D.installments=[];
   D.installments.forEach(i=>{
@@ -723,6 +725,7 @@ function normalizeData(){
     if(!v.card&&D.cardDigits)v.card=D.cardDigits;
   });
   if(!D.cats)D.cats=JSON.parse(JSON.stringify(DEF_CATS));
+  if(once){
   if(!D.cats.some(c=>c.id==='installment'))D.cats.push({id:'installment',label:'قسط',color:'#5C86C4'});
   const eo=D.cats.find(c=>c.id==='eatout');
   if(eo&&eo.label==='أكل بره')eo.label='أكل من بره';
@@ -758,6 +761,8 @@ function normalizeData(){
     const i=D.cats.findIndex(c=>c.id==='drinks');
     D.cats.splice(i>-1?i+1:D.cats.length,0,{id:'stimulants',label:'منبهات',color:'#A9CE4F'});
   }
+  }
+  D._cats2=1;
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
   if(!D._autoSince)D._autoSince=today();
@@ -1948,6 +1953,23 @@ function periodStart(from){
 }
 const RLM='\u200F';
 const periodFrom=()=>D.lastClose?dayShift(D.lastClose,1):'2000-01-01';
+/* القفل بيبص على العملية كلها: لو أي سطر فيها في دفتر المكتب جوه فترة متقفلة أو من التقفيل نفسه،
+   العملية كلها (في الدفترين) ماتتعدلش ولا تتمسح لحد ما تتراجع عن التقفيل */
+function txnGroup(t){
+  if(t.op&&D.ops&&D.ops[t.op])return D.txns.filter(x=>x.op===t.op);
+  if(t.link)return D.txns.filter(x=>x.link===t.link);
+  return [t];
+}
+function txnLock(t){
+  if(!t)return '';
+  if(t.closeSet||(t.book==='office'&&t.kind==='settle'))return 'set';
+  const g=txnGroup(t);
+  if(g.some(x=>x.closeSet))return 'set';
+  if(D.lastClose&&g.some(x=>x.book==='office'&&x.date<=D.lastClose))return 'period';
+  return '';
+}
+const LOCK_MSG='الحركة دي جوه فترة متقفلة. عشان تعدلها اتراجع عن التقفيل الأول.';
+const closedDay=d=>!!(D.lastClose&&d&&d<=D.lastClose);
 const vchLive=v=>!v.used&&!v.given&&(!v.expiry||v.expiry>=today());
 /* الحسابات اللي ممكن الفاوتشرات تيجي منها */
 const vchBanks=()=>(D.accounts||[]).filter(a=>!a.closed&&a.atype==='bank'&&a.scope!=='office');
@@ -2107,29 +2129,24 @@ function autoTrials(){
   return done;
 }
 
-/* الاشتراك في يومه بيستنى «اتخصم»؛ لو اليوم عدّى من غير ما تدوس (ومادستش «لسه») بيتسجل بتاريخ يومه */
+/* الاشتراك في يومه بيستنى «اتخصم»، وبيفضل «مستني الخصم» حتى لو اليوم عدّى — مفيش تسجيل لوحده.
+   (لو دوست «اتخصم» بعد يومه ومادستش «لسه»، بيتسجل بتاريخ يومه) */
 function chargedAlready(s){
-  return daysTo(s.next)<0&&s.held!==s.next;
+  return false;
 }
 function chargeSub(s,d){
   const usd=s.cur==='USD'?subPrice(s):0;
   const full=usd?Math.round(usd*D.rate*100)/100:subPrice(s);
   if(!(full>0))return null;
-  /* الخصم ده اتسجل خلاص من رسالة البنك: نربطه بالاشتراك بدل ما نسجله مرتين */
-  const used={};(D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t)used[p.t]=1;}));
   const acc=subAcc(s);
-  let twin=usd?smsUsdTwin(acc,usd,d):null;
-  if(!twin){const c=D.txns.filter(x=>(x.book||'me')==='me'&&x.kind==='expense'&&x.fromSms&&x.account===acc&&!x.usd
-      &&Math.abs((Number(x.amount)||0)-full)<0.005&&x.date>=dayShift(d,-1)&&x.date<=dayShift(d,1));
-    twin=c.length===1?c[0]:null;}
-  if(twin&&used[twin.id])twin=null;
+  const twin=subTwin(s,d,full,usd);
   const t=twin||{id:autoId('sub',s.id,d),book:'me',kind:'expense',amount:full,
     cat:s.cat||'subs',account:acc,date:d,note:s.name,
     usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
-  if(twin){if(!twin.cat||twin.cat==='other')twin.cat=s.cat||'subs';if(!twin.note)twin.note=s.name;}
-  else D.txns.unshift(t);
+  if(!twin)D.txns.unshift(t);
   if(!s.payments)s.payments=[];
   const pay={d:t.date||d,t:t.id,paid:Number(t.amount)||full,auto:true};
+  if(twin)pay.tw=subTwinTake(s,twin);
   promoStep(s,pay);
   if(subArrOn(s)){
     const est=arrEst(full);
@@ -2152,6 +2169,26 @@ function chargeSub(s,d){
   }
   s.next=subNextOf(s);
   return {name:s.name,amount:full,usd:!!usd,sid:s.id,t:t.id,date:d};
+}
+/* الخصم ده اتسجل خلاص من رسالة البنك: نربطه بالاشتراك بدل ما نسجله مرتين */
+function subTwin(s,d,full,usd){
+  const used={};(D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t)used[p.t]=1;}));
+  const acc=subAcc(s);
+  let twin=usd?smsUsdTwin(acc,usd,d,true):null;
+  if(!twin){const c=D.txns.filter(x=>(x.book||'me')==='me'&&x.kind==='expense'&&x.fromSms&&x.account===acc&&!x.usd
+      &&Math.abs((Number(x.amount)||0)-full)<0.005&&x.date>=dayShift(d,-1)&&x.date<=dayShift(d,1)&&!used[x.id]);
+    twin=c.length===1?c[0]:null;}
+  if(twin&&used[twin.id])twin=null;
+  return twin;
+}
+/* بنحفظ شكل الحركة قبل ما تتربط، عشان «تراجع آخر دفعة» يرجّعها زي ما كانت بدل ما يمسحها */
+function subTwinTake(s,t){
+  const nv=v=>v===undefined?null:v;
+  const tw={cat:nv(t.cat),note:nv(t.note),needs:nv(t.needs)};
+  if(!t.cat||t.cat==='other')t.cat=s.cat||'subs';
+  if(!t.note||t.note===t.place||t.note==='خصم')t.note=s.name;
+  delete t.needs;
+  return tw;
 }
 function autoCharge(){
   const done=[];
@@ -2401,11 +2438,65 @@ function syncMerge(base,local,remote){
   const strip=o=>{const c=Object.assign({},o);Object.keys(SYNC_SKIP).forEach(k=>delete c[k]);return c;};
   const lNew=(local._sv||0)>=(remote._sv||0);
   const m=merge3(base?strip(base):undefined,strip(local),strip(remote),lNew);
+  syncFixGroups(m,local,remote);
   m._sv=Math.max(local._sv||0,remote._sv||0);
   return m;
 }
-const ghBase=()=>{try{const s=localStorage.getItem(BASEKEY);return s?JSON.parse(s):null;}catch(e){return null;}};
-const ghSetBase=o=>{try{localStorage.setItem(BASEKEY,JSON.stringify(o));}catch(e){}};
+/* بعد الدمج: العملية الواحدة (حركات مربوطة ببعض) تفضل كاملة. لو جهاز مسحها كلها والتاني عدّل
+   جزء منها، بترجع كلها زي ما هي في الجهاز اللي عدّل بدل ما يفضل منها حتة لوحدها. ونفس الكلام
+   لو فيه سجل (فلوس عند حد، سلفة عهدة، رسوم) مربوط بحركة اتمسحت. والتقفيلة لنفس الفترة ماتتكررش */
+function syncFixGroups(m,local,remote){
+  if(!Array.isArray(m.txns))return;
+  const sides=[local,remote].map(o=>Array.isArray(o&&o.txns)?o.txns:[]);
+  const keyOf=t=>{const k=[];if(t.link)k.push('l:'+t.link);if(t.op)k.push('o:'+t.op);return k;};
+  for(let guard=0;guard<5;guard++){
+    const have={};m.txns.forEach(t=>have[t.id]=1);
+    const groupsIn=list=>{const g={};list.forEach(t=>keyOf(t).forEach(k=>{(g[k]=g[k]||[]).push(t);}));return g;};
+    const mg=groupsIn(m.txns);
+    const add=[];
+    sides.forEach((list,si)=>{
+      const other=sides[1-si];const sg=groupsIn(list),og=groupsIn(other);
+      Object.keys(mg).forEach(k=>{
+        if(og[k]||!sg[k])return;              /* الناحية التانية لسه عندها العملية: ده تعديل عادي */
+        sg[k].forEach(t=>{if(!have[t.id]){have[t.id]=1;add.push(t);}});
+      });
+    });
+    /* سجلات مربوطة بحركة اتمسحت */
+    const need={};
+    ['owed','floatLoans','ofees'].forEach(n=>(m[n]||[]).forEach(o=>{if(o&&o.srcTxn&&!have[o.srcTxn])need[o.srcTxn]=1;}));
+    (m.subs||[]).forEach(su=>(su.dues||[]).forEach(d=>{if(d&&d.srcTxn&&!have[d.srcTxn])need[d.srcTxn]=1;}));
+    Object.keys(need).forEach(id=>{
+      const t=sides[0].find(x=>x.id===id)||sides[1].find(x=>x.id===id);
+      if(t&&!have[id]){have[id]=1;add.push(t);}
+    });
+    if(!add.length)break;
+    add.forEach(t=>m.txns.push(JSON.parse(JSON.stringify(t))));
+    /* ومعاها كل اللي متسجل مع العملية (فلوس عند حد، سلف العهدة، رسوم...) وخانات العملية نفسها */
+    const addIds={},addOps={};add.forEach(t=>{addIds[t.id]=1;if(t.op)addOps[t.op]=1;});
+    [local,remote].forEach(S=>{if(!S)return;
+      ['owed','floatLoans','ofees','arrPend'].forEach(c=>{
+        const src=Array.isArray(S[c])?S[c]:[];if(!src.length)return;
+        if(!Array.isArray(m[c]))m[c]=[];
+        const hasR={};m[c].forEach(x=>{if(x&&x.id!==undefined)hasR[x.id]=1;});
+        src.forEach(x=>{if(!x||hasR[x.id])return;
+          if((x.op&&addOps[x.op])||(x.srcTxn&&addIds[x.srcTxn])||(x.src&&addIds[x.src])){hasR[x.id]=1;m[c].push(JSON.parse(JSON.stringify(x)));}});
+      });
+      Object.keys(addOps).forEach(k=>{if(S.ops&&S.ops[k]&&!(m.ops&&m.ops[k])){if(!m.ops)m.ops={};m.ops[k]=JSON.parse(JSON.stringify(S.ops[k]));}});
+    });
+  }
+  if(Array.isArray(m.closings)){
+    const seen={};
+    const drop={};
+    m.closings=m.closings.filter(c=>{if(!c)return false;const k=(c.from||'')+'|'+(c.to||'');
+      if(seen[k]){(c.settleIds||[]).forEach(id=>drop[id]=1);return false;}seen[k]=1;return true;});
+    if(Object.keys(drop).length)m.txns=m.txns.filter(t=>!drop[t.id]);
+    if(m.closings.length){const last=m.closings.reduce((a,c)=>(c.to||'')>(a||'')?c.to:a,'');if(last&&(m.lastClose||'')<last)m.lastClose=last;}
+  }
+}
+/* الأساس متعلّم بالـgist بتاعه: بيفضل لو فصلت ورجعت وصلت نفس الحساب، ومايتاخدش لو gist تاني */
+const ghBase=()=>{try{const s=localStorage.getItem(BASEKEY);if(!s)return null;const o=JSON.parse(s);
+  if(o&&o.__g!==undefined&&o.d!==undefined)return (o.__g===ghGist)?o.d:null;return o;}catch(e){return null;}};
+const ghSetBase=o=>{try{localStorage.setItem(BASEKEY,JSON.stringify({__g:ghGist,d:o}));}catch(e){}};
 /* التسجيل التلقائي (اشتراكات، تأمين، دمغة، عوائد...) بيستنى لحد ما المزامنة تخلص،
    عشان مايتسجلش نفس الحاجة على جهازين */
 let autoHold=false, ghBusyP=null, ghAgain=false;
@@ -2451,10 +2542,9 @@ async function ghSyncOnce(opt){
       if(!remote)merged=local;
       else if(opt.takeRemote)merged=remote;
       else if(opt.connect&&!base){
-        /* ربط جهاز فيه بيانات: اللي على GitHub هو الأساس، ونضيف بس حركات الجهاز اللي مش موجودة فيه */
-        merged=JSON.parse(JSON.stringify(remote));
-        const have={};(merged.txns||[]).forEach(t=>have[t.id]=1);
-        (local.txns||[]).forEach(t=>{if(!have[t.id])merged.txns.push(t);});
+        /* ربط جهاز فيه بيانات من غير أساس: بندمج الاتنين عنصر عنصر (حركات وحسابات وكل القوايم)،
+           ولو نفس الحاجة مختلفة بتكسب اللي على GitHub */
+        merged=syncMerge(null,Object.assign({},local,{_sv:0}),remote);
       }
       /* أول مزامنة من غير أساس (أول مرة بعد التحديث): النسخة الأحدث كلها، زي الأول */
       else if(!base)merged=(local._sv||0)>(remote._sv||0)?local:remote;
@@ -2467,7 +2557,10 @@ async function ghSyncOnce(opt){
       const rStr=remote?JSON.stringify(Object.assign({},remote,{ghLastSync:''})):'';
       if(mStr!==rStr){
         await ghPatch(ghGist,JSON.stringify(merged));
-        if(JSON.stringify(D)!==before){ghSetBase(merged);continue;}
+        /* حفظت حاجة وإحنا بنرفع: اللي رفعناه بقى الأساس، وتعديلك الجديد يتدمج فوقه (من غير ما يضيع اللي جه من الجهاز التاني) */
+        if(JSON.stringify(D)!==before){const cur=D;D=syncMerge(JSON.parse(before),cur,merged);
+          try{normalizeData();sortTxns();}catch(e){}
+          ghSetBase(merged);try{localStorage.setItem(SKEY,JSON.stringify(D));}catch(e){}continue;}
       }
       changed=!jeq(Object.assign({},merged,{ghLastSync:'',_sv:0}),Object.assign({},local,{ghLastSync:'',_sv:0}));
       ghSetBase(merged);
@@ -2502,7 +2595,7 @@ async function ghConnect(){
     await ghSync({takeRemote:!(D.txns||[]).length,connect:true});
   }catch(err){
     ghToken='';ghGist='';
-    try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);localStorage.removeItem(BASEKEY);}catch(e){}
+    try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);}catch(e){}
     ghState.busy=false;ghState.msg=ghErrMsg(err);render();
   }
 }
@@ -2665,11 +2758,19 @@ function smsUsdTxn(acc,usd,bal,dt,note,place){
     usd:usd,rate:h>0?Math.round(h/usd*100)/100:D.rate,hold:h>0?true:undefined,pending:true,fromSms:true,needs:true};
 }
 /* خصم بالدولار متسجل خلاص ولسه محجوز: نفس الحساب ونفس المبلغ بالدولار، في حدود ٣ أيام */
-function smsUsdTwin(acc,usd,dt){
+function smsUsdTwin(acc,usd,dt,smsOnly){
   if(!acc)return null;
   const lo=dayShift(dt,-3), hi=dayShift(dt,3);
-  const c=D.txns.filter(t=>(t.book||'me')==='me'&&t.kind==='expense'&&t.pending&&t.account===acc
+  const c=D.txns.filter(t=>(t.book||'me')==='me'&&t.kind==='expense'&&t.pending&&t.account===acc&&(!smsOnly||t.fromSms)
     &&Math.abs((Number(t.usd)||0)-usd)<0.005&&t.date>=lo&&t.date<=hi);
+  return c.length===1?c[0]:null;
+}
+/* حركة دفعة اشتراك (بالجنيه) بنفس الحساب والمبلغ في حدود يوم، ولسه مالهاش رسالة */
+function subPaidTwin(acc,amt,dt){
+  if(!acc)return null;
+  const ids={};(D.subs||[]).forEach(s=>(s.payments||[]).forEach(p=>{if(p.t)ids[p.t]=1;}));
+  const c=D.txns.filter(t=>ids[t.id]&&!t.fromSms&&!t.smsSeen&&!t.usd&&t.kind==='expense'&&t.account===acc
+    &&Math.abs((Number(t.amount)||0)-amt)<0.005&&t.date>=dayShift(dt,-1)&&t.date<=dayShift(dt,1));
   return c.length===1?c[0]:null;
 }
 function smsUsdHold(t,bal){
@@ -2742,12 +2843,12 @@ function payChips(sel,fn,exclude,bk,key,allowSave,opt){
     .concat(opt.other?[{id:'__other__',label:'حد دفعهالي'}]:[]),sel,fn);
 }
 /* pre/post: باراميترات قبل وبعد التاريخ لو الدالة محتاجاها */
-function dateField(val,fn,pre,post){
+function dateField(val,fn,pre,post,min){
   const a=pre?pre+',':'', z=post?','+post:'';
   return `<div class="drow">
       <button class="chip sm${val===today()?' on':''}" onclick="${fn}(${a}'${today()}'${z})">النهارده</button>
       <button class="chip sm${val===yesterday()?' on':''}" onclick="${fn}(${a}'${yesterday()}'${z})">إمبارح</button>
-      <input class="f" type="date" value="${val}" onchange="${fn}(${a}this.value${z})">
+      <input class="f" type="date" value="${val}"${min?' min="'+min+'"':''} onchange="${fn}(${a}this.value${z})">
     </div>`;
 }
 function acctRow(a,b,extra,attrs){
@@ -3823,7 +3924,7 @@ function txnRow(t,noDate){
   const color=inc?'var(--mint)':tr?'var(--muted)':'var(--clay)';
   const glyph=inc?'↑':tr?'⇄':'↓';
   const bg=inc?'rgba(79,208,141,.15)':tr?'rgba(141,150,162,.15)':'rgba(255,111,96,.14)';
-  const title=(t.book==='office')?(t.kind==='float'?('استلام عهدة'+(t.note?' — '+t.note:'')):(t.item||t.note||t.merchant||'بند')):(t.note||t.merchant||(t.kind==='income'&&!t.repay?icatOf(t).label:inc?'دخل':tr?'تحويل':c.label));
+  const title=(t.book==='office')?(t.kind==='float'?(t.adj?'تظبيط رصيد':('استلام عهدة'+(t.note?' — '+t.note:''))):(t.item||t.note||t.merchant||'بند')):(t.note||t.merchant||(t.kind==='income'&&!t.repay?icatOf(t).label:inc?'دخل':tr?'تحويل':c.label));
   return `
   <div class="tx" id="tx-${t.id}" onclick="app.toggleTxn('${t.id}')">
     <span class="ic" style="background:${bg};color:${color}">${glyph}</span>
@@ -3839,8 +3940,8 @@ function txnRow(t,noDate){
     ${(function(){
       if(editOp&&editInline===t.id)return `<div class="inedit">${inlineForm()}</div>`;
       const icq=(t.fromOffice&&t.kind==='income'&&(t.book||'me')==='me')?`<div style="margin-top:8px"><div class="hint" style="margin:0 0 6px">نوعه في دخلك:</div>${pickRow('ticat'+t.id,D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),icatOf(t).id,"((x)=>app.setTxnIcat('"+t.id+"',x))",1)}</div>`:'';
-      const locked=t.closeSet||((t.book==='office')&&(t.kind==='settle'||(D.lastClose&&t.date<=D.lastClose)));
-      if(locked)return `<div class="hint">${(t.closeSet||t.kind==='settle')?'دي حركة من التقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
+      const locked=txnLock(t);
+      if(locked)return icq+`<div class="hint">${locked==='set'?'دي حركة من التقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
       return eTxn&&eTxn.id===t.id?txnEditForm(t):icq+`<div class="chips" style="margin-top:10px">
         <button class="chip sm" onclick="app.startTxnEdit(event,'${t.id}')">عدّل</button>
         ${(t.book!=='office'&&t.kind==='expense'&&!t.refundDone)?`<button class="chip sm${t.refundSince?' on':''}" onclick="app.toggleRefundWait(event,'${t.id}')">${t.refundSince?'مش مستني مرتجع':'مستني مرتجع'}</button>`:''}
@@ -3998,7 +4099,7 @@ function vAddOffice0(){
     `}
 
     <label class="f">التاريخ</label>
-    ${dateField(draftO.date,'app.oDate')}
+    ${dateField(draftO.date,'app.oDate','','',D.lastClose?dayShift(D.lastClose,1):'')}
 
     ${(k==='expense'&&!oMineAll()&&!(isCreditAcc(draftO.account)&&draftO.cardFrom==='later'))?`<label class="f">اللي خرج من العهدة (لو مختلف)</label>
     <input class="f" type="text" inputmode="decimal" placeholder="سيبها فاضية لو نفس المبلغ"
@@ -4190,7 +4291,7 @@ function txnEditForm(t){
       ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me','',t.kind==='transfer',(t.kind==='transfer'||(t.kind==='settle'&&t.dir==='out'))?{src:1}:null)}`}
 
     <label class="f">التاريخ</label>
-    ${dateField(eTxn.date,'app.eTxnDate')}
+    ${dateField(eTxn.date,'app.eTxnDate','','',(D.lastClose&&txnGroup(D.txns.find(x=>x.id===eTxn.id)||{}).some(x=>x.book==='office'))?dayShift(D.lastClose,1):'')}
 
     <button class="btn" onclick="app.saveTxnEdit('${t.id}')">احفظ التعديل</button>
     <button class="btn ghost" onclick="app.cancelTxnEdit()">إلغاء</button>
@@ -4843,13 +4944,22 @@ function repLines(r){
   </div>`;
 }
 
+/* ماينفعش تقفل لتاريخ لسه ماجاش، ولا فترة مفيهاش ولا حركة */
+function closeWhy(){
+  if(!closeTo)return 'اختار تاريخ';
+  if(D.lastClose&&closeTo<=D.lastClose)return 'آخر تقفيل كان لغاية '+dayLabel(D.lastClose)+' — اختار تاريخ بعده.';
+  if(closeTo>today())return 'التاريخ ده لسه ماجاش — اختار النهارده أو قبله.';
+  const from=periodFrom();
+  if(!D.txns.some(t=>t.book==='office'&&t.date>=from&&t.date<=closeTo))return 'مفيش ولا حركة في الفترة دي، فمفيش حاجة تتقفل.';
+  return '';
+}
 function wClose(){
   const from=periodFrom();
   const r=officeReport(from,closeTo);
   return `<div style="margin-top:18px">
     <div class="sec-h"><h3 style="font-size:14px">الفترة</h3><span>${dayLabel(periodStart(from))} ← ${dayLabel(closeTo)}</span></div>
     <label class="f">لغاية تاريخ</label>
-    ${dateField(closeTo,'app.setCloseTo')}
+    ${dateField(closeTo,'app.setCloseTo','','',D.lastClose?dayShift(D.lastClose,1):'')}
 
     ${repLines(r)}
 
@@ -4859,7 +4969,7 @@ function wClose(){
     <div class="sec"><div class="sec-h"><h3>اقفل الفترة</h3></div>
       ${pickRow('closemode',[{id:'carry',label:'الباقي ينتقل'},{id:'settle',label:r.result<0?'استلمت الفرق':'سدّدت الباقي'}],closeMode,'app.setCloseMode',1)}
       ${closeMode==='carry'?'<div class="hint">الباقي هيفضل في حسابات الدفتر ويبقى رصيد مرحّل للفترة الجاية.</div>':closeSettleForm(r)}
-      ${(D.lastClose&&closeTo<=D.lastClose)?`<div class="note warn" style="margin-top:12px">آخر تقفيل كان لغاية ${dayLabel(D.lastClose)} — اختار تاريخ بعده.</div>`
+      ${closeWhy()?`<div class="note warn" style="margin-top:12px">${closeWhy()}</div>`
         :`<button class="btn" id="closebtn" ${closeOk(r)?'':'disabled'} onclick="app.closePeriod()">اقفل لغاية ${dayLabel(closeTo)}</button>`}
     </div>
 
@@ -6193,7 +6303,7 @@ function vSettings(){
     ${setCard('',[setSec('wipe','<span style="color:var(--clay)">مسح البيانات</span>','',()=>`
 
 
-      <p class="hint" style="margin-top:-4px">بيمسح كل حاجة في البرنامج ومش بيرجع تاني.</p>
+      <p class="hint" style="margin-top:-4px">بيمسح كل حاجة من الموبايل ده ومش بيرجع تاني.${ghToken?' المزامنة هتتفصل الأول، فالنسخة اللي على GitHub وباقي أجهزتك مش هيتمسحوا.':''}</p>
       ${confirmKey==='wipe'
       ?`<button class="btn danger" onclick="app.wipe()">أكد مسح كل البيانات</button>
         <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
@@ -6348,11 +6458,22 @@ function undoRecord(k,pre,ui){
   const a=dCmp(pre),b=dCmp(post);
   if(jeq(a,b))return;
   const txChanged=!jeq(a.txns,b.txns);
-  if(!txChanged&&!_lastToast)return;
+  /* تغيير في اشتراك أو حساب أو شهادة... من غير رسالة: برضو بيتسجل، عشان زرار التراجع
+     مايفضلش شايل عملية قديمة ويرجّعها بعد حاجة اتعملت بعدها */
+  const UNDO_COLS=['subs','certs','installments','owed','accounts','vouchers','vehicles','gams','closings','floatLoans','ofees','cats','icats','ocats','arrPend'];
+  const chCol=UNDO_COLS.find(c=>!jeq(a[c],b[c]));
+  if(!txChanged&&!_lastToast&&!chCol)return;
+  if(!txChanged&&!_lastToast&&!_undoLbl)_undoLbl=undoColLabel(chCol,a,b);
   lastUndo={pre:pre,post:post,ui:ui,label:_undoLbl||undoLabel(a,b)||_lastToast||'آخر تعديل'};_undoLbl='';
   undoShown=true;
   showUndoToast();
   if(tab==='log')bgRender();
+}
+const UNDO_COL_NM={subs:'اشتراك',certs:'شهادة',installments:'قسط',owed:'فلوس عند حد',accounts:'حساب',vouchers:'فاوتشر',
+  vehicles:'عربية',gams:'جمعية',closings:'تقفيل',floatLoans:'سلفة عهدة',ofees:'رسوم',cats:'تصنيف',icats:'نوع دخل',ocats:'تصنيف مكتب',arrPend:'مصاريف تدبير'};
+function undoColLabel(c,a,b){
+  const n=UNDO_COL_NM[c]||'';const la=(a[c]||[]).length,lb=(b[c]||[]).length;
+  return lb>la?'ضفت '+n:lb<la?'مسحت '+n:'عدّلت '+n;
 }
 /* اسم العملية من اللي اتغير: سجّلت / مسحت / عدّلت + اسم الحركة */
 function undoLabel(a,b){
@@ -6655,6 +6776,12 @@ function opWrap(o,f,k,args){
   const r=f.apply(o,args);
   if(JSON.stringify(D)===mid){if(editOp){D=JSON.parse(pre);}return r;}   /* الحفظ ماتمّش */
   OPCOLS.forEach(c=>(D[c]||[]).forEach(x=>{if(x&&x.id&&!before[c][x.id])x.op=id;}));
+  /* سطر في دفتر المكتب بتاريخ جوه فترة متقفلة: ماينفعش (ولا عملية قديمة متقفلة تتعدل) */
+  if(D.lastClose&&(D.txns.some(t=>t.op===id&&t.book==='office'&&t.date<=D.lastClose)
+     ||(gone&&JSON.parse(pre).txns.some(t=>t.op===id&&(t.closeSet||(t.book==='office'&&t.date<=D.lastClose)))))){
+    D=JSON.parse(pre);try{localStorage.setItem(SKEY,pre);}catch(e){}
+    if(form==='entry')draft=spec;else if(form==='office')draftO=spec;else scan=spec;
+    render();app.toast('التاريخ ده جوه فترة متقفلة — آخر تقفيل '+dayLabel(D.lastClose));return r;}
   if(!D.txns.some(t=>t.op===id)&&!(D.floatLoans||[]).some(l=>l.op===id)){
     /* مفيش سطور جديدة: يا إما الفاتورة اتسجلت على خصم موجود، يا إما حاجة غلط وقت التعديل */
     if(gone){D=JSON.parse(pre);save();render();}
@@ -6763,6 +6890,7 @@ const app=new Proxy({
   oShared(v){draftO.shared=v;render();},
   oSave(){
     if(ynLast)return;
+    if(closedDay(draftO.date)){app.toast('التاريخ ده جوه فترة متقفلة — آخر تقفيل '+dayLabel(D.lastClose));return;}
     const amt=Number(onlyNum(draftO.amount))||0;
     if(amt<=0)return;
     if(oMineAll()&&!draftO.account)draftO.account=officeCashId();
@@ -6895,7 +7023,7 @@ const app=new Proxy({
   viewClose(id){viewClose=viewClose===id?'':id;render();},
   closePeriod(){
     /* التقفيل مايرجعش لورا: لازم بعد آخر تقفيل */
-    if(!closeTo||(D.lastClose&&closeTo<=D.lastClose)){app.toast('لازم تاريخ بعد آخر تقفيل');return;}
+    if(closeWhy()){app.toast(closeWhy());return;}
     const from=periodFrom();
     const r=officeReport(from,closeTo);
     if(!closeOk(r))return;
@@ -7023,7 +7151,7 @@ const app=new Proxy({
     /* التراجع عن تسجيل لوحده: الاشتراك يرجع «مستني الخصم» ومايتسجلش لوحده تاني */
     if(last&&last.t===n.t){app.undoSubPay(n.sid);if(s)s.held=s.next;save();render();}else{save();render();}
   },
-  go(t){if(t!=='scan')needsTxn=null;editInline=null;openItem=null;
+  go(t){if(t!=='scan'&&!(scan&&scan.stage==='review'))needsTxn=null;editInline=null;openItem=null;
     if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();if(scan.stage==='review')scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};}
     rememberY();renderLock=0;renderPending=false;undoAsk=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};setSub=null;catEdit=null;openRow={};if(t==='settings')accCfgInit();render();restoreY();},
   setWtab(w){rememberY();wtab=w;payFor=null;convFor=null;editAcct=null;render();restoreY();},
@@ -7042,6 +7170,7 @@ const app=new Proxy({
   startTxnEdit(e,id){
     e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);if(!t)return;
+    if(txnLock(t)){app.toast('اتراجع عن التقفيل الأول');return;}
     /* في السجل والرئيسية: التعديل بيفتح مكان الحركة، لو العملية من نفس الدفتر */
     const inl=(tab==='log'||(tab==='home'&&D.txns.filter(x=>(x.book||'me')==='me').slice(0,6).some(x=>x.id===id)&&book==='me'))?id:false;
     const go=oid=>{const op=D.ops&&D.ops[oid];_inlNext=(inl&&op&&(op.b||'me')===book)?inl:false;openTxn=id;openOp(oid);};
@@ -7094,6 +7223,7 @@ const app=new Proxy({
     const it=t.items[ix];
     const amt=Number(it.amount)||0;
     if(t.items.length<2){alert('الفاتورة فيها صنف واحد — عدّل الحركة نفسها بدل كده.');return;}
+    if(closedDay(t.date)){app.toast('التاريخ ده جوه فترة متقفلة — آخر تقفيل '+dayLabel(D.lastClose));return;}
     // شيل الصنف من فاتورتك وحوّله لدفتر المكتب
     t.items=t.items.filter((_,k)=>k!==ix);
     t.amount=Math.round((Number(t.amount)-amt)*100)/100;
@@ -7120,6 +7250,8 @@ const app=new Proxy({
   cancelTxnEdit(){eTxn=null;render();},
   saveTxnEdit(id){
     const t=D.txns.find(x=>x.id===id);if(!t||!eTxn)return;
+    if(txnLock(t)){app.toast('اتراجع عن التقفيل الأول');return;}
+    if(eTxn.date&&eTxn.date!==t.date&&closedDay(eTxn.date)&&txnGroup(t).some(x=>x.book==='office')){app.toast('التاريخ ده جوه فترة متقفلة');return;}
     const old=JSON.parse(JSON.stringify(t));
     const hasItems=t.items&&t.items.length;
     const same=linkSame(t);
@@ -7197,7 +7329,7 @@ const app=new Proxy({
   },
   delTxn(e,id){e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);if(!t)return;
-    if(t.closeSet){app.toast('اتراجع عن التقفيل الأول');return;}
+    if(txnLock(t)){app.toast('اتراجع عن التقفيل الأول');return;}
     /* العملية كلها بتتمسح: كل سطورها في الدفترين وكل اللي اتعمل معاها */
     let ids;
     if(t.op&&D.ops&&D.ops[t.op]){ids=D.txns.filter(x=>x.op===t.op).map(x=>x.id);
@@ -7209,10 +7341,13 @@ const app=new Proxy({
     const has=v=>ids.indexOf(v)>-1;
     D.txns.filter(x=>has(x.id)).forEach(refundVoucher);
     D.owed=(D.owed||[]).filter(o=>!has(o.srcTxn)||o.got||(Number(o.gotAmount)||0)>0);
+    /* اللي فضل منها (اتحصّل) مابقاش مربوط بحركة اتمسحت */
+    D.owed.forEach(o=>{if(has(o.srcTxn))delete o.srcTxn;});
     D.floatLoans=(D.floatLoans||[]).filter(l=>!has(l.srcTxn));
     D.arrPend=(D.arrPend||[]).filter(x=>!has(x.src));
     D.ofees=(D.ofees||[]).filter(fx=>!has(fx.srcTxn));
     (D.subs||[]).forEach(s=>{s.dues=(s.dues||[]).filter(d=>!has(d.srcTxn)||d.got||(Number(d.gotAmount)||0)>0);
+      s.dues.forEach(d=>{if(has(d.srcTxn))delete d.srcTxn;});
       /* دفعة اشتراك اتمسحت حركتها: الدفعة تفضل (عشان مايتسجلش تاني) ومن غير مصاريف تدبير مستنية */
       (s.payments||[]).forEach(p=>{if(has(p.t)){delete p.t;if(p.feePending){delete p.feePending;delete p.fee;}}});});
     /* عائد شهادة اتمسح: لو آخر عائد، الشهر بيرجع «مستني العائد»؛ لو عائد قديم، الشهر يفضل متعلّم */
@@ -7726,7 +7861,8 @@ const app=new Proxy({
         /* نفس الرسالة اتلزقت قبل كده: نفس النوع والحساب والمبلغ والتاريخ والمكان */
         const nn=place||String(o.note||'').trim()||(kind==='income'?'إيداع':kind==='transfer'?'تحويل':'خصم');
         if(!usd&&D.txns.some(t=>t.fromSms&&t.kind===kind&&(t.account||'')===acc&&Math.abs(Number(t.amount)-amt)<0.005
-          &&t.date===dt&&String(t.place||t.note||'')===nn&&before[t.id])){dup++;return;}
+          &&t.date===dt&&String(t.place||t.note||'')===nn&&before[t.id])
+          ||(!usd&&kind==='expense'&&D.txns.some(t=>t.smsSeen===nn+'|'+dt&&t.account===acc&&Math.abs(Number(t.amount)-amt)<0.005&&before[t.id]))){dup++;return;}
         if(o.kind==='income'){
           D.txns.unshift({id:uid(),book:'me',kind:'income',amount:amt,account:acc,date:dt,place:place||undefined,
             note:place||String(o.note||'').trim()||'إيداع',fromSms:true,needs:(!acc||odd)?true:undefined});
@@ -7740,7 +7876,10 @@ const app=new Proxy({
           if(old){smsUsdHold(old,o.bal);n--;upd++;}
           else D.txns.unshift(smsUsdTxn(acc,amt,o.bal,dt,place||String(o.note||'').trim()||'خصم',place));
         }else{
-          D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:amt,cat:'other',account:acc,date:dt,
+          /* خصم اشتراك اتسجل بإيدك قبل الرسالة: مايتسجلش تاني */
+          const sp=subPaidTwin(acc,amt,dt);
+          if(sp){sp.smsSeen=nn+'|'+dt;n--;upd++;}
+          else D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:amt,cat:'other',account:acc,date:dt,
             note:place||String(o.note||'').trim()||'خصم',place:place||undefined,fromSms:true,needs:true});
         }
         n++;
@@ -7921,7 +8060,17 @@ const app=new Proxy({
   setOfficeBalance(id,cur){
     const v=numVal('obalin');
     const a=D.accounts.find(x=>x.id===id);if(!a)return;
-    a.openingOffice=(Number(a.openingOffice)||0)+(v-cur);
+    const dv=Math.round((v-cur)*100)/100;
+    if(D.lastClose){
+      /* بعد أول تقفيل: الرصيد الافتتاحي مايتغيرش (كان هيغيّر أرقام فترات اتقفلت)، بيتسجل سطر فرق بتاريخ النهارده */
+      if(Math.abs(dv)>=0.005){
+        const dt=closedDay(today())?dayShift(D.lastClose,1):today();
+        D.txns.unshift(dv>0
+          ?{id:uid(),book:'office',kind:'float',amount:dv,account:id,date:dt,adj:true,note:'تظبيط رصيد'}
+          :{id:uid(),book:'office',kind:'expense',amount:-dv,account:id,date:dt,adj:true,item:'فرق رصيد',ocat:defOcat(),note:'فرق رصيد'});
+        sortTxns();
+      }
+    }else a.openingOffice=(Number(a.openingOffice)||0)+dv;
     editAcct=null;save();render();app.toast('اتظبط');
   },
   setBalance(id,cur){
@@ -7972,6 +8121,7 @@ const app=new Proxy({
     D.accounts=D.accounts.filter(a=>a.id!==id);
     D.txns=D.txns.filter(t=>!has(t.id));
     D.owed=(D.owed||[]).filter(o=>!has(o.srcTxn)||o.got||(Number(o.gotAmount)||0)>0);
+    D.owed.forEach(o=>{if(has(o.srcTxn))delete o.srcTxn;});
     D.floatLoans=(D.floatLoans||[]).filter(l=>!has(l.srcTxn));
     D.arrPend=(D.arrPend||[]).filter(x=>!has(x.src)&&x.acct!==id);
     D.ofees=(D.ofees||[]).filter(fx=>!has(fx.srcTxn));
@@ -8233,6 +8383,7 @@ const app=new Proxy({
   setRefundTo(id){refundTo=id;render();},
   doRefund(accId,need){
     if(!refundTo||refundTotal()<=0)return;
+    if(closedDay(today())){app.toast('النهارده جوه فترة متقفلة — سجّلها بكره');return;}
     const owed=Number(need)||0;
     let left=Math.min(refundTotal(),owed);
     Object.keys(refundParts).forEach(src=>{
@@ -8249,7 +8400,7 @@ const app=new Proxy({
       // الزيادة: بتتزود على نفس بند المصروف وتدخل رصيدك
       const over=Math.round((amt-cover)*100)/100;
       if(over>0.005){
-        const target=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.account===accId);
+        const target=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.account===accId&&!txnLock(t));
         if(target){
           target.real=target.real||target.amount;
           target.amount=Math.round((Number(target.amount)+over)*100)/100;
@@ -8572,18 +8723,27 @@ const app=new Proxy({
   confirmPaySub(id){
     const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial'){paySubFor=null;render();return;}
     const usd=s.cur==='USD'?subPrice(s):0;
-    const hold=usd?holdFromBal(subAcc(s),paySubBal,0):0;
+    /* لو فيه رسالة بنك بالخصم ده متسجلة ولسه محجوزة، مبلغها داخل في رصيد البنك اللي كتبته */
+    const tw0=usd?subTwin(s,paySubDate,0,usd):null;
+    const hold=usd?holdFromBal(subAcc(s),paySubBal,tw0?Number(tw0.amount)||0:0):0;
     const full=usd?(hold>0?hold:Math.round(usd*D.rate*100)/100):subPrice(s);
     /* دفعة الميعاد الحالي بنفس رقم التسجيل التلقائي: لو جهاز تاني سجّلها لوحده مايتكررش بعد المزامنة */
     const dueNow=daysTo(s.next)<=0;
     const tid=(dueNow&&!D.txns.some(x=>x.id===autoId('sub',s.id,s.next)))?autoId('sub',s.id,s.next):uid();
-    const t={id:tid,book:'me',kind:'expense',amount:full,
+    /* لو رسالة البنك بالخصم ده اتسجلت قبل كده: بنربطها بدل ما الخصم يتسجل مرتين */
+    const twin=usd?tw0:subTwin(s,paySubDate,full,0);
+    const t=twin||{id:tid,book:'me',kind:'expense',amount:full,
       cat:s.cat||'subs',account:subAcc(s),date:paySubDate,note:s.name,
       usd:usd||undefined,rate:usd?(hold>0?Math.round(hold/usd*100)/100:D.rate):undefined,
       hold:hold>0?true:undefined,pending:usd?true:undefined};
-    D.txns.unshift(t);
+    let tw=null;
+    if(twin){
+      tw=subTwinTake(s,twin);
+      if(usd&&hold>0&&!twin.hold){tw.amount=twin.amount;tw.rate=twin.rate;tw.set=hold;twin.amount=hold;twin.rate=Math.round(hold/usd*100)/100;twin.hold=true;}
+    }else D.txns.unshift(t);
     if(!s.payments)s.payments=[];
-    const pay={d:paySubDate,t:t.id,paid:full};
+    const pay={d:t.date||paySubDate,t:t.id,paid:Number(t.amount)||full};
+    if(tw)pay.tw=tw;
     promoStep(s,pay);paySubBal='';
     if(subArrOn(s)){
       const est=arrEst(full);
@@ -8615,7 +8775,13 @@ const app=new Proxy({
     const p=s.payments.splice(ix,1)[0];
     if(s.promo&&p.promo)s.promo.left=Number(s.promo.left||0)+1;
     if(s.promo&&p.promoEnd)s.promo.done=false;
-    const ids=[p.t,p.feeTxn].filter(Boolean);
+    /* حركة رسالة البنك اللي اتربطت بالدفعة بتفضل (الخصم حصل فعلًا)، وبترجع زي ما كانت قبل الربط */
+    const tw=p.tw?D.txns.find(t=>t.id===p.t):null;
+    if(tw){['cat','note','needs'].forEach(k=>{if(!(k in p.tw))return;if(p.tw[k]===null||p.tw[k]===undefined)delete tw[k];else tw[k]=p.tw[k];});
+      /* المحجوز يرجع زي ما كان بس لو لسه محجوز بنفس المبلغ (لو المبلغ النهائي اتأكد يفضل) */
+      if(p.tw.set!==undefined&&tw.pending&&Math.abs((Number(tw.amount)||0)-p.tw.set)<0.005){
+        tw.amount=p.tw.amount;tw.rate=p.tw.rate;delete tw.hold;}}
+    const ids=[tw?null:p.t,p.feeTxn].filter(Boolean);
     D.txns=D.txns.filter(t=>ids.indexOf(t.id)<0);
     s.dues=(s.dues||[]).filter(d=>d.srcTxn!==p.t||d.got);
     s.next=subPrevOf(s);
@@ -9174,7 +9340,8 @@ const app=new Proxy({
   ghSyncNow(){return ghSync();},
   ghDisconnect(){
     ghToken='';ghGist='';
-    try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);localStorage.removeItem(BASEKEY);}catch(e){}
+    /* الأساس بيفضل: لو رجعت وصلت نفس الحساب، تعديلاتك وقت الفصل تتدمج صح */
+    try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);}catch(e){}
     confirmKey='';ghState={busy:false,msg:''};render();
   },
   editKey(){showKeyEdit=true;confirmKey='';render();},
@@ -9212,12 +9379,21 @@ const app=new Proxy({
   importData(el){
     const f=el.files&&el.files[0];el.value='';if(!f)return;
     const r=new FileReader();
-    r.onload=()=>{try{const d=JSON.parse(r.result);
-      if(d.accounts&&d.txns){D=d;normalizeData();sortTxns();_svDay='';save();msg='البيانات رجعت.';render();}else alert('الملف مش سليم.');}
-      catch(e){alert('الملف مش سليم.');}};
+    /* بنجرّب الملف الأول على نسخة، ولو فيه مشكلة بياناتك بتفضل زي ما هي */
+    r.onload=()=>{const keep=D;try{const d=JSON.parse(r.result);
+      const ok=d&&Array.isArray(d.accounts)&&Array.isArray(d.txns)&&d.accounts.every(a=>a&&typeof a==='object'&&a.id)&&d.txns.every(t=>t&&typeof t==='object'&&t.id&&t.kind);
+      if(!ok)throw new Error('bad');
+      D=d;normalizeData();sortTxns();balances('me');balances('office');vHome();
+      /* نسخة قديمة رجعت: الأساس بيتشال، فالمزامنة الجاية بتجمع الناحيتين بدل ما تمسح الأحدث من GitHub */
+      try{localStorage.removeItem(BASEKEY);}catch(e){}
+      _svDay='';save();msg='البيانات رجعت.';render();}
+      catch(e){D=keep;render();alert('الملف مش سليم، وبياناتك زي ما هي.');}};
     r.readAsText(f);
   },
   wipe(){
+    /* المسح للموبايل ده بس: المزامنة بتتفصل الأول عشان GitHub وباقي الأجهزة مايتمسحوش */
+    clearTimeout(ghPushTimer);ghToken='';ghGist='';
+    try{localStorage.removeItem(GKEY);localStorage.removeItem(GIDKEY);localStorage.removeItem(BASEKEY);}catch(e){}
     try{localStorage.removeItem(SKEY);}catch(e){}
     D=JSON.parse(JSON.stringify(DEFAULT));
     D.certs=[];D.subs=[];D.installments=[];D.vouchers=[];D.closings=[];
