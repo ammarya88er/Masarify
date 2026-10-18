@@ -3838,9 +3838,10 @@ function txnRow(t,noDate){
     ${(editOp&&editInline===t.id)?'':(t.items||[]).map((i,ik)=>`<div class="d${openItem===t.id+':'+ik?' hl':''}" data-ik="${ik}"><span>${esc(i.name)}${Number(i.qty)>1?' <span dir="ltr">×'+i.qty+'</span>':''} <span style="color:${catOf(i.cat).color}">· ${catOf(i.cat).label}</span></span><span class="n">${fmt(i.amount)}</span></div>`).join('')}
     ${(function(){
       if(editOp&&editInline===t.id)return `<div class="inedit">${inlineForm()}</div>`;
+      const icq=(t.fromOffice&&t.kind==='income'&&(t.book||'me')==='me')?`<div style="margin-top:8px"><div class="hint" style="margin:0 0 6px">نوعه في دخلك:</div>${pickRow('ticat'+t.id,D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),icatOf(t).id,"((x)=>app.setTxnIcat('"+t.id+"',x))",1)}</div>`:'';
       const locked=t.closeSet||((t.book==='office')&&(t.kind==='settle'||(D.lastClose&&t.date<=D.lastClose)));
       if(locked)return `<div class="hint">${(t.closeSet||t.kind==='settle')?'دي حركة من التقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
-      return eTxn&&eTxn.id===t.id?txnEditForm(t):`<div class="chips" style="margin-top:10px">
+      return eTxn&&eTxn.id===t.id?txnEditForm(t):icq+`<div class="chips" style="margin-top:10px">
         <button class="chip sm" onclick="app.startTxnEdit(event,'${t.id}')">عدّل</button>
         ${(t.book!=='office'&&t.kind==='expense'&&!t.refundDone)?`<button class="chip sm${t.refundSince?' on':''}" onclick="app.toggleRefundWait(event,'${t.id}')">${t.refundSince?'مش مستني مرتجع':'مستني مرتجع'}</button>`:''}
         <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('txn'+t.id,`app.delTxn(event,'${t.id}')`,'امسح')}</span>
@@ -3973,6 +3974,9 @@ function vAddOffice0(){
         ${yesNo('otome',draftO.toMe,'app.oToMe','لأ، اتصرف بره','أيوه، أخدته')}`}
         ${draftO.toMe?`<label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
           ${payChips(draftO.to,'app.oTo','','me')}
+          <label class="f">نوعه في دخلك؟</label>
+          ${pickRow('otomeicat',D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),oToMeIcat(),'app.oToMeIcat',1)}
+          ${(!draftO.toMeIcat&&oToMeIcat())?'<div class="hint">اتختار من آخر مرة — غيّره لو مش هو.</div>':''}
           <div class="hint">هيتسجل بند منصرف على العهدة باسمه وتصنيفه، ودخل ليك بنفس المبلغ. لو نفس الحساب، الفلوس مش هتتحرك فعليًا — بس هتخرج من نصيب العهدة وتدخل نصيبك.</div>`:''}
 
         <label class="f">فيها عمولات ورسوم؟</label>
@@ -4008,6 +4012,17 @@ function vAddOffice0(){
 
     <button class="btn" id="osave" ${ok?'':'disabled'} onclick="app.oSave()">احفظ</button>
   </div>`;
+}
+/* نوع الدخل للمبلغ اللي جالك من المكتب: اللي اخترته، وإلا اسم البند لو اتسجل قبل كده، وإلا آخر مرة */
+function oToMeIcat(){
+  if(draftO.toMeIcat)return draftO.toMeIcat;
+  /* من الفلوس اللي جاتلك من المكتب بس: نفس البند الأول، وبعده آخر مرة */
+  const L=D.txns.filter(t=>(t.book||'me')==='me'&&t.kind==='income'&&t.fromOffice)
+    .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:(b._q||0)-(a._q||0));
+  const nk=normTxt(normItem(draftO.item||''));
+  const h=(nk&&L.find(t=>normTxt(t.note||'')===nk))||L[0];
+  const id=h?icatOf(h).id:'';
+  return id&&id!=='salary'?id:'';
 }
 /* «فيه جزء من فلوسك؟» ← كلها ولا جزء (التسجيلات القديمة اللي فيها مبلغ = جزء) */
 const oPaidShort=()=>{const a=Number(onlyNum(draftO.amount))||0,p=Number(onlyNum(draftO.paid))||0;return p>0&&p<a-0.005;};
@@ -6449,7 +6464,9 @@ function openOp(id){
   /* العمليات الجديدة (v2) بتتحفظ بالإجابات زي ما هي؛ القديمة بقيمها الافتراضية القديمة */
   const t0=tab;
   if(op.f==='entry'){draft=Object.assign(op.v===2?newDraft():draftDef(),d);if(draft.cat)draft.catPicked=true;book='me';tab='add';}
-  else if(op.f==='office'){draftO=Object.assign(op.v===2?newDraftO():draftODef(),d);book='office';tab='add';}
+  else if(op.f==='office'){draftO=Object.assign(op.v===2?newDraftO():draftODef(),d);
+    if(draftO.toMe&&!draftO.toMeIcat){const mi=D.txns.find(x=>x.op===id&&x.fromOffice&&x.kind==='income');if(mi)draftO.toMeIcat=icatOf(mi).id;}
+    book='office';tab='add';}
   else{if(d.match&&d.matchYes===undefined)d.matchYes=false;
     scan=Object.assign({stage:'review',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]},d);book=op.b||'me';tab='scan';}
   /* من السجل: الفورم بيفتح تحت الحركة نفسها، والشاشة ماتتحركش */
@@ -6616,6 +6633,9 @@ function opWrap(o,f,k,args){
   const spec=JSON.parse(JSON.stringify(form==='entry'?draft:form==='office'?draftO:scan));
   delete spec.catPicked;delete spec.catAuto;
   const inl=editInline, inlNm=inlineFocusName();
+  /* عملية مكتب قديمة: نوع الدخل اللي اتملى من الدخل الموجود مش تغيير */
+  if(form==='office'&&editOp&&D.ops&&D.ops[editOp]&&D.ops[editOp].d&&D.ops[editOp].d.toMeIcat===undefined&&spec.toMeIcat){
+    const mi=D.txns.find(x=>x.op===editOp&&x.fromOffice&&x.kind==='income');if(mi&&icatOf(mi).id===spec.toMeIcat)delete spec.toMeIcat;}
   const pre=JSON.stringify(D);
   const id=editOp||uid();
   const oldOp=editOp&&D.ops&&D.ops[editOp]?D.ops[editOp]:null, oldSpec=oldOp?oldOp.d:null;
@@ -6723,6 +6743,12 @@ const app=new Proxy({
   oMineAll(v){draftO.mineAll=v==='all';if(draftO.mineAll){draftO.mineAmt='';draftO.paid='';draftO.diffTo='';}render();},
   oHasFee(v){draftO.hasFee=v;if(!v)draftO.feeAmt='';render();},
   oToMe(v){draftO.toMe=v;if(!v)draftO.to='';render();},
+  oToMeIcat(id){draftO.toMeIcat=id;render();},
+  /* نوع دخل جالك من المكتب: يتغيّر من السجل على طول، ويتحفظ في العملية */
+  setTxnIcat(id,ic){const t=D.txns.find(x=>x.id===id);if(!t||ic==='salary'||icatOf(t).id===ic)return;
+    /* «دخل تاني» بيتحفظ فاضي زي باقي البرنامج */
+    if(ic==='other_in')delete t.icat;else t.icat=ic;
+    if(t.op&&D.ops&&D.ops[t.op]&&D.ops[t.op].f==='office')D.ops[t.op].d.toMeIcat=ic;save();render();},
   oDiffTo(id){draftO.diffTo=id;render();},
   oCardFrom(id){draftO.cardFrom=id;draftO.cardTo='';render();},
   oCardTo(id){draftO.cardTo=id;render();},
@@ -6835,7 +6861,7 @@ const app=new Proxy({
         const last=D.txns.find(t=>t.book==='office'&&t.kind==='expense'&&t.item===it&&t.date===draftO.date);
         if(last)last.link=link;
         D.txns.unshift({id:uid(),link:link,book:'me',kind:'income',amount:amt,account:draftO.to,
-          date:draftO.date,note:it,fromOffice:true,icat:icatSuggest('','',0,{fromOffice:true})||undefined});
+          date:draftO.date,note:it,fromOffice:true,icat:(oToMeIcat()&&oToMeIcat()!=='other_in')?oToMeIcat():undefined});
       }
       const ofv=draftO.hasFee?(Number(onlyNum(draftO.feeAmt))||0):0;
       if(ofv>0){
