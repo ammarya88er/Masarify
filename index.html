@@ -763,6 +763,11 @@ function normalizeData(){
   }
   }
   D._cats2=1;
+  /* مبلغ دفعة الاشتراك هو مبلغ حركتها دايمًا (لو اتظبط المحجوز أو المبلغ النهائي من مكان تاني) */
+  {const tx={};(D.txns||[]).forEach(t=>tx[t.id]=t);
+   (D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{const t=p.t&&tx[p.t];if(!t)return;
+     const a=Number(t.amount)||0;if(a>0&&Math.abs((Number(p.paid)||0)-a)>0.004){p.paid=a;if(p.feePending&&p.fee!==undefined)p.fee=arrEst(a);}}));}
+
   if(!D.rate)D.rate=50;
   if(D.bookName===undefined)D.bookName='';
   if(!D._autoSince)D._autoSince=today();
@@ -1012,6 +1017,18 @@ function debtItems(who){
 /* «وصلك كام» لازم يتكتب فيها رقم؛ الصفر بس لو فيه حاجة عليك له هتتخصم */
 const owedGotOk=(v,hasDebt)=>{const r=String(onlyNum(v||'')).trim();if(r==='')return false;const n=Number(r)||0;return n>0.005||(hasDebt&&n>=0);};
 /* بيوزّع المبلغ اللي وصل على المستحقات (الأقدم الأول)، والزيادة بتتسجل لوحدها */
+/* في أرقام الشهر التحصيل بيتحسب في شهر الصرفة نفسها، عشان شهر التحصيل مايطلعش بالسالب.
+   بيتحسب كل مرة من الصرفة نفسها (لو تاريخها اتعدل يمشي معاها، ولو اتمسحت التحصيل يرجع لتاريخه) */
+let _sdM={};
+function sdBuild(){
+  const tx={};D.txns.forEach(t=>tx[t.id]=t);const M={};
+  const f=o=>{const st=o&&o.srcTxn&&tx[o.srcTxn];if(!st)return;
+    (o.gotTxns||[]).forEach(g=>{const t=tx[g];if(t&&t.kind==='expense'&&st.date<t.date)M[g]=st.date;});};
+  (D.owed||[]).forEach(f);(D.subs||[]).forEach(su=>(su.dues||[]).forEach(f));
+  _sdM=M;return M;
+}
+/* تاريخ الحركة في أرقام الشهر والملخص (السجل والرصيد بتاريخها الحقيقي) */
+const sDate=t=>_sdM[t.id]||t.date;
 function collectOwed(list,got,acct,who){
   const owedAcct=acct;
   let lastCat='lentcat';
@@ -1157,6 +1174,11 @@ async function fxFetch(force){
   D.fx.at=today();save();if(ch)bgRender();
 }
 const accountsFor=bk=>D.accounts.filter(a=>!a.closed&&(a.scope==='both'||a.scope===(bk||book)));
+/* في الرئيسية: حسابات الدفتر + أي حساب من الدفتر التاني شايل فلوس للدفتر ده (زي فلوس المكتب في كاشك) */
+function accountsShow(bk){
+  const own=accountsFor(bk), b=balances(bk);
+  return own.concat(D.accounts.filter(a=>!a.closed&&!a.credit&&own.indexOf(a)<0&&Math.abs(b[a.id]||0)>=0.005));
+}
 /* «لـ» + اسم الدفتر: «للمكتب» مش «لـالمكتب» */
 /* «لـ» + اسم: «للمكتب»، «لكريم»، ولو الاسم مش عربي «لـJohn» */
 const toName=v=>{const n=String(v||'').trim();return n.indexOf('ال')===0?'لل'+n.slice(2):/^[\u0600-\u06FF]/.test(n)?'ل'+n:'لـ'+n;};
@@ -1973,6 +1995,15 @@ const closedDay=d=>!!(D.lastClose&&d&&d<=D.lastClose);
 const vchLive=v=>!v.used&&!v.given&&(!v.expiry||v.expiry>=today());
 /* الحسابات اللي ممكن الفاوتشرات تيجي منها */
 const vchBanks=()=>(D.accounts||[]).filter(a=>!a.closed&&a.atype==='bank'&&a.scope!=='office');
+/* الناس اللي سجلت منهم فاوتشرات: آخر موبايل وبطاقة لكل اسم */
+function vchOwners(){
+  const m={},out=[];
+  (D.vouchers||[]).slice().sort((a,b)=>String(b.added||'')<String(a.added||'')?-1:1).forEach(v=>{
+    if(!v.owner)return;const k=pk(v.owner);if(m[k])return;m[k]=1;out.push({name:v.owner,phone:v.phone||'',card:v.card||''});});
+  return out;
+}
+const vchAddOk=()=>!!(vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&vchDraft.expiry&&vchDraft.who
+  &&(vchDraft.who==='me'||(String(vchDraft.oname||'').trim()&&String(vchDraft.ophone||'').length>=8&&String(vchDraft.ocard||'').length===6)));
 const vchBank=()=>{const a=(D.accounts||[]).find(x=>x.id===D.vchAcct);return a?a.name:'';};
 const vchSetupOk=()=>!!(vchBank()&&D.cardDigits&&D.phone);
 /* رسالة الفاوتشر من البنك: «... بقسيمة رقم 2016804891815 بقيمة 1000 جم صالحة حتى 28/12/2026 ...» */
@@ -2153,20 +2184,7 @@ function chargeSub(s,d){
     if(est>0){pay.fee=est;pay.feePending=true;}
   }
   s.payments.push(pay);
-  if(subShared(s)){
-    if(!s.dues)s.dues=[];
-    const ppl=subPeople(s);
-    if(ppl.length){
-      ppl.forEach(p=>{
-        const amt=usd?Math.round(Number(p.amount)*D.rate*100)/100:Number(p.amount);
-        if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:d,got:false,srcTxn:t.id});
-      });
-    }else{
-      const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
-      const owed=Math.round((full-mineEgp)*100)/100;
-      if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:d,got:false,srcTxn:t.id});
-    }
-  }
+  subDuesAdd(s,t,full,usd,d);
   s.next=subNextOf(s);
   return {name:s.name,amount:full,usd:!!usd,sid:s.id,t:t.id,date:d};
 }
@@ -2189,6 +2207,28 @@ function subTwinTake(s,t){
   if(!t.note||t.note===t.place||t.note==='خصم')t.note=s.name;
   delete t.needs;
   return tw;
+}
+/* نصيب الناس في دفعة اشتراك: بنفس نسبة السعر اللي اتدفع (العرض)، وعمره ما يعدّي المدفوع */
+function subDuesAdd(s,t,full,usd,d,price){
+  /* السعر اللي اتدفع (قبل ما العرض يقل بدفعة) */
+  price=price===undefined?(usd||full):price;
+  if(!(subMineAt(s,price)<price-0.001))return;
+  if(!s.dues)s.dues=[];
+  const r2=x=>Math.round(x*100)/100;
+  const ppl=subPeople(s), k=subK(s,price);
+  if(ppl.length){
+    const conv=usd?(Number(full)/(Number(usd)||1)):1;   /* سعر الدولار في الدفعة دي */
+    let left=Number(full)||0;
+    ppl.forEach(p=>{
+      let amt=r2(Number(p.amount)*k*conv);
+      amt=Math.min(amt,r2(left));left=r2(left-amt);
+      if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:d,got:false,srcTxn:t.id});
+    });
+  }else{
+    const mineEgp=usd?r2(subMineAt(s,price)*(Number(full)/(Number(usd)||1))):subMineAt(s,price);
+    const owed=r2(full-mineEgp);
+    if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:d,got:false,srcTxn:t.id});
+  }
 }
 function autoCharge(){
   const done=[];
@@ -2270,8 +2310,10 @@ const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearl
 const subCost=s=>s.cur==='USD'?subPrice(s)*D.rate:subPrice(s);
 const subPeople=s=>(s.people&&s.people.length)?s.people:[];
 const subOthers=s=>subPeople(s).reduce((a,p)=>a+(Number(p.amount)||0),0);
+/* وقت العرض (سعر أقل): نصيب كل واحد بيقل بنفس النسبة، عشان اللي على الناس مايعديش اللي اتدفع */
+const subK=(s,price)=>{const a=Number(s.amount)||0;return a>0?Math.min(1,(Number(price)||0)/a):1;};
 const subMine=s=>{
-  if(subPeople(s).length)return Math.max(0,subPrice(s)-subOthers(s));
+  if(subPeople(s).length)return Math.max(0,subPrice(s)-subOthers(s)*subK(s,subPrice(s)));
   return (s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
 };
 const subShared=s=>subMine(s)<subPrice(s)-0.001;
@@ -2303,7 +2345,7 @@ function subLive(s){
 const subCyc=s=>s.cycle==='trial'?(s.afterCycle||'monthly'):s.cycle;
 /* نصيبك من سعر معين */
 function subMineAt(s,price){
-  if(subPeople(s).length)return Math.max(0,price-subOthers(s));
+  if(subPeople(s).length)return Math.max(0,price-subOthers(s)*subK(s,price));
   if(s.myShare===null||s.myShare===undefined)return price;
   return Math.min(Number(s.myShare)||0,price);
 }
@@ -2606,8 +2648,10 @@ async function ghConnect(){
 /* أسامي الأصناف اللي اشتريتها قبل كده — عشان القراية تطلع بنفس الاسم */
 /* خصم من رسالة بنك مستني تفاصيل، بنفس إجمالي الفاتورة وفي حدود ٣ أيام من تاريخها.
    بيرجع الـid لو فيه خصم واحد بس — لو أكتر من واحد مش بنخمّن. */
-function scanMatch(items,date){
-  const tot=Math.round((items||[]).reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
+function scanMatch(items,date,disc){
+  const raw=Math.round((items||[]).reduce((a,i)=>a+(Number(i.amount)||0),0)*100)/100;
+  /* البنك بيخصم المبلغ بعد خصم الفاتورة */
+  const tot=Math.round((raw-Math.min(raw,Number(disc)||0))*100)/100;
   if(!(tot>0))return '';
   const lo=dayShift(date,-3), hi=dayShift(date,3);
   const c=D.txns.filter(t=>(t.book||'me')==='me'&&t.needs&&t.kind==='expense'
@@ -2842,6 +2886,46 @@ function payChips(sel,fn,exclude,bk,key,allowSave,opt){
     .map(a=>({id:a.id,label:esc(a.name)+(b?` · <span class="n">${fmt(b[a.id]||0)}</span>${curTag(a.id)}`:'')}))
     .concat(opt.other?[{id:'__other__',label:'حد دفعهالي'}]:[]),sel,fn);
 }
+/* الفلوس اللي بتتنقل بين المكتب وبينك بتفضل من نفس النوع: كاش لكاش، بنك لبنك، محفظة لمحفظة */
+const moneyKind=a=>!a?'':a.atype==='cash'?'cash':a.atype==='wallet'?'wallet':'bank';
+const KIND_NM={cash:'كاش',bank:'بنك',wallet:'محفظة'};
+/* field/srcField: اسم الخانة في العملية — وقت تعديل عملية قديمة الحساب اللي كانت عليه يفضل مسموح
+   طول ما الحساب اللي جاية منه ماتغيرش */
+function kindList(srcId,sel,field,srcField){
+  const src=D.accounts.find(a=>a.id===srcId), k=moneyKind(src);
+  const l=accountsFor('me').filter(a=>!a.credit&&!isSave(a)&&!isFxAcc(a.id)&&(!k||moneyKind(a)===k));
+  const od=editOp&&field&&D.ops&&D.ops[editOp]&&D.ops[editOp].d;
+  if(od&&od[field]&&(!srcField||od[srcField]===srcId)&&!l.some(a=>a.id===od[field])){const c=D.accounts.find(a=>a.id===od[field]);if(c)l.push(c);}
+  return l;
+}
+function kindVal(sel,srcId,field,srcField){const l=kindList(srcId,sel,field,srcField);
+  if(l.some(a=>a.id===sel))return sel;
+  /* عملية قديمة كانت الخانة فيها فاضية: مابنملاهاش لوحدنا (عشان التعديل من غير تغيير مايغيرش حاجة) */
+  const od=editOp&&field&&D.ops&&D.ops[editOp]&&D.ops[editOp].d;
+  if(od&&!od[field])return '';
+  return l.length===1?l[0].id:'';}
+/* لو فيه حساب واحد بس مناسب بيتختار لوحده والسؤال مايظهرش */
+function kindPick(label,one,sel,fn,srcId,field,srcField){
+  const l=kindList(srcId,sel,field,srcField), src=D.accounts.find(a=>a.id===srcId);
+  if(!l.length)return `<div class="note warn" style="margin-top:14px">مفيش عندك حساب ${KIND_NM[moneyKind(src)]||''} يقابل ${esc(src?src.name:'')}.</div>`;
+  if(l.length===1&&sel===l[0].id)return `<div class="hint" style="margin-top:14px">${one} <b>${esc(l[0].name)}</b>.</div>`;
+  return `<label class="f">${label} <b>*</b></label>`+pickRow('',l.map(a=>({id:a.id,label:esc(a.name)})),sel,fn);
+}
+/* الاسترداد: النوع من الحسابات اللي هتاخد منها (لو كلها نوع واحد) */
+function refundSrcKind(){
+  const ids=Object.keys(refundParts||{}), ks={};ids.forEach(id=>ks[moneyKind(D.accounts.find(a=>a.id===id))]=id);
+  const k=Object.keys(ks);return k.length===1?ks[k[0]]:'';
+}
+/* الخانات دي بتتظبط قبل الرسم والحفظ: لو فيه حساب واحد مناسب بيتحط، ولو المختار مش من نفس النوع بيتشال */
+function oFixKinds(){
+  const d=draftO, card=isCreditAcc(d.account), a=Number(onlyNum(d.amount))||0, p=Number(onlyNum(d.paid))||0;
+  if(d.kind!=='expense')return;
+  if(card){const f=D.accounts.find(x=>x.id===d.cardFrom);
+    if(f&&f.scope!=='both')d.cardTo=kindVal(d.cardTo,d.cardFrom,'cardTo','cardFrom');return;}
+  if(d.toMe)d.to=kindVal(d.to,d.account,'to','account');
+  if((d.mine&&oMineSel())||(!d.mine&&p>0&&p<a-0.005))d.mineFrom=kindVal(d.mineFrom,oMineAll()?'':d.account,'mineFrom',oMineAll()?'':'account');
+  if(p>a+0.005)d.diffTo=kindVal(d.diffTo,d.account,'diffTo','account');
+}
 /* pre/post: باراميترات قبل وبعد التاريخ لو الدالة محتاجاها */
 function dateField(val,fn,pre,post,min){
   const a=pre?pre+',':'', z=post?','+post:'';
@@ -2856,9 +2940,9 @@ function acctRow(a,b,extra,attrs){
   /* الكارت واحد عند البنك: اللي عليك ومتاحه من الدفترين مع بعض */
   const v=(a.credit&&lim)?availOf(a.id):(b[a.id]||0)+(isSave(a)&&book==='me'?saveAccrued(a):0),left=Math.max(0,Math.min(v,lim));
   let split='';
-  if(a.scope==='both'&&!(a.credit&&lim)){
+  if(!(a.credit&&lim)){
     const bm=balances('me')[a.id]||0, bo=balances('office')[a.id]||0;
-    /* نصيب الدفتر التاني صفر: مفيش داعي للسطرين */
+    /* نصيب الدفتر التاني صفر: مفيش داعي للسطرين (ولو حساب شخصي شايل فلوس المكتب، أو العكس، بيبان في الدفترين) */
     if(Math.abs(book==='me'?bo:bm)>=0.005)split=`<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7">
       <span style="display:block">${book==='me'?'عهدة '+esc(bookName()):'فلوسك'} <span class="n">${fmt(book==='me'?bo:bm)}</span></span>
       <span style="display:block">إجمالي الحساب <span class="n">${fmt(bm+bo)}</span></span></span>`;
@@ -2888,7 +2972,7 @@ function vHomeOffice(){
   return `
   ${alertsPanel()}
   <div class="sec" style="margin-top:24px">
-    <div class="panel">${accountsFor('office').map(a=>acctRow(a,b)).join('')}
+    <div class="panel">${accountsShow('office').map(a=>acctRow(a,b)).join('')}
     </div>
   </div>
 
@@ -3252,7 +3336,8 @@ function itemParts(t){
   return parts;
 }
 function periodSummary(from,to){
-  const mt=D.txns.filter(t=>(t.book||'me')==='me'&&t.date>=from&&t.date<=to);
+  sdBuild();
+  const mt=D.txns.filter(t=>(t.book||'me')==='me'&&sDate(t)>=from&&sDate(t)<=to);
   const ex=mt.filter(t=>t.kind==='expense');
   const r2=x=>Math.round(x*100)/100;
   const spent=r2(ex.reduce((a,t)=>a+mySpend(t),0));
@@ -3294,18 +3379,19 @@ function sumBody(P){
 }
 /* أرقام الشهر اللي مختاره في الرئيسية */
 function monthStats(){
+  sdBuild();
   const mine=D.txns.filter(t=>(t.book||'me')==='me');
   const pers=salaryPeriods();
   let mt,pills,periodNote='',title=mLabel(month);
   if(pers){
     let cur=pers.find(p=>p.key===month)||pers[0];
-    mt=mine.filter(t=>t.date>=cur.from&&t.date<=cur.to);
+    mt=mine.filter(t=>sDate(t)>=cur.from&&sDate(t)<=cur.to);
     pills=pers.slice(0,12).map(p=>`<button class="mpill${p.key===cur.key?' on':''}" onclick="app.setMonth('${p.key}')">${p.label}</button>`).join('');
     periodNote=cur.to==='9999-12-31'?('من '+shortDay(cur.from)+' لحد دلوقتي'):('من '+shortDay(cur.from)+' لـ '+shortDay(cur.to));
     title=periodNote;
   }else{
     const ms=[...new Set(mine.map(t=>monthOf(t.date)).concat([monthOf(today())]))].filter(Boolean).sort().reverse();
-    mt=mine.filter(t=>monthOf(t.date)===month);
+    mt=mine.filter(t=>monthOf(sDate(t))===month);
     pills=ms.map(x=>`<button class="mpill${x===month?' on':''}" onclick="app.setMonth('${x}')">${mLabel(x)}</button>`).join('');
     periodNote='سجّل مرتبك عشان الشهر يبدأ من يوم القبض';
   }
@@ -3343,7 +3429,7 @@ function vHome(){
     ${sumNew?`<div class="hint" style="margin:-4px 0 10px">${esc(done.title)}</div>${sumBody(done)}`:''}</div>`:''}
 
   <div class="sec" style="margin-top:24px">
-    <div class="panel">${accountsFor('me').map(a=>acctRow(a,b)).join('')}</div>
+    <div class="panel">${accountsShow('me').map(a=>acctRow(a,b)).join('')}</div>
   </div>
 
   <div class="sec">
@@ -3633,8 +3719,8 @@ ${s.cycle==='trial'
               <label class="f">هتاخد كام من ${esc(x.name)}؟</label>
               <input class="f" type="text" inputmode="decimal" value="${esc(refundParts[x.id])}" oninput="app.setRefundPart('${x.id}',numFix(this,1))">`).join('')
             +(Object.keys(refundParts).length>1?`<div class="hint">المجموع <span class="n" id="refsum">${fmt(refundTotal())}</span> من <span class="n">${fmt(Math.abs(v))}</span></div>`:'');})()}
-        <label class="f">وتدخل على أنهي حساب من حساباتك؟ <b>*</b></label>
-        ${payChips(refundTo,'app.setRefundTo','','me')}
+        ${(function(){const src=refundSrcKind();refundTo=kindVal(refundTo,src);
+          return kindPick('وتدخل على أنهي حساب من حساباتك؟','هتدخل على',refundTo,'app.setRefundTo',src);})()}
         ${(function(){const need=Math.abs(v), got=refundTotal(), d=Math.round((got-need)*100)/100;
           if(Math.abs(d)<0.005)return '';
           return d>0
@@ -3864,8 +3950,7 @@ ${s.cycle==='trial'
       ${ofeeMode==='part'?`<input class="f" id="ofeein" style="margin-top:10px" type="text" inputmode="decimal" value="${n2(ofeeBalance())}" oninput="numFix(this,1)">`:''}
       <label class="f">من أنهي حساب عهدة؟ <b>*</b></label>
       ${payChips(ofeeAcct,'app.setOfeeAcct','','office','',0,{src:1})}
-      <label class="f">دخلت على أنهي حساب عندك؟ <b>*</b></label>
-      ${payChips(ofeeTo,'app.setOfeeTo','','me')}
+      ${ofeeAcct?(ofeeTo=kindVal(ofeeTo,ofeeAcct),kindPick('دخلت على أنهي حساب عندك؟','هتدخل على',ofeeTo,'app.setOfeeTo',ofeeAcct)):''}
       <div class="hint">هتتسجل مصروف على ${esc(bookName())}${defOcat()?' بتصنيف '+esc(ocatOf(defOcat()).label):' من غير تصنيف'}، وأي فرق هيترحّل للمرة الجاية.</div>
       <button class="btn" ${ofeeAcct&&ofeeTo?'':'disabled'} onclick="app.takeOfee()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelOfee()">إلغاء</button>
@@ -3962,7 +4047,17 @@ function ynWrap(fn,btn,okFn){
   if(ynLast)h=h.replace('<button class="btn" id="'+btn+'"','<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div><button class="btn" id="'+btn+'"');
   return h;
 }
+/* المبلغ بعد الخصم، ونصيب الناس مايعديهوش */
+function entryNet(){const A=Number(onlyNum(draft.amount))||0;
+  const d=(draft.kind==='expense'&&draft.hasDisc&&draft.cur!=='USD')?(Number(onlyNum(draft.discAmt))||0):0;
+  return Math.max(0,Math.round((A-d)*100)/100);}
+const owedPeopleSum=()=>Math.round((draft.owedPeople||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)*100)/100;
+const owedOver=()=>draft.kind==='expense'&&draft.owed&&draft.owedKind!=='lent'&&owedPeopleSum()>entryNet()+0.005;
+function owedHintTxt(){
+  if(owedOver())return '<b style="color:var(--clay)">اللي على الناس أكتر من المبلغ'+(draft.hasDisc?' بعد الخصم':'')+' — قلّله.</b>';
+  return 'نصيبك المتوقع <span class="n">'+fmt(Math.max(0,entryNet()-owedPeopleSum()))+'</span> جنيه.';}
 function entryOk0(){const k=draft.kind;
+  if(owedOver())return false;
   const nm=String(draft.from||'').trim();
   if(k==='income'&&draft.loan&&!nm)return false;
   if(k==='expense'&&draft.account==='__other__'&&!nm)return false;
@@ -3985,6 +4080,7 @@ function insOk(){
   return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
 function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account&&certDraft.bank);}
 function vAddOffice0(){
+  oFixKinds();
   const k=draftO.kind;
   const ok=oOk();
   return `
@@ -4044,7 +4140,7 @@ function vAddOffice0(){
       <label class="f">خدت الفلوس من فين؟ <b>*</b></label>
       ${pickRow('ocardfrom',officeAccs().map(a=>({id:a.id,label:esc(offAccLabel(a))})).concat([{id:'later',label:'لسه، هاخدها بعدين'}]),draftO.cardFrom,'app.oCardFrom',1)}
       ${(function(){const f=D.accounts.find(a=>a.id===draftO.cardFrom);
-        return (f&&f.scope!=='both')?`<label class="f">ودخلت على أنهي حساب عندك؟ <b>*</b></label>${payChips(draftO.cardTo,'app.oCardTo','','me','',0,{src:1})}`:'';})()}
+        return (f&&f.scope!=='both')?kindPick('ودخلت على أنهي حساب عندك؟','ودخلت على',draftO.cardTo,'app.oCardTo',draftO.cardFrom,'cardTo','cardFrom'):'';})()}
       <div class="hint">${draftO.cardFrom==='later'
         ?'الكارت هيتخصم منه المبلغ، و'+esc(bookName())+' هيتسجل عليه ليك لحد ما تاخدها.'
         :'الكارت هيتخصم منه المبلغ، والفلوس اللي خدتها من '+esc(bookName())+' هتدخل حسابك — ومش هيتحسب مصروف عليك.'}</div>`:''}`}
@@ -4073,8 +4169,7 @@ function vAddOffice0(){
 
         ${isCreditAcc(draftO.account)?'':`<label class="f">المبلغ ده جالي أنا؟</label>
         ${yesNo('otome',draftO.toMe,'app.oToMe','لأ، اتصرف بره','أيوه، أخدته')}`}
-        ${draftO.toMe?`<label class="f">يدخل على أنهي حساب من حساباتي؟ <b>*</b></label>
-          ${payChips(draftO.to,'app.oTo','','me')}
+        ${draftO.toMe?`${kindPick('يدخل على أنهي حساب من حساباتي؟','هيدخل على',draftO.to,'app.oTo',draftO.account,'to','account')}
           <label class="f">نوعه في دخلك؟</label>
           ${pickRow('otomeicat',D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),oToMeIcat(),'app.oToMeIcat',1)}
           ${(!draftO.toMeIcat&&oToMeIcat())?'<div class="hint">اتختار من آخر مرة — غيّره لو مش هو.</div>':''}
@@ -4091,8 +4186,7 @@ function vAddOffice0(){
         ${draftO.mine?`${pickRow('omineall',[{id:'all',label:'كلها'},{id:'part',label:'جزء منها'}],oMineSel(),'app.oMineAll',1)}
           ${oMineSel()==='part'?`<label class="f">كام منها من فلوسك؟</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(draftO.mineAmt)}" oninput="app.oSet('mineAmt',numFix(this,1))">`:''}
-          ${oMineSel()?`<label class="f">طلعت من أنهي حساب عندك؟ <b>*</b></label>
-          ${payChips(draftO.mineFrom,'app.oMineFrom','','me','',0,{src:1})}
+          ${oMineSel()?`${kindPick('طلعت من أنهي حساب عندك؟','هتطلع من',draftO.mineFrom,'app.oMineFrom',oMineAll()?'':draftO.account,'mineFrom',oMineAll()?'':'account')}
           <div class="hint">${oMineAll()?'المبلغ كله هيتخصم من حسابك ويتسجل إن '+esc(bookName())+' عليه ليك.'
             :`هيتخصم من ${esc(bookName())} <span class="n" id="ominehint">${fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)))}</span> جنيه، والباقي هيتخصم من حسابك ويتسجل إن ${esc(bookName())} عليه ليك.`}</div>`:''}`:''}`}
       `:''}
@@ -4131,6 +4225,7 @@ const oMineSel=()=>draftO.mineAll===true?'all':(draftO.mineAll===false||(draftO.
 const oMineAll=()=>draftO.kind==='expense'&&!isCreditAcc(draftO.account)&&!!draftO.mine&&draftO.mineAll===true;
 /* شرح «اللي خرج من العهدة» وسؤال الفرق — بيتحدثوا وانت بتكتب */
 function oPaidInfo(){
+  oFixKinds();
   const a=Number(onlyNum(draftO.amount))||0, p=Number(onlyNum(draftO.paid))||0, d=Math.round(Math.abs(p-a)*100)/100;
   if(!p||!a||d<0.005)return '<div class="hint">سيبها فاضية لو اللي خرج من العهدة هو نفس المصروف بالظبط.</div>';
   const bn=esc(bookName());
@@ -4138,9 +4233,9 @@ function oPaidInfo(){
     ?`<div class="hint">الكارت هيتخصم منه <span class="n">${fmt(a)}</span>، و${bn} هيتسجل عليه <span class="n">${fmt(p)}</span>، والفرق <span class="n">${fmt(d)}</span> هيتسجل دخل ليك.</div>`
     :`<div class="hint">الكارت هيتخصم منه <span class="n">${fmt(a)}</span>، وهيدخلك <span class="n">${fmt(p)}</span>، والفرق <span class="n">${fmt(d)}</span> هيتسجل على ${bn} ليك.</div>`;
   if(p>a)return `<div class="hint">${bn} هيتسجل عليه <span class="n">${fmt(p)}</span> في سطر واحد، و<span class="n">${fmt(d)}</span> هيدخل رصيدك.</div>
-    <label class="f">الفرق يدخل على أنهي حساب؟ <b>*</b></label>${payChips(draftO.diffTo,'app.oDiffTo','','me')}`;
+    ${kindPick('الفرق يدخل على أنهي حساب؟','الفرق هيدخل على',draftO.diffTo,'app.oDiffTo',draftO.account,'diffTo','account')}`;
   return `<div class="hint">الفرق <span class="n">${fmt(d)}</span> هيتحسب إنك دفعته من فلوسك، وهيبقى ليك على ${bn}.</div>
-    ${draftO.mine?'':`<label class="f">طلعت من أنهي حساب عندك؟ <b>*</b></label>${payChips(draftO.mineFrom,'app.oMineFrom','','me','',0,{src:1})}`}`;
+    ${draftO.mine?'':kindPick('طلعت من أنهي حساب عندك؟','الفرق هيطلع من',draftO.mineFrom,'app.oMineFrom',draftO.account,'mineFrom','account')}`;
 }
 function peopleNames(){
   const out=[],ks={},add=n=>{n=String(n||'').trim();if(n&&!ks[pk(n)]){ks[pk(n)]=1;out.push(n);}};
@@ -4195,7 +4290,7 @@ function itemSuggestions(fn){
   if(!n.length)return '';
   return `<div class="chips" style="margin-top:10px">${n.map(x=>`<button class="chip sm" onclick="${fn}('${jsArg(x)}')">${esc(x)}</button>`).join('')}</div>`;
 }
-function oOk0(){const k=draftO.kind;
+function oOk0(){oFixKinds();const k=draftO.kind;
   if(k==='loan')return Number(onlyNum(draftO.amount))>0;
   if(k==='xfer'&&draftO.swap)return !!(Number(onlyNum(draftO.amount))>0&&draftO.account&&draftO.myAcc
     &&(draftO.shared||sharedAccs().length===1));
@@ -4424,7 +4519,7 @@ function vAdd0(){
           <button class="chip sm" style="padding:0" onclick="app.owedPersonDel(${i})">×</button>
         </div>`).join('')}
         <button class="btn ghost" style="margin-top:0" onclick="app.owedPersonAdd()">ضيف شخص</button>
-        ${draft.owedKind==='lent'?'<div class="hint">لو حد بعتلك أكتر من اللي عليه، الزيادة هتتسجل دخل.</div>':`<div class="hint">لو حد بعت أكتر أو أقل، الفرق بيتظبط على نصيبك أنت. نصيبك المتوقع <span class="n" id="owedhint">${fmt(Math.max(0,(Number(onlyNum(draft.amount))||0)-(draft.owedPeople||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)))}</span> جنيه.</div>`}`:''}
+        ${draft.owedKind==='lent'?'<div class="hint">لو حد بعتلك أكتر من اللي عليه، الزيادة هتتسجل دخل.</div>':`<div class="hint">لو حد بعت أكتر أو أقل، الفرق بيتظبط على نصيبك أنت. <span id="owedhint">${owedHintTxt()}</span></div>`}`:''}
     `:''}
 
     <label class="f">المكان (اختياري)</label>
@@ -4620,7 +4715,7 @@ function scanTotalsLive(){
   setText('rsum',fmt(S.raw));setText('rtot',fmt(S.net));
   const b=document.getElementById('saveRec');if(b){b.textContent='احفظ الفاتورة — '+fmt(S.net)+' جنيه';b.disabled=!scanSaveOk();}
   const cn=document.getElementById('catneed');if(cn)cn.style.display=scanCatMissing()?'':'none';
-  setText('scanshare',fmt(scanMyShare()));
+  {const e=document.getElementById('scanshare');if(e)e.innerHTML=scanShareTxt();}
   if(scan.voucherId){
     const v=(D.vouchers||[]).find(x=>x.id===scan.voucherId);
     if(!v||Number(v.amount)>S.net)scan.voucherId='';
@@ -4633,15 +4728,24 @@ const itemBlank=i=>!String(i.name||'').trim()&&!(Number(i.amount)>0);
 const scanCatMissing=()=>(scan.items||[]).some(i=>!itemBlank(i)&&!i.cat);
 function scanSaveOk0(){
   const its=scan.items||[];
+  if(scanSplitOver())return false;
   return !!(scan.account&&its.some(i=>!itemBlank(i))&&!scanCatMissing()
     &&(book!=='office'||((scan.item||scan.merchant||'').trim()&&scan.ocat))
     &&(book==='office'||!its.some(i=>i.off&&!itemBlank(i))||((scan.oitem||scan.merchant||'').trim()&&scan.ocat)));
 }
-function scanMyShare(){
+/* الخصم بيتوزع على الأصناف بنسبتها، فنصيبك من الخصم على قد أصنافك بس */
+function scanMineNet(){
+  const raw=(scan.items||[]).reduce((a,i)=>a+(Number(i.amount)||0),0);
   const mine=(scan.items||[]).filter(i=>!i.off&&!i.who).reduce((a,i)=>a+(Number(i.amount)||0),0);
-  const disc=Number(onlyNum(scan.disc||''))||0;
-  const others=(scan.people||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0);
-  return Math.max(0,Math.round((mine-disc-others)*100)/100);
+  const disc=Math.min(raw,Number(onlyNum(scan.disc||''))||0);
+  return raw>0?Math.round(mine*(1-disc/raw)*100)/100:0;
+}
+const scanOthers=()=>Math.round((scan.people||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0)*100)/100;
+const scanSplitOver=()=>!!scan.split&&scanOthers()>scanMineNet()+0.005;
+const scanShareTxt=()=>scanSplitOver()?'<b style="color:var(--clay)">اللي على الناس أكتر من نصيبك بعد الخصم — قلّله.</b>'
+  :'نصيبك هيطلع <span class="n">'+fmt(scanMyShare())+'</span> جنيه.';
+function scanMyShare(){
+  return Math.max(0,Math.round((scanMineNet()-scanOthers())*100)/100);
 }
 function vScan(){return scan.stage==='review'?ynWrap(vScan0,'saveRec',scanSaveOk):vScan0();}
 function vScan0(){
@@ -4698,7 +4802,7 @@ function vScan0(){
             <button class="chip sm" style="padding:0" onclick="app.scanPersonDel(${i})">×</button>
           </div>`).join('')}
           <button class="btn ghost" style="margin-top:0" onclick="app.scanPersonAdd()">ضيف شخص</button>
-          <div class="hint">بيتقسم على المبلغ اللي ليك بعد ما تشيل أصناف الناس والعهدة. نصيبك هيطلع <span class="n" id="scanshare">${fmt(scanMyShare())}</span> جنيه.</div>
+          <div class="hint">بيتقسم على المبلغ اللي ليك بعد ما تشيل أصناف الناس والعهدة. <span id="scanshare">${scanShareTxt()}</span></div>
         `:''}`:''}
       ${book!=='office'&&!needsTxn?`<div class="hint">دوس على «ليا» جنب أي صنف عشان تخليه ${officeOn()?esc(toBook())+' أو ':''}لحد تاني.</div>`:''}
 
@@ -5183,7 +5287,7 @@ function wVouchers(){
     }).map(x=>x.v);
   const live=list.filter(vchLive);
   const tot=live.reduce((a,v)=>a+(Number(v.amount)||0),0);
-  const ok=vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&vchDraft.expiry;
+  const ok=vchAddOk();
   return `<div style="margin-top:18px">
     <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleVch()">${showVch?'إلغاء':'ضيف فاوتشر'}</button>
     ${showVch?`
@@ -5199,7 +5303,17 @@ function wVouchers(){
       <label class="f">تاريخ الانتهاء <b>*</b></label>
       <input class="f" type="date" value="${vchDraft.expiry}" onchange="app.vchSet('expiry',this.value)">
 
-      ${vchSetupOk()?'':`<div class="note warn" style="line-height:1.9">البنك ورقم البطاقة والموبايل اللي بيتبعتوا مع الفاوتشر لما تشاركه بيتظبطوا من الإعدادات.
+      <label class="f">الفاوتشر ده بتاع مين؟ <b>*</b></label>
+      ${pickRow('vchwho',[{id:'me',label:'أنا'},{id:'other',label:'حد تاني'}],vchDraft.who,'app.vchWho',1)}
+      ${vchDraft.who==='other'?`
+        <label class="f">اسمه <b>*</b></label>
+        <input class="f" id="vchoname" list="vchowners" value="${esc(vchDraft.oname||'')}" oninput="app.vchSet('oname',this.value)" onchange="app.vchOwnerPick(this.value)">
+        <datalist id="vchowners">${vchOwners().map(o=>`<option value="${esc(o.name)}">`).join('')}</datalist>
+        <label class="f">موبايله <b>*</b></label>
+        <input class="f n" id="vchophone" type="text" inputmode="numeric" value="${esc(vchDraft.ophone||'')}" oninput="app.vchSet('ophone',onlyDigits(this.value))">
+        <label class="f">آخر 6 أرقام من بطاقته <b>*</b></label>
+        <input class="f n" id="vchocard" type="text" inputmode="numeric" maxlength="6" style="text-align:center;letter-spacing:1px" value="${esc(vchDraft.ocard||'')}" oninput="app.vchSet('ocard',onlyDigits(this.value))">`:''}
+      ${(vchDraft.who==='other'||vchSetupOk())?'':`<div class="note warn" style="line-height:1.9">البنك ورقم البطاقة والموبايل اللي بيتبعتوا مع الفاوتشر لما تشاركه بيتظبطوا من الإعدادات.
         <div class="chips" style="margin-top:10px"><button class="chip sm" onclick="app.goVchSet()">كمّل بيانات الفاوتشرات</button></div></div>`}
       <button class="btn" id="vchsave" ${ok?'':'disabled'} onclick="app.addVch()">احفظ الفاوتشر</button>
     `:''}
@@ -5219,6 +5333,7 @@ function wVouchers(){
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.8">
           ${vchBank()?esc(vchBank())+'<br>':''}
+          ${v.owner?'بتاع <bdi>'+esc(v.owner)+'</bdi><br>':''}
           ${v.used?((v.usedBy?'استخدمه '+esc(v.usedBy):'استخدمته')+(v.usedOn?atDay(v.usedOn):''))
             :v.given?('مبعوت'+(v.givenTo?' '+esc(toName(v.givenTo)):'')+' · بينتهي '+dayLabel(v.expiry))
             :(daysTo(v.expiry)<0?'انتهى في '+dayLabel(v.expiry):'بينتهي '+dayLabel(v.expiry)+' · '+whenLabel(v.expiry))}
@@ -5241,6 +5356,12 @@ function wVouchers(){
           <input class="f" id="evamt" type="text" inputmode="decimal" value="${esc(eDraft.amount)}" oninput="app.eSet('amount',numFix(this,1))">
           <label class="f">تاريخ الانتهاء</label>
           <input class="f" id="evexp" type="date" value="${eDraft.expiry}" onchange="app.eSet('expiry',this.value)">
+          ${v.owner?`<label class="f">اسم صاحبه</label>
+          <input class="f" value="${esc(eDraft.owner)}" oninput="app.eSet('owner',this.value)">
+          <label class="f">موبايله</label>
+          <input class="f n" type="text" inputmode="numeric" value="${esc(eDraft.phone)}" oninput="app.eSet('phone',onlyDigits(this.value))">
+          <label class="f">آخر 6 أرقام من بطاقته</label>
+          <input class="f n" type="text" inputmode="numeric" maxlength="6" value="${esc(eDraft.card)}" oninput="app.eSet('card',onlyDigits(this.value))">`:''}
           <button class="btn" onclick="app.saveEdit('${v.id}')">احفظ التعديل</button>
           <button class="btn ghost" onclick="app.cancelEdit()">إلغاء</button>
         </div>`:''}
@@ -5263,7 +5384,7 @@ function vchPicker(selId,total,fnPick){
     (<span class="n">${fmt(Math.min.apply(null,live.map(x=>Number(x.amount))))}</span>) أكبر من الفاتورة، فمينفعش يتستخدم دلوقتي.</div>`;
   const v=usable.find(x=>x.id===selId);
   return `<label class="f">فاوتشر (اختياري)</label>
-    <div class="chips">${usable.map(x=>`<button class="chip sm${selId===x.id?' on':''}" onclick="${fnPick}('${x.id}')"><span class="n">${esc(x.code)}</span> · <span class="n">${fmt(x.amount)}</span></button>`).join('')}
+    <div class="chips">${usable.map(x=>`<button class="chip sm${selId===x.id?' on':''}" onclick="${fnPick}('${x.id}')"><span class="n">${esc(x.code)}</span> · <span class="n">${fmt(x.amount)}</span>${x.owner?' · <bdi>'+esc(x.owner)+'</bdi>':''}</button>`).join('')}
       ${selId?`<button class="chip sm" onclick="${fnPick}('')">شيله</button>`:''}</div>
     ${v?`<div class="hint">هيتخصم من حسابك <span class="n">${fmt(Math.max(0,total-Number(v.amount)))}</span> جنيه بس.</div>`:''}`;
 }
@@ -5558,7 +5679,9 @@ function wIns(){
           <label class="f">يوم الاستحقاق</label>
           <input class="f" type="text" inputmode="numeric" value="${esc(iDraft.day)}" oninput="app.iDraftSet('day',numFix(this,0))">
           <label class="f">مقسط على إيه؟</label>
-          ${pickRow('isrc'+i.id,accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})).concat([{id:'office',label:'سلفة'}]),iDraft.src,"((v)=>app.iDraftPick('src',v))",1)}
+          ${/* قسط كارت يفضل على كارت، والسلفة تفضل سلفة: التحويل بينهم بيغيّر طريقة السداد كلها */
+            i.src==='office'?'<div class="hint" style="margin-top:0">سلفة</div>'
+            :pickRow('isrc'+i.id,accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})),iDraft.src,"((v)=>app.iDraftPick('src',v))",1)}
           ${iDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
           <input class="f" value="${esc(iDraft.from||'')}" oninput="app.iDraftSet('from',this.value)">`:''}
           <label class="f">بيتدفع من أنهي حساب؟</label>
@@ -5885,14 +6008,30 @@ function logList(){
     if(hit){const s2=r2(ents.reduce((a,e)=>a+e.amt,0));
       return `<div class="hint" style="margin:-6px 0 12px">${plural(ents.length,'سطر واحد','سطرين','سطور','سطر')} · مصروف <span class="n">${fmt(s2)}</span></div>`+logDaysItems(ents);}
   }}
-  const sum=list.reduce((a,t)=>{
+  /* المجاميع زي الرئيسية بالظبط: المصروف بالفاوتشر اللي اتدفع بيه، والدخل الحقيقي بس
+     (السلفة واللي حد دفعه عنك والفلوس اللي رجعتلك ظاهرين بس مش داخلين في رقم الدخل) */
+  const meTot=book==='me'&&!fxL;
+  let notInc=0, otherM=0;
+  sdBuild();
+  const sum0=list.reduce((a,t)=>{
     const v=fxL?(t.account===fAcct?Number(t.amount)||0:inAmt(t)):egpOf(t);
-    if(fDir==='in')return a+(txnIn(t)?v:0);
+    if(fDir==='in'){
+      if(!txnIn(t))return a;
+      if(meTot){if(t.kind==='income'&&!t.repay)return a+v+(Number(t.fxGain)||0);notInc+=v;return a;}
+      return a+v;}
     if(fDir==='tr')return a+v;
-    return a+(t.kind==='expense'?v:0);
+    if(t.kind!=='expense')return a;
+    /* تحصيل لصرفة في شهر تاني: بيتحسب في شهرها، فمش داخل في مجموع الشهر ده */
+    if(meTot&&fMonth&&monthOf(sDate(t))!==fMonth){otherM+=Math.abs(egpOf(t));return a;}
+    return a+((meTot&&!fAcct)?mySpend(t):v);
   },0);
+  /* مكسب فرق العملة في التحويلات داخل في الدخل زي الرئيسية */
+  const fxg=(meTot&&fDir==='in'&&!fCat&&!normTxt(q).trim())?D.txns.filter(t=>(t.book||'me')==='me'&&isXferLike(t)&&Number(t.fxGain)
+    &&(!fMonth||monthOf(t.date)===fMonth)&&(!fAcct||t.account===fAcct||t.to===fAcct)).reduce((a,t)=>a+Number(t.fxGain),0):0;
+  const sum=sum0+fxg;
+  const vch=(meTot&&!fAcct&&fDir!=='in'&&fDir!=='tr')?list.reduce((a,t)=>a+(t.kind==='expense'?vchUsed(t):0),0):0;
   return list.length
-    ?`<div class="hint" style="margin:-6px 0 12px">${nTx(list.length)} · ${sumLabel} <span class="n">${fmt(Math.round(sum*100)/100)}</span>${fxL?' '+esc(fxName(accCur(fAcct))):''}</div>`+logDays(list)
+    ?`<div class="hint" style="margin:-6px 0 12px">${nTx(list.length)} · ${sumLabel} <span class="n">${fmt(Math.round(sum*100)/100)}</span>${fxL?' '+esc(fxName(accCur(fAcct))):''}${vch>0.005?' · منه <span class="n">'+fmt(Math.round(vch*100)/100)+'</span> بفاوتشر':''}${notInc>0.005?' · وفيه <span class="n">'+fmt(Math.round(notInc*100)/100)+'</span> مش دخل (سلف أو حد دفع عنك)':''}${fxg?' · منه <span class="n">'+fmt(Math.round(fxg*100)/100)+'</span> فرق عملة':''}${otherM>0.005?' · ووصلك <span class="n">'+fmt(Math.round(otherM*100)/100)+'</span> تحصيل لصرفة في شهر تاني':''}</div>`+logDays(list)
     :'<div class="empty">مفيش نتايج.</div>';
 }
 
@@ -5944,8 +6083,9 @@ function logDays(list){
     const r2=x=>Math.round(x*100)/100;
     /* فلتر على حساب بعملة تانية: الأرقام بعملته، غير كده بالجنيه */
     const fxL=fAcct&&isFxAcc(fAcct), val=t=>fxL?(t.account===fAcct?Number(t.amount)||0:inAmt(t)):egpOf(t);
-    const out=r2(g.l.reduce((a,t)=>a+(t.kind==='expense'?val(t):0),0));
-    const inn=r2(g.l.reduce((a,t)=>a+(txnIn(t)?val(t):0),0));
+    const meT=book==='me'&&!fxL;
+    const out=r2(g.l.reduce((a,t)=>a+((t.kind==='expense'&&!(meT&&fMonth&&monthOf(sDate(t))!==fMonth))?((meT&&!fAcct)?mySpend(t):val(t)):0),0));
+    const inn=r2(g.l.reduce((a,t)=>a+(txnIn(t)&&(!meT||(t.kind==='income'&&!t.repay))?val(t)+(meT?Number(t.fxGain)||0:0):0),0));
     const trs=r2(g.l.reduce((a,t)=>a+(isXferLike(t)?val(t):0),0));
     const parts=fDir==='tr'?[trs?'تحويل <span class="n">'+fmt(trs)+'</span>':'']
       :[fDir!=='in'&&out?'<span style="color:var(--clay)">مصروف <span class="n">'+fmt(out)+'</span></span>':'',
@@ -6890,6 +7030,7 @@ const app=new Proxy({
   oShared(v){draftO.shared=v;render();},
   oSave(){
     if(ynLast)return;
+    oFixKinds();
     if(closedDay(draftO.date)){app.toast('التاريخ ده جوه فترة متقفلة — آخر تقفيل '+dayLabel(D.lastClose));return;}
     const amt=Number(onlyNum(draftO.amount))||0;
     if(amt<=0)return;
@@ -7399,7 +7540,7 @@ const app=new Proxy({
     const A=Number(onlyNum(draft.amount))||0;
     setText('dischint',fmt(Math.max(0,A-(Number(onlyNum(draft.discAmt))||0))));
     setText('floathint',fmt(Math.max(0,A-(Number(onlyNum(draft.floatAmt))||0))));
-    setText('owedhint',fmt(Math.max(0,A-(draft.owedPeople||[]).reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));
+    {const oh=document.getElementById('owedhint');if(oh)oh.innerHTML=owedHintTxt();}
     const uh=document.getElementById('usdhint');
     if(uh)uh.innerHTML=usdHint();
     const xh=document.getElementById('xchhint');if(xh)xh.innerHTML=xchHint();
@@ -7460,8 +7601,8 @@ const app=new Proxy({
   owedPerson(i,k,v){
     if(!draft.owedPeople)draft.owedPeople=[{name:'',amount:''}];
     if(draft.owedPeople[i])draft.owedPeople[i][k]=v;
-    const A=Number(onlyNum(draft.amount))||0;
-    setText('owedhint',fmt(Math.max(0,A-draft.owedPeople.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));
+    const oh=document.getElementById('owedhint');if(oh)oh.innerHTML=owedHintTxt();
+    setDisabled('entrysave',entryOk());
   },
   owedPersonAdd(){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.push({name:'',amount:''});render();},
   owedPersonDel(i){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.splice(i,1);if(!draft.owedPeople.length)draft.owedPeople.push({name:'',amount:''});render();},
@@ -7767,7 +7908,7 @@ const app=new Proxy({
       scan.items=items;scan.disc=dsc>0?String(Math.round(dsc*100)/100):'';scan.merchant=r.merchant||(nt&&nt.place)||'';scan.account=(nt&&nt.account)||'';
       if(nt){scan.date=nt.date;scan.dateWarn=false;}
       else{const sd=scanDateRead(r.date);scan.date=sd.date;scan.dateWarn=!sd.sure;}
-      scan.match=nt?'':scanMatch(items,scan.date);scan.matchYes=undefined;scan.split=undefined;
+      scan.match=nt?'':scanMatch(items,scan.date,dsc);scan.matchYes=undefined;scan.split=undefined;
       scan.stage='review';
     }catch(e){
       needsTxn=null;
@@ -7924,7 +8065,7 @@ const app=new Proxy({
     ownerFor=null;render();
   },
   scanSplit(v){scan.split=v;if(!scan.people||!scan.people.length)scan.people=[{name:'',amount:''}];render();},
-  scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;setText('scanshare',fmt(scanMyShare()));}},
+  scanPerson(i,k,v){if(scan.people&&scan.people[i]){scan.people[i][k]=v;scanTotalsLive();}},
   scanPersonAdd(){if(!scan.people)scan.people=[];scan.people.push({name:'',amount:''});render();},
   scanPersonDel(i){if(scan.people)scan.people.splice(i,1);if(!scan.people.length)scan.people.push({name:'',amount:''});render();},
   scanDisc(v){scan.disc=v;scanTotalsLive();},
@@ -8122,9 +8263,10 @@ const app=new Proxy({
     D.txns=D.txns.filter(t=>!has(t.id));
     D.owed=(D.owed||[]).filter(o=>!has(o.srcTxn)||o.got||(Number(o.gotAmount)||0)>0);
     D.owed.forEach(o=>{if(has(o.srcTxn))delete o.srcTxn;});
-    D.floatLoans=(D.floatLoans||[]).filter(l=>!has(l.srcTxn));
+    /* سلف العهدة ورسوم المكتب تاريخ في دفتر المكتب: بتفضل، بس من غير ربط بالحركة اللي اتمسحت */
+    (D.floatLoans||[]).forEach(l=>{if(has(l.srcTxn))delete l.srcTxn;});
     D.arrPend=(D.arrPend||[]).filter(x=>!has(x.src)&&x.acct!==id);
-    D.ofees=(D.ofees||[]).filter(fx=>!has(fx.srcTxn));
+    (D.ofees||[]).forEach(fx=>{if(has(fx.srcTxn))delete fx.srcTxn;});
     /* سطر لوحده من مجموعة مربوطة: الربط بيتشال */
     const L={};D.txns.forEach(t=>{if(t.link)L[t.link]=(L[t.link]||0)+1;});
     D.txns.forEach(t=>{if(t.link&&L[t.link]<2)delete t.link;});
@@ -8420,8 +8562,15 @@ const app=new Proxy({
   vchSet(k,v,el){
     vchDraft[k]= k==='code'?onlyDigits(v):v;
     if(el&&k==='code'&&el.value!==vchDraft.code)el.value=vchDraft.code;
-    setDisabled('vchsave',vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&vchDraft.expiry);
+    setDisabled('vchsave',vchAddOk());
   },
+  vchWho(v){vchDraft.who=v;render();},
+  /* اسم حد سجلت منه فاوتشر قبل كده: موبايله وبطاقته بيتملوا لوحدهم */
+  vchOwnerPick(v){vchDraft.oname=String(v||'');const o=vchOwners().find(x=>pk(x.name)===pk(vchDraft.oname));
+    if(o){vchDraft.oname=o.name;vchDraft.ophone=o.phone||'';vchDraft.ocard=o.card||'';vchDraft.auto=o.name;}
+    /* اسم تاني غير اللي اتملت بياناته: البيانات القديمة بتتشال */
+    else if(vchDraft.auto){vchDraft.ophone='';vchDraft.ocard='';vchDraft.auto='';}
+    render();},
   eSet(k,v,el){
     eDraft[k]= k==='code'?onlyDigits(v):v;
     if(el&&k==='code'&&el.value!==eDraft.code)el.value=eDraft.code;
@@ -8429,7 +8578,7 @@ const app=new Proxy({
   startEdit(id){
     if(editVch===id){editVch=null;render();return;}
     const v=D.vouchers.find(x=>x.id===id);if(!v)return;
-    editVch=id;eDraft={code:v.code,amount:String(v.amount),expiry:v.expiry};giveFor=null;render();
+    editVch=id;eDraft={code:v.code,amount:String(v.amount),expiry:v.expiry,owner:v.owner||'',phone:v.phone||'',card:v.card||''};giveFor=null;render();
   },
   cancelEdit(){editVch=null;render();},
   saveEdit(id){
@@ -8439,6 +8588,9 @@ const app=new Proxy({
     const amt=numVal('evamt')||Number(onlyNum(eDraft.amount))||0;
     const exp=(e?e.value:eDraft.expiry)||v.expiry;
     if(!code||amt<=0||!exp){alert('املا الرقم والقيمة وتاريخ الانتهاء.');return;}
+    if(v.owner){const nm=String(eDraft.owner||'').trim();
+      if(!nm||String(eDraft.phone||'').length<8||String(eDraft.card||'').length!==6){alert('املا اسم صاحبه وموبايله وآخر 6 أرقام من بطاقته.');return;}
+      v.owner=nm;v.phone=eDraft.phone;v.card=eDraft.card;}
     v.code=code;v.amount=amt;v.expiry=exp;
     editVch=null;save();render();
   },
@@ -8455,7 +8607,7 @@ const app=new Proxy({
     try{t=String(await navigator.clipboard.readText()||'');}
     catch(e){vchMsg='مقدرتش أوصل للحافظة.';render();return;}
     const m=parseVchMsg(t);
-    if(m){vchDraft={code:m.code,amount:m.amount||vchDraft.amount,expiry:m.expiry||vchDraft.expiry};render();return;}
+    if(m){vchDraft=Object.assign({},vchDraft,{code:m.code,amount:m.amount||vchDraft.amount,expiry:m.expiry||vchDraft.expiry});render();return;}
     const digits=onlyDigits(t);
     if(digits){vchDraft.code=digits;render();setTimeout(()=>{const el=document.getElementById('vchcode');if(el)el.focus();},50);return;}
     vchMsg='مفيش رسالة فاوتشر ولا رقم في الحافظة.';render();
@@ -8475,8 +8627,12 @@ const app=new Proxy({
     setsOpen={};save();app.toast('اتحفظ');render();
   },
   addVch(){
-    D.vouchers.push({id:uid(),code:vchDraft.code.trim(),amount:Number(onlyNum(vchDraft.amount))||0,
-      expiry:vchDraft.expiry,card:D.cardDigits||undefined,used:false,usedOn:'',added:today()});
+    if(!vchAddOk())return;
+    const oth=vchDraft.who==='other';
+    const v={id:uid(),code:vchDraft.code.trim(),amount:Number(onlyNum(vchDraft.amount))||0,
+      expiry:vchDraft.expiry,card:(oth?vchDraft.ocard:D.cardDigits)||undefined,used:false,usedOn:'',added:today()};
+    if(oth){v.owner=String(vchDraft.oname).trim();v.phone=vchDraft.ophone;}
+    D.vouchers.push(v);
     vchDraft={code:'',amount:'',expiry:''};showVch=false;save();render();
   },
   startGive(id){giveFor=id;render();},
@@ -8497,7 +8653,7 @@ const app=new Proxy({
     const txt='فاوتشر'+(vchBank()?' — '+vchBank():'')+'\n'+
       'رقم الفاوتشر: '+v.code+'\n'+
       (card?'آخر 6 أرقام من البطاقة: '+card+'\n':'')+
-      (D.phone?'رقم الموبايل: '+D.phone+'\n':'')+
+      ((v.owner?v.phone:D.phone)?'رقم الموبايل: '+(v.owner?v.phone:D.phone)+'\n':'')+
       'القيمة: '+fmt(v.amount)+' جنيه\n'+
       'ينتهي في: '+dayLabel(v.expiry);
     try{
@@ -8750,20 +8906,7 @@ const app=new Proxy({
       if(est>0){pay.fee=est;pay.feePending=true;}
     }
     s.payments.push(pay);
-    if(subShared(s)){
-      if(!s.dues)s.dues=[];
-      const ppl=subPeople(s);
-      if(ppl.length){
-        ppl.forEach(p=>{
-          const amt=usd?Math.round(Number(p.amount)*D.rate*100)/100:Number(p.amount);
-          if(amt>0.01)s.dues.push({id:uid(),who:p.name,amount:amt,date:paySubDate,got:false,srcTxn:t.id});
-        });
-      }else{
-        const mineEgp=usd?Math.round(subMine(s)*D.rate*100)/100:subMine(s);
-        const owed=Math.round((full-mineEgp)*100)/100;
-        if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:paySubDate,got:false,srcTxn:t.id});
-      }
-    }
+    subDuesAdd(s,t,full,usd,paySubDate);
     s.next=subNextOf(s);
     paySubFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
@@ -8959,7 +9102,7 @@ const app=new Proxy({
     const mo=Number(onlyNum(iDraft.monthly))||0;if(mo>0)i.monthly=mo;
     const ms=Number(onlyNum(iDraft.months))||0;if(ms>0)i.months=ms;
     const dy=Number(onlyNum(iDraft.day))||0;if(dy>0)i.day=clampDay(dy);
-    if(iDraft.src)i.src=iDraft.src;
+    if(iDraft.src&&(iDraft.src==='office')===(i.src==='office'))i.src=iDraft.src;
     i.from=i.src==='office'?String(iDraft.from||'').trim():'';
     if(iDraft.account)i.account=iDraft.account;
     insEdit=null;save();render();app.toast('اتعدل');
