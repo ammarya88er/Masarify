@@ -3497,7 +3497,8 @@ function spendCalc(){
   const X=[],Y=[];
   const add=(L,label,amt,when)=>{amt=r2(amt);if(amt>0.004)L.push({label,amt,when});};
   /* الحساب ده فلوسه محسوبة؟ كارت ← «لو دفعت كل اللي عليك»، حساب جاهز ← الرقم الأولاني، غير كده مالوش دعوة */
-  const where=id=>isCard(id)?Y:liquidAccs.some(a=>a.id===id)?X:null;
+  /* الكارت: اللي هيتخصم عليه بعد كده بيتسدد من كشف بعد المرتب، فمش داخل هنا. اللي داخل هو اللي عليه دلوقتي */
+  const where=id=>liquidAccs.some(a=>a.id===id)?X:null;
   /* الاشتراكات اللي ميعادها لحد يوم المرتب (ومنها اللي مستني الخصم) */
   (D.subs||[]).forEach(s=>{
     if(subEnded(s)||s.cancelAtEnd||(s.cycle==='trial'&&!s.willRenew))return;
@@ -3529,7 +3530,7 @@ function spendCalc(){
     let inX=0;
     if(stmtDate(key,a)<=dayShift(target,0)){inX=stmtLeft(a,key);add(X,'كشف '+a.name+' — '+mLabel(key),inX,stmtDue(key,a));}
     const debt=Math.max(0,cardDebt(a)-(inX>0?insRemainOn(a.id):insOnAccount(a.id)));
-    add(Y,inX?'باقي '+a.name+' بعد الكشف':'اللي عليك لـ'+a.name,debt-inX,'');
+    add(Y,inX?'باقي '+a.name+' بعد الكشف':'اللي عليك لـ'+a.name,Math.max(0,debt-inX),'');
   });
   const L=peopleLedger();
   const owe=r2(L.reduce((x,g)=>x+(g.debtTot||0),0)), rec=r2(L.reduce((x,g)=>x+(g.recTot||0),0));
@@ -3540,7 +3541,8 @@ function spendCalc(){
 }
 /* اللي فاضل من كشف: لو كتبت مبلغه (أو اتقرا من الرسالة) بيتاخد هو، غير كده حسبة البرنامج */
 function stmtLeft(a,key){
-  const e=stmtEntry(a.id,key);if(!e)return cardStmtLeft(a,key);
+  /* لو سددت أكتر من الكشف (دفعت حاجات بعده) يبقى الكشف خلص: صفر، مش بالسالب */
+  const e=stmtEntry(a.id,key);if(!e)return Math.max(0,cardStmtLeft(a,key));
   return Math.max(0,Math.round(((Number(e.amt)||0)-cardPaidAfter(a,stmtDate(key,a)))*100)/100);
 }
 /* حسبة البرنامج لمبلغ الكشف يوم نزوله (من غير السداد اللي بعده) — للمقارنة بالكشف */
@@ -3570,7 +3572,7 @@ function spendHtml(){
     <div class="panel" style="padding:14px 16px;cursor:pointer" onclick="app.spendToggle()">
       <div style="font-size:12px;color:var(--muted)">تقدر تصرف لحد ${S.late?'ما المرتب ينزل':'المرتب ('+dLabel(S.target)+')'}</div>
       <div style="font-size:24px;font-weight:700;margin-top:4px;color:${S.x<0?'var(--clay)':'var(--text)'}">${f(S.x)}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.8">لو دفعت كل اللي عليك: ${f(S.y)}${S.rec>0.004?`<br>ولو اتحسب اللي ليك: ${f(S.z)}`:''}</div>
+      ${(Math.abs(S.y-S.x)>0.004||S.rec>0.004)?`<div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.8">${Math.abs(S.y-S.x)>0.004?`لو دفعت كل اللي عليك: ${f(S.y)}`:''}${(Math.abs(S.y-S.x)>0.004&&S.rec>0.004)?'<br>':''}${S.rec>0.004?`ولو اتحسب اللي ليك: ${f(S.z)}`:''}</div>`:''}
     </div>
     ${spendOpen?`<div class="panel" style="margin-top:10px">
       <div class="arow"><span class="nm">فلوسك الجاهزة (كاش وبنك ومحافظ)</span><span class="vl n">${fmt(S.liquid)}</span></div>
@@ -3762,6 +3764,8 @@ function alertsPanel(){
     const key=stmtKey(today(),a), sd=stmtDate(key,a), due=stmtDue(key,a);
     if(today()<sd||today()>due)return;
     const e=stmtEntry(a.id,key), calc=cardStmtLeft(a,key);
+    /* اتسدد خلاص (أو مفيش عليك حاجة فيه): مفيش داعي تكتبه */
+    if(!e&&calc<=0.004)return;
     if(e){const d=Math.round(((Number(e.amt)||0)-cardStmtFull(a,key))*100)/100;
       if(Math.abs(d)<0.01||e.seen)return;
       rows.push(`<div class="alert">${RAIL(4,sd)}<span class="g"><span class="t">كشف ${esc(a.name)} — ${mLabel(key)}</span>
@@ -5928,7 +5932,7 @@ function maintHtml(v){
   const row=r=>{
     const l=r.last;
     const every=r.part==='oil'?c.oil:r.part==='gear'?c.gear:c.filterKm;
-    const lastTxt=l?`آخر ${r.part==='filter'?actL(l.act):'مرة'} ${l.odo?'عند <span class="n">'+fmt(l.odo)+'</span>'+(l.est?' تقريبًا':''):'(العداد مش متسجل)'} · ${dLabel(l.date)}`:'مفيش مرة متسجلة';
+    const lastTxt=l?`آخر ${r.part==='filter'?actL(l.act):'مرة'} ${l.odo?'عند <span class="n">'+fmt(l.odo)+'</span>'+(l.est?' تقريبًا':''):'(العداد مش متسجل)'}${l.date?' · '+dLabel(l.date):''}`:'مفيش مرة متسجلة';
     const nextTxt=r.next?`${r.withOil?actL(r.act)+' مع الزيت ':''}الجاي عند <span class="n">${fmt(r.next)}</span>`
       :r.withOil?`${actL(r.act)} مع غيار الزيت الجاي`:!(Number(every)>0)?'حدد كل كام كيلو':!l?'سجّل آخر مرة عشان أحسب الجاي':'سجّل العداد عشان أحسب الجاي';
     return `<div class="mrow${r.due?' due':''}">
@@ -6677,12 +6681,8 @@ function vSettings(){
         <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
       :`<button class="btn danger" onclick="app.askDel('wipe')">امسح كل البيانات</button>`}
             `)])}
-    <div class="hint" style="text-align:center;margin:18px 0 6px">الإصدار <span class="n">${APP_VER}</span> · ${esc(APP_NOTE)}</div>
   </div>`;
 }
-/* رقم الإصدار بيزيد مع كل رفع، ومعاه سطر بالتغيير — عشان تعرف أنهي نسخة على موبايلك */
-const APP_VER='4.1';
-const APP_NOTE='تقدر تصرف لحد المرتب، كشف الكارت، التدبير الراجع، والتقرير المختصر';
 
 
 /* ==========================================================================
