@@ -1,0 +1,20 @@
+const {boot,seed,t,done}=require('./harness');
+{ const s=seed();s.accounts.push({id:'sv',name:'وعاء',opening:40000,scope:'me',atype:'save',saveStart:'2026-09-01',saveRates:[{from:'2026-09-01',rate:0}]});
+  const {run,V,doc}=boot(s);
+  run("app.go('wallet');app.setWtab('accounts');app.editAccount('sv');");let v=V();
+  t('أهداف الادخار في إعدادات الوعاء', v.indexOf('أهداف الادخار')>-1&&v.indexOf('goalnm')>-1);
+  doc.getElementById('goalnm').value='لابتوب';doc.getElementById('goalamt').value='30000';run("app.addGoal('sv')");
+  doc.getElementById('goalnm').value='موبايل';doc.getElementById('goalamt').value='20000';run("app.addGoal('sv')");
+  doc.getElementById('goalnm').value='لابتوب';doc.getElementById('goalamt').value='5';run("app.addGoal('sv')");
+  t('هدفين والاسم المكرر مرفوض', run("D.accounts.find(a=>a.id==='sv').goals.length")===2);
+  const G=run("JSON.stringify(saveGoals(D.accounts.find(a=>a.id==='sv'),40000).map(g=>g.got))");
+  t('التوزيع بالترتيب', G==='[30000,10000]', G);
+  run("app.go('home');");v=V();
+  t('في الرئيسية تحت الوعاء', v.indexOf('لابتوب · <span class="n">30,000</span> من <span class="n">30,000</span> · اكتمل')>-1&&v.indexOf('موبايل · <span class="n">10,000')>-1);
+  const gid=run("D.accounts.find(a=>a.id==='sv').goals[0].id");run("app.delGoal('sv','"+gid+"')");
+  t('المسح', run("D.accounts.find(a=>a.id==='sv').goals.length")===1);
+  t('شريط التثبيت مش ظاهر من غير الحدث', V().indexOf('نزّل البرنامج')<0);
+  run("installEvt={prompt(){},userChoice:Promise.resolve()};app.go('home');");
+  t('بيظهر لما الموبايل يسمح، و«مش دلوقتي» بتشيله', V().indexOf('نزّل البرنامج على الموبايل')>-1&&(run("app.noInstall()"),V().indexOf('نزّل البرنامج')<0));
+}
+done();

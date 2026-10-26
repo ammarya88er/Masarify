@@ -1,0 +1,9 @@
+# بياناتك الحقيقية: ماتترفعش أبدًا (الريبو عام)
+tests/backup.json
+tests/backup*.json
+tests/*backup*
+*.backup.json
+masareef-backup*.json
+# بيتعمل لوحده من index.html وقت تشغيل الاختبارات
+tests/s0.js
+node_modules/

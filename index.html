@@ -2043,7 +2043,7 @@ const vchAddOk=()=>!!(vchDraft.code.trim()&&Number(onlyNum(vchDraft.amount))>0&&
   &&(vchDraft.who==='me'||(String(vchDraft.oname||'').trim()&&String(vchDraft.ophone||'').length>=8&&String(vchDraft.ocard||'').length===6)));
 const vchBank=()=>{const a=(D.accounts||[]).find(x=>x.id===D.vchAcct);return a?a.name:'';};
 const vchSetupOk=()=>!!(vchBank()&&D.cardDigits&&D.phone);
-/* رسالة الفاوتشر من البنك: «... بقسيمة رقم 2016804891815 بقيمة 1000 جم صالحة حتى 28/12/2026 ...» */
+/* رسالة الفاوتشر من البنك: «... بقسيمة رقم 1234567890123 بقيمة 1000 جم صالحة حتى 28/12/2026 ...» */
 function parseVchMsg(raw){
   const t=String(raw||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
   const c=t.match(/قسيمة\s*(?:رقم)?\s*(\d{6,})/);
@@ -6523,8 +6523,12 @@ function vSettings(){
         <button class="btn ghost" onclick="app.cancelDel()">إلغاء</button>`
       :`<button class="btn danger" onclick="app.askDel('wipe')">امسح كل البيانات</button>`}
             `)])}
+    <div class="hint" style="text-align:center;margin:18px 0 6px">الإصدار <span class="n">${APP_VER}</span> · ${esc(APP_NOTE)}</div>
   </div>`;
 }
+/* رقم الإصدار بيزيد مع كل رفع، ومعاه سطر بالتغيير — عشان تعرف أنهي نسخة على موبايلك */
+const APP_VER='4.0';
+const APP_NOTE='فاوتشر لحد تاني، مرتجع محجوز، وتصليحات الربط والأرقام';
 
 
 /* ==========================================================================
