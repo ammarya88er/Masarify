@@ -41,7 +41,10 @@ const ex=(id,date,amount)=>({id,book:'me',kind:'expense',amount,cat:'other',acco
 { // كارت جديد
   const {run,V}=boot(seed());run("app.goAccounts();showAddAcc=true;accDraft.credit=true;accDraft.atype='credit';render();");
   t('إضافة كارت: السؤال موجود', V().indexOf('فيه ضريبة دمغة؟')>-1);
+  const n0=run("D.accounts.length");
   run("accDraft.name='كارت تاني';accDraft.limit='10000';app.addAccount();");
+  t('الأسئلة بتبدأ فاضية: مايتحفظش قبل ما تجاوب', run("D.accounts.length")===n0&&V().indexOf('جاوب على كل الأسئلة الأول')>-1);
+  run("app.accPickSec(false);app.accPickIns(true);app.accPickStamp(true);app.addAccount();");
   const a=JSON.parse(run("JSON.stringify(D.accounts[D.accounts.length-1])"));
   t('اتحفظ بالنسبة', a.stamp===true&&a.stampRate===0.05);
 }

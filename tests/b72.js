@@ -6,7 +6,7 @@ const {boot,seed,t,done}=require('./harness');
   const v=V();
   t('سطر واحد من غير فاصل', v.indexOf('class="rl r1"')>-1&&v.indexOf('class="br"')<0);
   t('العدد جنب الاسم', /class="nml"><span class="qx on"/.test(v));
-  t('التصنيف تحت الاسم بسهم صغير', v.indexOf('class="sub"')>-1&&v.indexOf('مشروبات ▾')>-1);
+  t('التصنيف تحت الاسم بسهم صغير', v.indexOf('class="sub"')>-1&&v.indexOf('مشروبات</span>&nbsp;▾')>-1);
   t('تغيّر السعر كلمة «أغلى» مش سهم لوحده', v.indexOf('↑ أغلى')>-1&&v.indexOf('class="pa ')<0);
   run("app.priceFor(0);");
   t('الدوسة بتوري آخر سعر', V().indexOf('آخر مرة')>-1);

@@ -71,7 +71,7 @@ const {boot,seed,t,done,r2}=require('./harness');
   t('٤٤ سؤال السعر المخفض موجود', V().indexOf('فيه سعر مخفض لفترة؟')>0);
   run("app.subPick_on(true);app.subSet('promoAmt','52.99');app.subPick('promoN','3');app.subPick('next','2026-09-25');");
   t('٤٤ بيوري السعر العادي هيبدأ إمتى', V().indexOf('السعر العادي هيبدأ من دفعة 25 ديسمبر 2026')>0, (V().match(/السعر العادي هيبدأ[^<]*/)||[''])[0]);
-  run("app.addSub();");
+  run("app.subPick('owner','me');app.subPick('split',false);app.addSub();");
   const s=JSON.parse(run("JSON.stringify(D.subs[0])"));
   t('٤٤ اتحفظ', s.amount===110 && s.promo && s.promo.amount===52.99 && s.promo.left===3, JSON.stringify(s));
   run("render();");

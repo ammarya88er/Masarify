@@ -19,16 +19,18 @@ const sal={id:'s',book:'me',kind:'income',amount:10000,account:'cib',date:'2026-
   const liquid=5000+10000+10000+700;
   t('لحد المرتب الجاي (شهر من آخر مرتب)', c.target==='2026-11-25');
   t('الاشتراكات قبل المرتب ويومه نفسه بتتخصم، واللي بعده لأ', c.X.some(i=>/^نت/.test(i.label))&&c.X.some(i=>/يوم المرتب/.test(i.label))&&!c.X.some(i=>/بعد المرتب/.test(i.label)));
-  t('اشتراك هيتخصم على الكارت مش داخل (بيتسدد من كشف بعد المرتب)', !c.Y.some(i=>/كارتي/.test(i.label))&&!c.X.some(i=>/كارتي/.test(i.label)));
+  t('اشتراك هيتخصم على الكارت مش في الرقم الأولاني', !c.Y.some(i=>/كارتي/.test(i.label))&&!c.X.some(i=>/كارتي/.test(i.label)));
+  t('وفي «بعد اشتراكات الكارت»', c.C.some(i=>/كارتي/.test(i.label))&&c.c===c.x-103, JSON.stringify(c.C));
   t('الرقم الأولاني', c.x===liquid-300-50, c.x+' '+liquid);
-  t('الرقم التاني فيه الكارت وفلوس الناس', Math.abs(c.y-(c.x-2000-700))<0.01, c.y);
-  t('الرقم التالت فيه اللي ليك', c.z===c.x+400);
+  t('«بعد كل اللي عليك» فيه الكارت وفلوس الناس كمان', Math.abs(c.y-(c.c-2000-700))<0.01, c.y);
+  t('«ولو رجعلك اللي ليك» على الرقم الأولاني', c.z===c.x+400);
   // المرتب اتأخر
   const r=boot(Object.assign(seed({txns:[Object.assign({},sal,{date:'2026-09-20'})]})),NOW);
   t('المرتب عدّى ميعاده: الحسبة لحد النهارده', JSON.parse(r.run("JSON.stringify(spendCalc())")).late===true);
   const {run:r2,V}=boot(S,NOW);r2("app.go('home');render();");
   t('كشف اتسدد زيادة مايطلعش بالسالب', true);
   t('ظاهر في الرئيسية من غير تقسيم على الأيام', V().indexOf('تقدر تصرف لحد المرتب')>-1&&V().indexOf('في اليوم')<0);
+  t('بالأسامي الجديدة', ['بعد اشتراكات الكارت','بعد كل اللي عليك','ولو رجعلك اللي ليك'].every(x=>V().indexOf(x)>-1));
 }
 { // ٢ كشف الكارت: الكشف اللي ميعاده قبل المرتب
   const S=seed({txns:[Object.assign({},sal,{date:'2026-10-20'}),ex('c',1500,{account:'card',date:'2026-10-10'})]});
@@ -106,7 +108,7 @@ const sal={id:'s',book:'me',kind:'income',amount:10000,account:'cib',date:'2026-
   t('مفيش أرقام بالسالب ولا كارت', c.y===c.x&&!c.X.length&&!c.Y.length, JSON.stringify(c));
   run("app.go('home');alertsOpen=true;render();");
   t('مفيش «نزل كشف» لكشف اتسدد', V().indexOf('نزل كشف')<0);
-  t('ولا سطر «لو دفعت» لو مفيش عليك حاجة', V().indexOf('لو دفعت كل اللي عليك')<0);
+  t('ولا سطر «بعد كل اللي عليك» لو مفيش عليك حاجة', V().indexOf('بعد كل اللي عليك')<0&&V().indexOf('بعد اشتراكات الكارت')<0);
 }
 done();
 })();

@@ -36,7 +36,7 @@ const pay=(run)=>{run("app.paySub('s1');app.confirmPaySub('s1');");return JSON.p
   run("tab='wallet';wtab='subs';showSub=true;render();");let v=V();
   t('إضافة: السؤال بـ«لأ / أيوه» من غير اختيار', v.indexOf('ليه مصاريف تدبير؟ (اختياري)')>-1&&/subarr[^]*?>لأ<\/button>[^]*?>أيوه<\/button>/.test(v)&&!/class="chip sm on"[^>]*app.shutRow\('subarr'\)/.test(v)&&v.indexOf('لو مش عارف سيبها')>-1);
   t('الكارت: «التدبير هيتحدد من أول دفعة»', v.indexOf('التدبير هيتحدد من أول دفعة')>-1);
-  run("subDraft.name='X';subDraft.amount='50';app.subPick('arr',false);app.addSub();");
+  run("subDraft.name='X';subDraft.amount='50';app.subPick('arr',false);app.subPick('owner','me');app.subPick('promo',false);app.subPick('split',false);app.addSub();");
   t('إضافة: الإجابة اتحفظت', run("D.subs.find(s=>s.name==='X').arr")===false);
   run("subDraft.cur='USD';showSub=true;render();");
   t('بالدولار: مفيش سؤال', V().indexOf('ليه مصاريف تدبير؟')<0);

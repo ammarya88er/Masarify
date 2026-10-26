@@ -40,7 +40,7 @@ const ex=(id,date,amount,o)=>Object.assign({id,book:'me',kind:'expense',amount,c
   const {run,V}=boot(seed());
   run("app.go('scan');app.manualBill();");
   t('أول صنف فاضي من غير تصنيف', run("scan.items[0].name===''&&scan.items[0].amount===0&&scan.items[0].cat===''"));
-  t('مكتوب «التصنيف»', /class="ct ph">التصنيف ▾<select/.test(V()));
+  t('مكتوب «التصنيف»', /class="ct ph"><span class="ctl">التصنيف<\/span>&nbsp;▾<select/.test(V()));
   run("app.addItem();");
   t('«ضيف صنف ناقص» فاضي برضو', run("scan.items[1].name===''&&scan.items[1].cat===''"));
   run("app.scanAccount('cash');app.iset(0,'name','عصير');app.iset(0,'amount','40');");

@@ -21,7 +21,7 @@ function check(name,run,V,key,label,stateExpr,want){
   check('اشتراك جديد: هتجدد',run,V,'subren','أيوه',"subDraft.willRenew",true);
   check('اشتراك جديد: العملة',run,V,'subcur2','بالدولار',"subDraft.cur",'USD');
   check('اشتراك جديد: بعد التجربة',run,V,'subaft','سنوي',"subDraft.afterCycle",'yearly');
-  run("app.subPick('cycle','monthly');");
+  run("app.subPick('cycle','monthly');app.subPick('owner','me');");
   check('اشتراك جديد: متقسم',run,V,'subsplit','أيوه',"subDraft.split",true);
   run("app.startSubEdit('s1');");
   check('تعديل اشتراك: الدورة',run,V,'sdcycles1','سنوي',"sDraft.cycle",'yearly');

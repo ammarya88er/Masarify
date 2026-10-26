@@ -140,6 +140,9 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .money span{position:absolute;inset-inline-end:22px;top:50%;transform:translateY(-50%);
   color:var(--muted);font-size:13px;}
 .chips{display:flex;flex-wrap:wrap;gap:8px;}
+/* قاعدة عامة: أي صف اختيارات أو تاريخ جاي بعد حاجة تانية مباشرة (من غير عنوان) ليه مسافة فوقه */
+:where(.chips,.drow){margin-top:12px;}
+:where(.chips,.drow):first-child,label.f+.chips,label.f+.drow,.sec-h+.chips{margin-top:0;}
 .chips+.chips{margin-top:8px;}
 .chip{border:1px solid var(--line);background:var(--surf);color:var(--tx2);border-radius:12px;
   padding:8px 12px;font:inherit;font-size:12.5px;cursor:pointer;transition:.15s;}
@@ -211,7 +214,11 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 .rl.r1 .sub{display:flex;gap:8px;align-items:center;margin-top:2px}
 .rl.r1 .ct{border:0!important;padding:0!important;min-height:0!important;font-size:11px;color:#6E6759}
 .rl.r1 .pa2{background:none;border:0;padding:0;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
-.rl.r1 .ct{white-space:nowrap}
+.rl.r1 .ct{white-space:nowrap;display:flex;align-items:center;min-width:0;max-width:100%;flex:0 1 auto}
+.receipt .chip{background:transparent;border-color:#CDC7B8;color:var(--paper-ink);}
+.rl.r1 .ct .ctl{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rl.r1 .sub{min-width:0;max-width:100%}
+.rl.r1 .pa2{flex:0 0 auto}
 .rl.r1 .pa2.up{color:#C0503F}.rl.r1 .pa2.down{color:#23835F}
 .rl.r1 input.vl{border:0!important;flex:0 0 64px;width:64px}
 .rl.r1 .who{min-height:32px;min-width:40px}
@@ -291,6 +298,9 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
   padding:3px 11px;border-radius:99px;background:var(--surf2);}
 .rep .catline:first-child{margin-top:4px;}
 :root[data-theme="light"] .cat .am{color:var(--text)!important;}
+/* ألوان التصنيفات فاتحة (معمولة للوضع الغامق): في الوضع الفاتح بتغمق شوية عشان تبان على الخلفية البيضا */
+:root[data-theme="light"] .fill,:root[data-theme="light"] .catchip b,:root[data-theme="light"] .rail,:root[data-theme="light"] .cdot{filter:brightness(.78) saturate(1.35);}
+:root[data-theme="light"] .ccol{filter:brightness(.55) saturate(1.5);}
 .rep .l.catsum{font-weight:600;color:var(--tx5);background:var(--surf2);border-radius:8px;border-bottom:0;margin-top:4px;padding:8px;}
 
 .rl .who{background:#E7E2D6;border:1px solid #CDC7B8;color:#5C5648;border-radius:9px;
@@ -626,7 +636,7 @@ let closeTo=today(), closeMode='carry', closeAcct='', ocatDraft='';
 /* سداد التقفيل: العمولة (لسه ماتجاوبتش = undefined)، والحساب المشترك، وكاشك، والتقفيل القديم المفتوح */
 let closeFee, closeFeeAmt='', closeShared='', closeCash='', viewClose='';
 let insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};
-let accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',stamp:true,stampRate:'0.05',sec:false,secured:[],
+let accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:undefined,insureRate:'0.9',stamp:undefined,stampRate:'0.05',sec:undefined,secured:[],
   secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
 let payCard={id:null,mode:'full',amount:'',from:'bank',date:today()};
 let eTxn=null;
@@ -637,8 +647,8 @@ function accCfgInit(){accCfg={};D.accounts.forEach(a=>accCfg[a.id]={
   accNo:a.accNo||'',last4:a.last4||'',
   stmtDay:String(a.stmtDay||20),graceDay:String(a.graceDay||15),
   insureRate:String(a.insureRate!==undefined?a.insureRate:0.9),stampRate:String(a.stampRate!==undefined?a.stampRate:0.05),cur:a.cur||'EGP',color:aColor(a.id)});}
-let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:'cert'};
-let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',promo:false,split:false,people:[{name:'',amount:''}]};
+let certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:undefined,fee:'',type:'cert'};
+let subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:undefined,afterCycle:'monthly',at:'',promo:undefined,split:undefined,owner:undefined,ownerName:'',ocat:'',people:[{name:'',amount:''}]};
 let vchDraft={code:'',amount:'',expiry:''}, showVch=false, copied='', giveFor=null, vchMsg='';
 let editVch=null, eDraft={code:'',amount:'',expiry:''};
 let ghToken=ghGetToken(), ghGist=ghGetGistId();
@@ -663,6 +673,13 @@ function stmtPut(acc,key,amt,mn,due){
 let flPay={from:'',to:''};
 let feeDate='';
 let paySubBal='', repBal='', upBal='';
+/* اشتراك المكتب وقت «اتخصم»: خدت الفلوس من المكتب؟ (undefined = لسه ماجاوبتش) ومن أنهي حساب ولأنهي حساب */
+let paySubTake=undefined, paySubFrom='', paySubTo='';
+/* الحساب اللي دخلت عليه فلوس المكتب: نفس الحساب لو مشترك (نصيب ينتقل لنصيب)، وإلا من نفس النوع */
+function subTakeTo(s){const f=D.accounts.find(a=>a.id===paySubFrom);if(!f)return '';
+  return f.scope==='both'?f.id:kindVal(paySubTo,paySubFrom);}
+/* بالدولار المبلغ لسه مش متأكد: الفلوس بتتاخد بعدين من «سوّها» */
+const subTakeOk=s=>subOwner(s)!=='office'||s.cur==='USD'||paySubTake===false||(paySubTake===true&&!!paySubFrom&&!!subTakeTo(s));
 let alertsOpen=false;
 let svEdit=null;
 const ASEEN='masareef:alertsSeen:';
@@ -830,6 +847,7 @@ function normalizeData(){
   if(!D._nmclean){const fx=i=>{if(i&&typeof i.name==='string'){const c=cleanNm(i.name);if(c!==i.name)i.name=c;}};
     (D.txns||[]).forEach(t=>(t.items||[]).forEach(fx));Object.values(D.ops||{}).forEach(o=>{if(o&&o.d&&Array.isArray(o.d.items))o.d.items.forEach(fx);});
     if(Array.isArray(D.nameNo))D.nameNo=[...new Set(D.nameNo.map(k=>{const p=String(k).split('||');return p.length===2?[cleanNm(p[0]),cleanNm(p[1])].sort().join('||'):k;}))];
+    if(Array.isArray(D.placeNo))D.placeNo=[...new Set(D.placeNo.map(k=>{const p=String(k).split('||');return p.length===2?[cleanNm(p[0]),cleanNm(p[1])].sort().join('||'):k;}))];
     D._nmclean=1;}
   /* إعدادات الصيانة الافتراضية لكل مركبة */
   (D.vehicles||[]).forEach(v=>{if(!v.maint)v.maint=mDef();});
@@ -1293,6 +1311,8 @@ function addFeeBack(ref,label){
   D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-v,cat:'fees',account:ref.account,date:ref.date,
     note:'تدبير راجع — '+label,refWait:true,refFee:ref.id});
 }
+/* مبلغ المرتجع موجب: المرتجع العادي مصروف بالسالب، ومرتجع فلوس المكتب نقل فلوس داخل */
+const refV=t=>t.kind==='settle'?(t.dir==='in'?1:-1)*(Number(t.amount)||0):-(Number(t.amount)||0);
 /* حركة مستنية: مرتجع محجوز، أو الحركة الأصلية اللي مرتجعها لسه محجوز (زي «مستني مرتجع») */
 function refHeldOrig(){const o={};D.txns.forEach(t=>{if(t.refWait&&t.refundOf)o[t.refundOf]=1;});return o;}
 function saveFlows(a){
@@ -2244,6 +2264,70 @@ function chargeSub(s,d){
   s.next=subNextOf(s);
   return {name:s.name,amount:full,usd:!!usd,sid:s.id,t:t.id,date:d};
 }
+/* ==========================================================================
+   اشتراك المكتب: الخصم من حسابك (غالبًا الكارت) بيتسجل نقل فلوس مش مصروف عليك،
+   وفي دفتر المكتب بند «اشتراك X» متقرّب لأقرب 5 لفوق، كل خصم لوحده (999 ← 1000، وتدبيره 29 ← 30).
+   مرتجع على الاشتراك بيقلل اللي على المكتب، والإجمالي بيتقرب تاني (999 + 29 − 12.36 ← 1020، فسطر «مرتجع» بـ−10).
+   «خدت الفلوس؟ أيوه» وقت الخصم: بتدخل حسابك على طول وفرق التقريب «باقي تقريب» ليك.
+   «لسه»: المكتب عليه ليك، وفرق التقريب بيتسجل لما تاخدها من «سوّها».
+   سطور المكتب بتتبني من حركاتك (الخصم والتدبير والمرتجعات) بأرقام ثابتة، فالبناء من تاني مابيغيّرش حاجة لو مفيش تغيير.
+   ========================================================================== */
+const ceil5=x=>{const c=Math.round((Number(x)||0)*100);return c<=0?c/100:Math.ceil(c/500)*5;};
+const r2s=x=>Math.round((Number(x)||0)*100)/100;
+function subOffSync(s,p){
+  if(!p||!p.off)return;
+  const key=p.off.k;if(!key)return;
+  const old={};
+  D.txns.forEach(x=>{if(x.sof===key)old[x.id]=x;});(D.floatLoans||[]).forEach(l=>{if(l.sof===key)old[l.id]=l;});
+  D.txns=D.txns.filter(x=>x.sof!==key);
+  /* التسويات بتفضل في نفس مكانها (عشان البناء من تاني مايغيّرش ترتيب حاجة) */
+  const nl=[], fin=()=>{const used={};
+    D.floatLoans=(D.floatLoans||[]).map(l=>{if(l.sof!==key)return l;const n=nl.find(x=>x.id===l.id);if(n){used[n.id]=1;return n;}return null;}).filter(Boolean)
+      .concat(nl.filter(x=>!used[x.id]));};
+  const t=p.t&&D.txns.find(x=>x.id===p.t);if(!t){fin();return;}
+  const keep=o=>{const w=old[o.id];if(w&&w._q!==undefined)o._q=w._q;return o;};
+  const L=t.link, nm=s.name, it='اشتراك '+nm, oc=s.ocat||defOcat(), card=isCreditAcc(t.account)?t.account:undefined;
+  const c=r2s(t.amount);
+  const fT=p.feeTxn&&D.txns.find(x=>x.id===p.feeTxn&&x.sofP===key), f=fT?r2s(fT.amount):0;
+  const refs=D.txns.filter(x=>x.sofP===key&&x.sofRef), rf=r2s(refs.reduce((a,x)=>a+(Number(x.amount)||0),0));
+  const lines=[{k:'c',amt:ceil5(c),real:c,date:t.date,note:it}];
+  if(f>0.004)lines.push({k:'f',amt:ceil5(f),real:f,date:fT.date,note:'تدبير — '+nm});
+  if(rf>0.004){const prev=lines.reduce((a,l)=>a+l.amt,0), tot=ceil5(c+f-rf);
+    lines.push({k:'r',amt:r2s(tot-prev),real:-rf,date:refs.map(x=>x.date).sort().pop(),note:'مرتجع — '+nm});}
+  if(!(c>0)){fin();return;}
+  lines.forEach(ln=>{
+    if(Math.abs(ln.amt)<0.005)return;
+    const take=ln.k==='c'&&p.off.from&&p.off.to;
+    const acc=take?p.off.from:(p.off.acc||officeCashId());
+    const oid='so:'+key+':'+ln.k;
+    D.txns.push(keep({id:oid,book:'office',kind:'expense',amount:ln.amt,account:acc,date:ln.date,item:it,ocat:oc,note:ln.note,
+      real:(ln.k!=='r'&&Math.abs(ln.amt-ln.real)>0.004)?ln.real:undefined,link:L,ocard:card,sof:key}));
+    if(take){
+      D.txns.push(keep({id:oid+':in',book:'me',kind:'settle',dir:'in',amount:ln.real,account:p.off.to,date:ln.date,ocard:card?true:undefined,omine:card?undefined:true,
+        link:L,sof:key,note:'من '+bookName()+' — '+it}));
+      const rd=r2s(ln.amt-ln.real);
+      if(rd>0.004)D.txns.push(keep({id:oid+':rd',book:'me',kind:'income',amount:rd,account:p.off.to,date:ln.date,link:L,sof:key,
+        icat:'diff',note:'باقي تقريب — '+it}));
+    }else{
+      D.txns.push(keep({id:oid+':fl',book:'office',kind:'float',amount:ln.amt,account:acc,date:ln.date,link:L,sof:key,
+        note:'من فلوسي ('+(card?'الكارت':accName(t.account))+') — '+it}));
+      nl.push({id:oid+':ln',dir:'back',amount:ln.amt,date:ln.date,note:it,srcTxn:oid,sof:key,rnd:r2s(ln.amt-ln.real)});
+    }
+  });
+  fin();sortTxns();
+}
+/* بعد أي تعديل أو مسح لحركة من حركات اشتراك المكتب: سطور المكتب بتتبني من جديد */
+function subOffAll(){(D.subs||[]).forEach(s=>(s.payments||[]).forEach(p=>{if(p.off)subOffSync(s,p);}));}
+/* فرق التقريب اللي لسه ماتاخدش (من «لسه»): بيتسجل «باقي تقريب» لما تاخد الفلوس */
+const loanRnd=()=>r2s((D.floatLoans||[]).reduce((a,l)=>a+(l.dir==='back'?1:-1)*(Number(l.rnd)||0),0));
+/* حركات خصم اشتراك المكتب في دفترك: نقل فلوس (ocard من الكارت، omine من حساب تاني) */
+function subOffMark(o,s,key,L){
+  const card=isCreditAcc(o.account);
+  o.kind='settle';o.dir='out';o.link=L;o.sofP=key;
+  if(card){o.ocard=true;delete o.omine;}else{o.omine=true;delete o.ocard;}
+  delete o.cat;delete o.arrFee;
+  return o;
+}
 /* الخصم ده اتسجل خلاص من رسالة البنك: نربطه بالاشتراك بدل ما نسجله مرتين */
 function subTwin(s,d,full,usd){
   const used={};(D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t)used[p.t]=1;}));
@@ -2266,6 +2350,7 @@ function subTwinTake(s,t){
 }
 /* نصيب الناس في دفعة اشتراك: بنفس نسبة السعر اللي اتدفع (العرض)، وعمره ما يعدّي المدفوع */
 function subDuesAdd(s,t,full,usd,d,price){
+  if(subOwner(s)==='office')return;
   /* السعر اللي اتدفع (قبل ما العرض يقل بدفعة) */
   price=price===undefined?(usd||full):price;
   if(!(subMineAt(s,price)<price-0.001))return;
@@ -2364,11 +2449,16 @@ function subDefAcc(){
 const subAcc=s=>(s.account&&(D.accounts||[]).some(a=>a.id===s.account))?s.account:subDefAcc();
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
 const subCost=s=>s.cur==='USD'?subPrice(s)*D.rate:subPrice(s);
-const subPeople=s=>(s.people&&s.people.length)?s.people:[];
+/* الاشتراك بتاع مين: «me» أنا (من غير قيمة = أنا)، «other» حد تاني بالكامل (s.ownerName)، «office» الدفتر التاني */
+const subOwner=s=>(s&&(s.owner==='other'||s.owner==='office'))?s.owner:'me';
+/* بتاع حد تاني: كل دفعة بمبلغها كله «ليك عنده»، والتدبير عليك */
+const subPeople=s=>subOwner(s)==='other'?[{name:String(s.ownerName||'').trim()||'حد',amount:Number(s.amount)||0}]
+  :subOwner(s)==='office'?[]:(s.people&&s.people.length)?s.people:[];
 const subOthers=s=>subPeople(s).reduce((a,p)=>a+(Number(p.amount)||0),0);
 /* وقت العرض (سعر أقل): نصيب كل واحد بيقل بنفس النسبة، عشان اللي على الناس مايعديش اللي اتدفع */
 const subK=(s,price)=>{const a=Number(s.amount)||0;return a>0?Math.min(1,(Number(price)||0)/a):1;};
 const subMine=s=>{
+  if(subOwner(s)==='office')return 0;
   if(subPeople(s).length)return Math.max(0,subPrice(s)-subOthers(s)*subK(s,subPrice(s)));
   return (s.myShare===null||s.myShare===undefined)?Number(s.amount):Number(s.myShare);
 };
@@ -2401,6 +2491,7 @@ function subLive(s){
 const subCyc=s=>s.cycle==='trial'?(s.afterCycle||'monthly'):s.cycle;
 /* نصيبك من سعر معين */
 function subMineAt(s,price){
+  if(subOwner(s)==='office')return 0;
   if(subPeople(s).length)return Math.max(0,price-subOthers(s)*subK(s,price));
   if(s.myShare===null||s.myShare===undefined)return price;
   return Math.min(Number(s.myShare)||0,price);
@@ -2419,7 +2510,8 @@ function subFeeAt(s,price){
   return arrEst(price);
 }
 /* تكلفة دفعة واحدة بالجنيه بسعر معين */
-const subPayCost=(s,price)=>(s.cur==='USD'?subMineAt(s,price)*D.rate:subMineAt(s,price))+subFeeAt(s,price);
+/* تدبير اشتراك المكتب على المكتب، فمش من تكلفتك */
+const subPayCost=(s,price)=>(s.cur==='USD'?subMineAt(s,price)*D.rate:subMineAt(s,price))+(subOwner(s)==='office'?0:subFeeAt(s,price));
 const subNowPrice=s=>s.cycle==='trial'?(Number(s.amount)||0):subPrice(s);
 /* المتوسط في الشهر: الشهري بسعره الحالي، والسنوي مقسوم على ١٢ */
 function subMonthly(s){
@@ -3399,6 +3491,85 @@ function itemParts(t){
   if(sh>0.005&&mine>0){const k=1-sh/mine;parts.forEach(p=>{p.amount*=k;});}
   return parts;
 }
+/* ==========================================================================
+   الحاجات اللي عايز أقللها: درجات («مضر» و«مش مفيد» و«رفاهية» — بتتعدل من الإعدادات)
+   على تصنيف كامل (D.cutCat[تصنيف]) أو على صنف لوحده (D.cutItem[اسم]) — درجة الصنف تكسب،
+   و«none» على صنف = الصنف ده من غير درجة حتى لو تصنيفه ليه درجة.
+   مفيش حد ولا مصروف أسبوعي: بس صرفت كام وكام مرة، وبقالك قد إيه من غيرها، وقصاد متوسط آخر 3 شهور.
+   ========================================================================== */
+const LV_DEF=[{id:'harm',label:'مضر',color:'#E5484D'},{id:'useless',label:'مش مفيد',color:'#E8A03C'},{id:'lux',label:'رفاهية',color:'#8C7BF0'}];
+const lvList=()=>Array.isArray(D.cutLv)?D.cutLv:LV_DEF;
+const lvById=id=>lvList().find(l=>l.id===id)||null;
+const lvKey=n=>pk(cleanNm(n));
+function lvOf(cat,name){
+  const k=lvKey(name), it=k&&D.cutItem?D.cutItem[k]:undefined;
+  if(it)return it==='none'?null:lvById(it);
+  const c=D.cutCat?D.cutCat[cat]:'';return c?lvById(c):null;
+}
+const lvOn=()=>Object.keys(D.cutCat||{}).some(k=>lvById(D.cutCat[k]))||Object.keys(D.cutItem||{}).some(k=>lvById(D.cutItem[k]));
+const lvDot=l=>l?`<span class="cdot" title="${esc(l.label)}" style="display:inline-block;width:8px;height:8px;border-radius:99px;background:${l.color};margin-inline-start:6px;vertical-align:middle;flex:0 0 8px"></span>`:'';
+/* الشهر الحالي (من المرتب لو متسجل، وإلا بالتقويم) */
+function lvNow(){const pers=salaryPeriods();if(pers)return {from:pers[0].from,to:pers[0].to};
+  const m=monthOf(today());return {from:m+'-01',to:dayShift(mAdd(m,1)+'-01',-1)};}
+/* لكل درجة: صرفت كام وكام مرة (مرة = حركة فيها حاجة من الدرجة دي) في الفترة، وآخر مرة خالص */
+function lvStats(from,to){
+  const r={};lvList().forEach(l=>r[l.id]={amount:0,n:0,last:''});
+  sdBuild();
+  D.txns.forEach(t=>{if((t.book||'me')!=='me'||t.kind!=='expense')return;
+    const d=sDate(t), inP=d>=from&&d<=to, seen={};
+    itemParts(t).forEach(p=>{const l=lvOf(p.cat,p.name);if(!l||!r[l.id]||!(p.amount>0.004))return;
+      if(t.date>r[l.id].last)r[l.id].last=t.date;
+      if(!inP)return;r[l.id].amount+=p.amount;if(!seen[l.id]){r[l.id].n++;seen[l.id]=1;}});});
+  Object.values(r).forEach(x=>{x.amount=r2s(x.amount);});
+  return r;
+}
+const lvSince=d=>{if(!d)return 'مااتسجلش منها حاجة لسه';const n=-daysTo(d);
+  return n<=0?'جبت منها النهارده':n===1?'آخر مرة إمبارح':'بقالك '+plural(n,'يوم','يومين','أيام','يوم')+' من غيرها';};
+/* الرئيسية: لكل درجة صرفت كام الشهر ده وكام مرة، وبقالك قد إيه من غيرها */
+function lvHomeHtml(){
+  if(!lvOn())return '';
+  const P=lvNow(), S=lvStats(P.from,P.to);
+  const L=lvList().filter(l=>Object.values(D.cutCat||{}).indexOf(l.id)>-1||Object.values(D.cutItem||{}).indexOf(l.id)>-1);
+  if(!L.length)return '';
+  return `<div class="sec">
+    <div class="sec-h"><h3>الحاجات اللي عايز أقللها</h3><span>الشهر ده</span></div>
+    <div class="panel">${L.map(l=>{const x=S[l.id];return `<div class="arow">
+      <span class="rail" style="background:${l.color}"></span>
+      <span class="nm">${esc(l.label)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${x.n?plural(x.n,'مرة','مرتين','مرات','مرة')+' · ':''}${lvSince(x.last)}</span></span>
+      <span class="vl n">${fmt(x.amount)}</span></div>`;}).join('')}</div>
+  </div>`;
+}
+/* وانت بتسجل: مجموع الدرجة في الشهر لحد دلوقتي */
+/* add: اللي بتسجله دلوقتي لكل درجة (لسه ماتحفظش) */
+function lvLiveLine(ids,add){
+  const L=ids.map(lvById).filter(Boolean);if(!L.length)return '';
+  const P=lvNow(), S=lvStats(P.from,P.to);add=add||{};
+  return `<div class="hint">${L.map(l=>{const a=r2s(add[l.id]||0);return `${lvDot(l)} ${esc(l.label)} الشهر ده لحد دلوقتي <span class="n">${fmt(S[l.id].amount)}</span>${S[l.id].n?' ('+plural(S[l.id].n,'مرة','مرتين','مرات','مرة')+')':''}${a>0.004?' · ومع دي <span class="n">'+fmt(r2s(S[l.id].amount+a))+'</span>':''}`;}).join('<br>')}</div>`;
+}
+/* الفترات اللي قبل فترة: من المرتب لو متسجل، وإلا شهور التقويم */
+function prevPeriods(P,n){
+  const pers=salaryPeriods();
+  if(pers){const i=pers.findIndex(x=>x.from===P.from);return i<0?[]:pers.slice(i+1,i+1+n).map(x=>({from:x.from,to:x.to}));}
+  const out=[];let m=monthOf(P.from);for(let k=0;k<n;k++){m=mAdd(m,-1);out.push({from:m+'-01',to:dayShift(mAdd(m,1)+'-01',-1)});}
+  const first=D.txns.filter(t=>(t.book||'me')==='me').map(t=>t.date).sort()[0]||'';
+  return out.filter(x=>x.to>=first);
+}
+/* ملخص الشهر: كل درجة قصاد متوسط آخر 3 شهور */
+function lvSumHtml(P){
+  if(!lvOn())return '';
+  const S=lvStats(P.from,P.to), prev=prevPeriods(P,3).map(x=>lvStats(x.from,x.to));
+  const L=lvList().filter(l=>S[l.id].amount>0||prev.some(x=>x[l.id].amount>0));
+  if(!L.length)return '';
+  const nm=prev.length===1?'الشهر اللي قبله':prev.length===2?'متوسط آخر شهرين':'متوسط آخر 3 شهور';
+  return `<h4 style="font-size:13px;margin:18px 0 6px">الحاجات اللي عايز أقللها</h4>
+    <div class="panel">${L.map(l=>{const v=S[l.id].amount, avg=prev.length?r2s(prev.reduce((a,x)=>a+x[l.id].amount,0)/prev.length):null;
+      const d=avg===null?0:r2s(v-avg);
+      return `<div class="arow"><span class="rail" style="background:${l.color}"></span>
+        <span class="nm">${esc(l.label)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${avg===null?'مفيش شهور قبله للمقارنة':nm+' <span class="n">'+fmt(avg)+'</span>'+(Math.abs(d)>=0.5?` · <span style="color:${d>0?'var(--clay)':'var(--mint)'}">${d>0?'أكتر':'أقل'} بـ<span class="n">${fmt(Math.abs(d))}</span></span>`:' · زيه')}</span></span>
+        <span class="vl n">${fmt(v)}</span></div>`;}).join('')}</div>`;
+}
+/* اختيار الدرجة: صف الدرجات + «من غير» */
+const lvChips=(sel,fn,key)=>pickRow(key,lvList().map(l=>({id:l.id,label:`${lvDot(l)} ${esc(l.label)}`})).concat([{id:'',label:'من غير'}]),sel||'',fn,1);
 function periodSummary(from,to){
   sdBuild();
   const mt=D.txns.filter(t=>(t.book||'me')==='me'&&sDate(t)>=from&&sDate(t)<=to);
@@ -3439,7 +3610,8 @@ function sumBody(P){
       <div class="panel">${S.high.map(i=>`<div class="arow">
         <span class="nm">${esc(i.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${esc(catOf(i.cat).label)} · ${i.n>1?plural(i.n,'مرة','مرتين','مرات','مرة')+' · ':''}${i.pct}% من التصنيف</span></span>
         <span class="vl n">${fmt(i.amount)}</span></div>`).join('')}</div>`
-      :'<div class="hint">مفيش حاجة عالية على تصنيفها في الفترة دي.</div>'}`;
+      :'<div class="hint">مفيش حاجة عالية على تصنيفها في الفترة دي.</div>'}
+    ${lvSumHtml(P)}`;
 }
 /* أرقام الشهر اللي مختاره في الرئيسية */
 function monthStats(){
@@ -3464,7 +3636,8 @@ function monthStats(){
     +mt.reduce((a,t)=>a+(Number(t.fxGain)||0),0))*100)/100;
   const m={};
   mt.filter(t=>t.kind==='expense').forEach(t=>breakdown(t).forEach(x=>m[x.cat]=(m[x.cat]||0)+x.amount));
-  const byCat=Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  /* تصنيف مجموعه صفر (زي اشتراك كله على حد تاني) مابيظهرش */
+  const byCat=Object.entries(m).filter(x=>Math.abs(x[1])>=0.005).sort((a,b)=>b[1]-a[1]);
   const gross=byCat.reduce((a,x)=>a+x[1],0)||1;
   const max=byCat.length?byCat[0][1]:1;
   const mi={};
@@ -3480,9 +3653,9 @@ function monthStats(){
    X = فلوسك الجاهزة (كاش وبنك ومحافظ، من غير فلوس المكتب والتوفير)
        ناقص كل اللي هيتخصم منها لحد يوم المرتب (يومه نفسه محسوب): اشتراكات وتدبيرها، أقساط،
        مصاريف حسابات، وكشف الكارت اللي ميعاد سداده قبل المرتب.
-   Y = X ناقص باقي اللي عليك: الكارت اللي لسه مانزلش في كشف (ومعاه اللي هيتخصم عليه لحد المرتب)
-       وفلوس عليك لحد.
-   Z = X زايد اللي ليك عند الناس (لو اتحسب).
+   C = X ناقص الاشتراكات (وتدبيرها) اللي هتتخصم على الكارت لحد المرتب، حتى لو طلع بالسالب.
+   Y = C ناقص باقي اللي عليك: اللي على الكارت دلوقتي (غير الكشف اللي في X) وفلوس عليك لحد.
+   Z = X زايد اللي ليك عند الناس.
    يوم المرتب = شهر من آخر مرتب؛ لو عدّى ولسه مااتسجلش، الحسبة بتمشي يوم بيوم.
    ========================================================================== */
 function spendCalc(){
@@ -3494,7 +3667,7 @@ function spendCalc(){
   const b=balances('me');
   const liquidAccs=D.accounts.filter(a=>!a.closed&&!a.credit&&!isSave(a)&&!isFxAcc(a.id)&&a.scope!=='office');
   const liquid=r2(liquidAccs.reduce((x,a)=>x+(b[a.id]||0),0));
-  const X=[],Y=[];
+  const X=[],Y=[],C=[];
   const add=(L,label,amt,when)=>{amt=r2(amt);if(amt>0.004)L.push({label,amt,when});};
   /* الحساب ده فلوسه محسوبة؟ كارت ← «لو دفعت كل اللي عليك»، حساب جاهز ← الرقم الأولاني، غير كده مالوش دعوة */
   /* الكارت: اللي هيتخصم عليه بعد كده بيتسدد من كشف بعد المرتب، فمش داخل هنا. اللي داخل هو اللي عليه دلوقتي */
@@ -3507,7 +3680,7 @@ function spendCalc(){
     while(c.next&&c.next<=target&&g++<24){
       const price=c.cur==='USD'?r2(subPrice(c)*(D.rate||0)):subPrice(c);
       const fee=c.cur==='USD'?0:subFeeAt(s,price);
-      const L0=where(subAcc(s));if(L0)add(L0,s.name+(fee?' + تدبير':''),price+fee,c.next);
+      const L0=where(subAcc(s))||(isCard(subAcc(s))?C:null);if(L0)add(L0,s.name+(fee?' + تدبير':''),price+fee,c.next);
       if(c.promo&&Number(c.promo.left)>0)c.promo.left--;
       c.next=subNextOf(c);
     }
@@ -3519,9 +3692,9 @@ function spendCalc(){
     const L0=where(a.id);if(!L0)return;
     let d=f.next,g=0;while(d&&d<=target&&g++<24){add(L0,f.name+' — '+a.name,Number(f.amount)||0,d);d=feeNext({cycle:f.cycle,day:f.day,next:d});}}));
   /* مصاريف تدبير مستنية تأكيدك: البنك هيخصمها قريب */
-  (D.arrPend||[]).forEach(e=>{const L0=where(e.acct);if(L0)add(L0,'تدبير مستني — '+(e.note||accName(e.acct)),Number(e.amount)||0,'');});
+  (D.arrPend||[]).forEach(e=>{const L0=where(e.acct)||(isCard(e.acct)?C:null);if(L0)add(L0,'تدبير مستني — '+(e.note||accName(e.acct)),Number(e.amount)||0,'');});
   (D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{if(!p.feePending||!(Number(p.fee)>0))return;
-    const L0=where(subAcc(su));if(L0)add(L0,'تدبير مستني — '+su.name,Number(p.fee),'');}));
+    const L0=where(subAcc(su))||(isCard(subAcc(su))?C:null);if(L0)add(L0,'تدبير مستني — '+su.name,Number(p.fee),'');}));
   /* الكارت: الكشف اللي ميعاد سداده قبل المرتب في X، والباقي عليه في Y */
   (D.accounts||[]).filter(a=>a.credit&&!a.closed&&!isFxAcc(a.id)).forEach(a=>{
     /* آخر كشف ميعاد سداده لحد يوم المرتب (حتى لو لسه مانزلش، أو ميعاده فات ولسه ماتسددش):
@@ -3535,9 +3708,9 @@ function spendCalc(){
   const L=peopleLedger();
   const owe=r2(L.reduce((x,g)=>x+(g.debtTot||0),0)), rec=r2(L.reduce((x,g)=>x+(g.recTot||0),0));
   if(owe>0.004)Y.push({label:'فلوس عليك لناس',amt:owe});
-  const sx=r2(X.reduce((x,i)=>x+i.amt,0)), sy=r2(Y.reduce((x,i)=>x+i.amt,0));
-  const x=r2(liquid-sx);
-  return {target,late,liquid,X,Y,x,y:r2(x-sy),z:r2(x+rec),rec};
+  const sx=r2(X.reduce((x,i)=>x+i.amt,0)), sy=r2(Y.reduce((x,i)=>x+i.amt,0)), sc=r2(C.reduce((x,i)=>x+i.amt,0));
+  const x=r2(liquid-sx), c=r2(x-sc);
+  return {target,late,liquid,X,C,Y,x,c,y:r2(c-sy),z:r2(x+rec),rec};
 }
 /* اللي فاضل من كشف: لو كتبت مبلغه (أو اتقرا من الرسالة) بيتاخد هو، غير كده حسبة البرنامج */
 function stmtLeft(a,key){
@@ -3572,12 +3745,17 @@ function spendHtml(){
     <div class="panel" style="padding:14px 16px;cursor:pointer" onclick="app.spendToggle()">
       <div style="font-size:12px;color:var(--muted)">تقدر تصرف لحد ${S.late?'ما المرتب ينزل':'المرتب ('+dLabel(S.target)+')'}</div>
       <div style="font-size:24px;font-weight:700;margin-top:4px;color:${S.x<0?'var(--clay)':'var(--text)'}">${f(S.x)}</div>
-      ${(Math.abs(S.y-S.x)>0.004||S.rec>0.004)?`<div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.8">${Math.abs(S.y-S.x)>0.004?`لو دفعت كل اللي عليك: ${f(S.y)}`:''}${(Math.abs(S.y-S.x)>0.004&&S.rec>0.004)?'<br>':''}${S.rec>0.004?`ولو اتحسب اللي ليك: ${f(S.z)}`:''}</div>`:''}
+      ${(function(){/* كل سطر بيظهر بس لو رقمه مختلف عن اللي قبله (يعني فيه حاجة اتخصمت أو اتزادت فعلًا) */
+        const L=[[S.x-S.c,'بعد اشتراكات الكارت',S.c],[S.c-S.y,'بعد كل اللي عليك',S.y],[S.rec,'ولو رجعلك اللي ليك',S.z]]
+          .filter(r=>Math.abs(r[0])>0.004)
+          .map(r=>`<div style="display:flex;justify-content:space-between;gap:10px"><span>${r[1]}</span><span class="n" style="color:${r[2]<0?'var(--clay)':'inherit'}">${fmt(r[2])}</span></div>`);
+        return L.length?`<div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:2">${L.join('')}</div>`:'';})()}
     </div>
     ${spendOpen?`<div class="panel" style="margin-top:10px">
       <div class="arow"><span class="nm">فلوسك الجاهزة (كاش وبنك ومحافظ)</span><span class="vl n">${fmt(S.liquid)}</span></div>
       ${S.X.length?`<div class="hint" style="margin:10px 0 4px">بيتخصم لحد المرتب</div>${lst(S.X)}`:''}
-      ${S.Y.length?`<div class="hint" style="margin:10px 0 4px">وفي «لو دفعت كل اللي عليك» كمان</div>${lst(S.Y)}`:''}
+      ${S.C.length?`<div class="hint" style="margin:10px 0 4px">اشتراكات هتتخصم على الكارت لحد المرتب</div>${lst(S.C)}`:''}
+      ${S.Y.length?`<div class="hint" style="margin:10px 0 4px">وفي «بعد كل اللي عليك» كمان</div>${lst(S.Y)}`:''}
       ${S.rec>0.004?`<div class="hint" style="margin:10px 0 4px">ليك عند الناس <span class="n">${fmt(S.rec)}</span></div>`:''}
     </div>`:''}
   </div>`;
@@ -3615,6 +3793,8 @@ function vHome(){
     <button class="btn ghost" onclick="app.sumToggle()">${sumOpen?'اقفل ملخص الشهر':'ملخص الشهر'}</button>
     ${sumOpen?sumBody(monthRange()):''}
   </div>
+
+  ${editInline?'':lvHomeHtml()}
 
   <div class="sec">
     <div class="sec-h" onclick="app.toggleCats()" style="cursor:pointer">
@@ -3679,6 +3859,12 @@ function alertsPanel(){
       <span class="g"><span class="t">أسامي أصناف شبه بعض</span>
         <span class="s" style="display:block">${plural(n,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح')} توحّدهم</span></span>
       <div class="side"><button class="chip sm" onclick="app.goNames()">راجعها</button></div>
+    </div>`);}
+  if(book==='me'){const n=placeGroups().length;if(n)rows.push(`<div class="alert">
+      ${RAIL(4,'')}
+      <span class="g"><span class="t">أسامي أماكن شبه بعض</span>
+        <span class="s" style="display:block">${plural(n,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح')} توحّدهم</span></span>
+      <div class="side"><button class="chip sm" onclick="app.goPlaces()">راجعها</button></div>
     </div>`);}
   if(book==='me')D.txns.filter(t=>t.pending&&!_dupT[t.id]).forEach(t=>{const T=txnTitle(t);rows.push(`
     <div class="alert">
@@ -3784,18 +3970,18 @@ function alertsPanel(){
   /* مرتجع محجوز: مستني يوصل */
   if(book==='me')D.txns.filter(t=>t.refWait&&!t.refFee).forEach(t=>{
     const w=Math.max(0,-daysTo(t.date));
-    const fb=D.txns.filter(x=>x.refFee===t.id&&x.refWait).reduce((a,x)=>a-Number(x.amount),0);
+    const fb=D.txns.filter(x=>x.refFee===t.id&&x.refWait).reduce((a,x)=>a+refV(x),0);
     rows.push(`
     <div class="alert">
       ${RAIL(4,t.date)}
       <span class="g"><span class="t">${esc(String(t.note||'مرتجع'))}</span>
         <span class="s" style="display:block">مرتجع محجوز · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}${fb>0.004?' · منه تدبير <span class="n">'+fmt(fb)+'</span>':''}</span></span>
-      <div class="side"><span class="vl" style="white-space:nowrap;color:var(--mint)">${money(-Number(t.amount)+fb,'EGP')}</span>
+      <div class="side"><span class="vl" style="white-space:nowrap;color:var(--mint)">${money(refV(t)+fb,'EGP')}</span>
       <button class="chip sm" onclick="${t.usdRef?`app.startRefArr('${t.id}')`:`app.refArrived('${t.id}')`}">${t.usdRef&&refArrFor===t.id?'إخفاء':'وصل'}</button></div>
     </div>
     ${(t.usdRef&&refArrFor===t.id)?`<div class="inline">
       <label class="f">وصل كام بالجنيه؟</label>
-      <input class="f" id="rain" type="text" inputmode="decimal" value="${n2(-Number(t.amount))}" oninput="numFix(this,1)">
+      <input class="f" id="rain" type="text" inputmode="decimal" value="${n2(refV(t))}" oninput="numFix(this,1)">
       <div class="hint">لو وصل مبلغ مختلف، الفرق هيتسجل فرق سعر صرف لوحده.</div>
       <button class="btn" onclick="app.refArrived('${t.id}')">سجّل</button>
     </div>`:''}`);});
@@ -4232,7 +4418,7 @@ function txnRow(t,noDate){
     <span class="a" style="color:${color}">${t.refWait?'<small style="font-size:11px;color:var(--muted)">محجوز</small> ':''}${isFxAcc(t.account)?'<small style="font-size:11px">'+esc(fxName(accCur(t.account)))+'</small> ':''}${(!inc&&!tr&&Number(t.amount)<0)?'+'+fmt(-Number(t.amount)):(inc?'+':tr?'':'−')+fmt(t.amount)}</span>
   </div>
   ${openTxn===t.id?`<div class="detail">
-    ${(editOp&&editInline===t.id)?'':(t.items||[]).map((i,ik)=>`<div class="d${openItem===t.id+':'+ik?' hl':''}" data-ik="${ik}"><span>${esc(i.name)}${Number(i.qty)>1?' <span dir="ltr">×'+i.qty+'</span>':''} <span style="color:${catOf(i.cat).color}">· ${catOf(i.cat).label}</span>${i.returned?' <span style="color:var(--mint);font-size:11px">· مرتجع</span>':''}</span><span class="n">${fmt(i.amount)}</span></div>${itemRetRow(t,i,ik)}`).join('')}
+    ${(editOp&&editInline===t.id)?'':(t.items||[]).map((i,ik)=>`<div class="d${openItem===t.id+':'+ik?' hl':''}" data-ik="${ik}"${(t.book||'me')==='me'&&t.kind==='expense'&&!i.who&&!i.off?` style="cursor:pointer" onclick="event.stopPropagation();app.lvItemFor('${t.id}',${ik})"`:''}><span>${esc(i.name)}${lvDot(lvOf(i.cat,i.name))}${Number(i.qty)>1?' <span dir="ltr">×'+i.qty+'</span>':''} <span class="ccol" style="color:${catOf(i.cat).color}">· ${esc(catOf(i.cat).label)}</span>${i.returned?' <span style="color:var(--mint);font-size:11px">· مرتجع</span>':''}</span><span class="n">${fmt(i.amount)}</span></div>${lvItemPick(t,i,ik)}${itemRetRow(t,i,ik)}`).join('')}
     ${(function(){
       if(editOp&&editInline===t.id)return `<div class="inedit">${inlineForm()}</div>`;
       const icq=(t.fromOffice&&t.kind==='income'&&(t.book||'me')==='me')?`<div style="margin-top:8px"><div class="hint" style="margin:0 0 6px">نوعه في دخلك:</div>${pickRow('ticat'+t.id,D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),icatOf(t).id,"((x)=>app.setTxnIcat('"+t.id+"',x))",1)}</div>`:'';
@@ -4283,13 +4469,32 @@ function entryOk0(){const k=draft.kind;
   return !!(Number(onlyNum(draft.amount))>0&&draft.account&&(k!=='expense'||lent||draft.cat)&&(k!=='transfer'||(draft.to&&draft.to!==draft.account)));}
 function subOk(){
   if(!subDraft.name.trim()||!subDraft.next)return false;
-  if(subDraft.cycle==='trial')return subDraft.willRenew?Number(onlyNum(subDraft.amount))>0:true;
+  /* أسئلة «أيوه ولا لأ» بتبدأ فاضية ولازم تتجاوب */
+  if(!subOwnerOk(subDraft))return false;
+  if(subDraft.cycle==='trial'){if(subDraft.willRenew===undefined)return false;return subDraft.willRenew?Number(onlyNum(subDraft.amount))>0:true;}
+  if(subDraft.promo===undefined||((subDraft.owner||'me')==='me'&&subDraft.split===undefined))return false;
   return Number(onlyNum(subDraft.amount))>0;}
+/* «الاشتراك ده بتاع مين؟»: لازم تختار، وحد تاني محتاج اسم، والمكتب محتاج تصنيف */
+const subOwnerOk=d=>d.owner==='me'||(d.owner==='other'&&!!String(d.ownerName||'').trim())||(d.owner==='office'&&!!d.ocat);
+function subOwnerFields(d,pick,set,key){
+  const opts=[{id:'me',label:'أنا'},{id:'other',label:'حد تاني'}].concat(officeOn()||d.owner==='office'?[{id:'office',label:esc(bookName())}]:[]);
+  return `<label class="f">الاشتراك ده بتاع مين؟ <b>*</b></label>
+    ${pickRow(key,opts,d.owner,`((v)=>${pick}('owner',v))`,1)}
+    ${d.owner==='other'?`<label class="f">بتاع مين؟ <b>*</b></label>
+      <input class="f" placeholder="الاسم" value="${esc(d.ownerName||'')}" oninput="${set}('ownerName',this.value)">
+      ${peopleNames().length?`<div class="chips" style="margin-top:8px">${peopleNames().slice(0,8).map(n=>`<button class="chip sm${pk(d.ownerName)===pk(n)?' on':''}" onclick="${pick}('ownerName','${jsArg(n)}')">${esc(n)}</button>`).join('')}</div>`:''}
+      <div class="hint">كل دفعة هتتسجل «ليك عنده» بمبلغها كله، ومش هتتحسب في مصروفك. مصاريف التدبير عليك.</div>`:''}
+    ${d.owner==='office'?`<label class="f">تصنيفه في ${esc(bookName())} <b>*</b></label>
+      ${pickRow(key+'oc',(D.ocats||[]).map(c=>({id:c.id,label:esc(c.label)})),d.ocat,`((v)=>${pick}('ocat',v))`,1)}
+      <div class="hint">كل دفعة هتتسجل على ${esc(bookName())} «اشتراك ${esc(String(d.name||'').trim()||'…')}» متقرّبة لأقرب 5 لفوق (هي ومصاريف تدبيرها كل واحدة لوحدها)، والفرق «باقي تقريب» ليك.</div>`:''}`;
+}
 function insOk(){
   if(isCreditAcc(insDraft.src))return !!(insDraft.name.trim()&&(Number(onlyNum(insDraft.total))||0)>0
     &&(Number(onlyNum(insDraft.months))||0)>0&&(Number(onlyNum(insDraft.monthly))||0)>0);
   return !!(insDraft.name.trim()&&Number(onlyNum(insDraft.monthly))>0&&Number(onlyNum(insDraft.months))>0&&insDraft.account&&insDraft.src);}
-function certOk(){return !!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account&&certDraft.bank);}
+/* أسئلة «أيوه ولا لأ» في الكارت الجديد بتبدأ فاضية ولازم تتجاوب */
+const accYnOk=()=>!accDraft.credit||[accDraft.sec,accDraft.insure,accDraft.stamp].every(v=>v!==undefined&&v!==null);
+function certOk(){return certDraft.ded!==undefined&&!!(Number(onlyNum(certDraft.amount))>0&&Number(onlyNum(certDraft.monthly))>0&&certDraft.start&&certDraft.account&&certDraft.bank);}
 function vAddOffice0(){
   oFixKinds();
   const k=draftO.kind;
@@ -4319,10 +4524,13 @@ function vAddOffice0(){
         ${sharedAccs().length?'':'<div class="note warn">مفيش حساب مشترك بين الدفترين — اعمل حساب نطاقه «الاتنين» من الإعدادات.</div>'}
       `:`
       <label class="f">من أنهي حساب؟ <b>*</b></label>
-      ${(function(){const ob=balances('office');const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&!isFxAcc(x.id));
+      ${(function(){const ob=balances('office');
+        /* حسابات الدفتر بس، ومعاها أي حساب تاني لسه شايل فلوس للدفتر (عشان ترجّعها) */
+        const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&!isFxAcc(x.id)&&(officeAccs().indexOf(x)>-1||Math.abs(ob[x.id]||0)>=0.005||x.id===draftO.account));
         return pickRow('oxfrom',opts.map(x=>({id:x.id,label:esc(x.name)+` · <span class="n">${fmt(ob[x.id]||0)}</span>`})),draftO.account,'app.oAccount');})()}
       <label class="f">لأنهي حساب؟ <b>*</b></label>
-      ${(function(){const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&!isFxAcc(x.id)&&x.id!==draftO.account);
+      ${(function(){const opts=officeAccs().filter(x=>!isFxAcc(x.id)&&x.id!==draftO.account);
+        if(draftO.to&&!opts.some(x=>x.id===draftO.to)){const c=D.accounts.find(x=>x.id===draftO.to);if(c)opts.push(c);}
         return pickRow('oto',opts.map(x=>({id:x.id,label:esc(x.name)})),draftO.to,'app.oTo');})()}
       <div class="hint">بينقل فلوس العهدة من حساب لحساب — إجمالي العهدة مش هيتغير.</div>
       ${atmFrom(draftO.account,draftO.to)?`<label class="f">فيه عمولة سحب؟</label>
@@ -4343,9 +4551,9 @@ function vAddOffice0(){
       /* المصروف: حسابات الدفتر والكارت بس — فلوسك بتيجي من سؤال «فيه جزء من فلوسك؟» */
       const opts=k==='expense'
         ?officeAccs().filter(x=>!isFxAcc(x.id)).concat(D.accounts.filter(x=>!x.closed&&x.credit&&!isFxAcc(x.id)))
-        :D.accounts.filter(x=>!x.closed&&!isSave(x)&&!isFxAcc(x.id)&&!x.credit);
+        :officeAccs().filter(x=>!isFxAcc(x.id));
       if(draftO.account&&!opts.some(x=>x.id===draftO.account)){const c=D.accounts.find(x=>x.id===draftO.account);if(c)opts.push(c);}
-      return pickRow('oacct',opts.map(x=>({id:x.id,label:esc(k==='expense'?offAccLabel(x):x.name)})),draftO.account,'app.oAccount');})()}
+      return pickRow('oacct',opts.map(x=>({id:x.id,label:esc(offAccLabel(x))})),draftO.account,'app.oAccount');})()}
     ${(k==='expense'&&oMineAll())?`<div class="hint">كلها من فلوسك، فمش لازم تختار حساب من ${esc(bookName())}.</div>`:''}
     ${(k==='expense'&&isCreditAcc(draftO.account))?`
       <label class="f">خدت الفلوس من فين؟ <b>*</b></label>
@@ -4368,7 +4576,7 @@ function vAddOffice0(){
       ${itemSuggestions('app.oItemPick')}
       <div class="hint">اضغط على اسم جاهز أو اكتب اسم جديد — نفس الاسم بيتجمع في سطر واحد وقت التقفيل.</div>
       <label class="f">التصنيف <b>*</b></label>
-      ${pickRow('ocat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),draftO.ocat,'app.oCat')}
+      <div id="ocatrow">${pickRow('ocat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),draftO.ocat,'app.oCat')}${ocatAutoHint(draftO)}</div>
       ${D.ocats.length?'':'<div class="hint">مفيش تصنيفات لسه — ضيفها من الإعدادات.</div>'}
 
       ${k==='expense'?`
@@ -4480,7 +4688,34 @@ function floatAsk(){
 }
 /* صف التصنيف: لو اتختار لوحده من آخر مرة بيتكتب كده */
 const catRowHtml=()=>pickRow('cat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),draft.cat,'app.setCat')
-  +((draft.cat&&draft.catAuto&&!draft.catPicked)?'<div class="hint">اتختار من آخر مرة سجلت حاجة زيها — غيّره لو مش هو.</div>':'');
+  +((draft.cat&&draft.catAuto&&!draft.catPicked)?'<div class="hint">اتختار من آخر مرة سجلت حاجة زيها — غيّره لو مش هو.</div>':'')
+  +entryLvHtml();
+/* الدرجة من السجل: دوسة على الصنف بتفتح الصنف لوحده أو التصنيف كله */
+let lvItem='', lvCatOpen='';
+function lvItemPick(t,i,ik){
+  if(lvItem!==t.id+':'+ik)return '';
+  const k=lvKey(i.name), cur=(D.cutItem||{})[k];
+  return `<div onclick="event.stopPropagation()" style="border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:4px 0 10px">
+    <div class="hint" style="margin-top:0">«${esc(i.name)}» بس</div>${lvChips(cur&&cur!=='none'?cur:'','((v)=>app.lvSetItem(\''+jsArg(i.name)+'\',v))','')}
+    <div class="hint">${esc(catOf(i.cat).label)} كله</div>${lvChips((D.cutCat||{})[i.cat]||'','((v)=>app.lvSetCat(\''+i.cat+'\',v))','')}
+    ${cur==='none'?'<div class="hint">الصنف ده متعلّم «من غير» حتى لو تصنيفه ليه درجة.</div>':''}
+  </div>`;
+}
+/* «حدد درجة» جنب التصنيف في التسجيل العادي: على التصنيف كله أو على الحاجة دي بس (الملاحظة) */
+let lvEntryOpen=false, lvScope='cat';
+function entryLvHtml(){
+  if(!draft.cat||draft.cat==='lentcat')return '';
+  const nm=String(draft.note||'').trim(), l=lvOf(draft.cat,nm);
+  const itemSet=nm&&D.cutItem&&D.cutItem[lvKey(nm)];
+  const scope=nm?lvScope:'cat';
+  return `<div class="lvrow" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px">
+      ${l?`<span style="font-size:12px;color:var(--muted)">${lvDot(l)} ${esc(l.label)}${itemSet?'':' · كل '+esc(catOf(draft.cat).label)}</span>`:''}
+      <button class="chip sm${lvEntryOpen?' on':''}" onclick="app.lvEntryToggle()">${l?'غيّر الدرجة':'حدد درجة'}</button></div>
+    ${lvEntryOpen?`<div style="margin-top:8px">
+      ${nm?pickRow('lvscope',[{id:'cat',label:'لـ'+esc(catOf(draft.cat).label)+' كله'},{id:'item',label:'لـ«'+esc(nm)+'» بس'}],scope,'app.lvScope',1):''}
+      ${lvChips(scope==='item'?(itemSet&&itemSet!=='none'?itemSet:''):((D.cutCat||{})[draft.cat]||''),'app.lvEntrySet','')}</div>`:''}
+    ${l?lvLiveLine([l.id],{[l.id]:Number(onlyNum(draft.amount))||0}):''}`;
+}
 const icatRow=()=>pickRow('icat',D.icats.map(c=>({id:c.id,label:esc(c.label)})),draftIcat(),'app.setIcat',1)
   +(draftIcat()==='salary'?'<div class="hint">شهرك المالي بيبدأ من يوم المرتب ده لحد المرتب اللي بعده.</div>':'');
 function fromField(label,req){
@@ -4496,6 +4731,27 @@ function itemNames(){
     if(n&&seen.indexOf(n)<0){seen.push(n);out.push(n);}});
   return out.slice(0,8);
 }
+/* تصنيف البند في دفتر المكتب من آخر مرة اتسجل فيها: لو البند اتسجل بتصنيف واحد بس ياخده،
+   ولو بأكتر من تصنيف (زي «فاتورة») ياخد تصنيف الملاحظة أو المكان (اسم الشركة) لو اتسجلت قبل كده، وإلا مايختارش حاجة */
+function ocatSuggest(item,note,place){
+  const nk=normTxt(normItem(item||''));if(!nk)return '';
+  const ok=id=>(D.ocats||[]).some(c=>c.id===id);
+  const L=D.txns.filter(t=>t.book==='office'&&t.kind==='expense'&&!t.adj&&t.ocat&&ok(t.ocat)&&normTxt(normItem(t.item||''))===nk)
+    .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:(b._q||0)-(a._q||0));
+  if(!L.length)return '';
+  if(new Set(L.map(t=>t.ocat)).size===1)return L[0].ocat;
+  const keys=[note,place].map(x=>normTxt(String(x||'').trim())).filter(x=>x&&x!==nk);
+  const h=keys.length&&L.find(t=>[t.note,t.place].some(v=>{const n=normTxt(String(v||'').trim());return n&&keys.indexOf(n)>-1;}));
+  return h?h.ocat:'';
+}
+/* بيتنادى لما البند أو الملاحظة يتغيروا: لو التصنيف مااخترتوش بنفسك */
+function ocatAutoSet(d,item,note,place){
+  if(d.ocatPicked)return false;
+  const g=ocatSuggest(item,note,place), was=d.ocat;
+  if(g){d.ocat=g;d.ocatAuto=true;}else if(d.ocatAuto){d.ocat='';d.ocatAuto=false;}
+  return was!==d.ocat;
+}
+const ocatAutoHint=d=>(d.ocat&&d.ocatAuto&&!d.ocatPicked)?'<div class="hint">اتختار من آخر مرة سجلت البند ده — غيّره لو مش هو.</div>':'';
 function itemSuggestions(fn){
   const n=itemNames();
   if(!n.length)return '';
@@ -4879,6 +5135,54 @@ function simGroups(){
   return Object.values(g).map(x=>({key:x.key,root:x.root,cat:x.root.cat,list:[x.root].concat(Object.values(x.m).filter(Boolean).sort((a,b)=>b.n-a.n))}))
     .filter(x=>x.list.length>1).sort((a,b)=>b.list.reduce((s,y)=>s+y.n,0)-a.list.reduce((s,y)=>s+y.n,0));
 }
+/* ---------- أسامي الأماكن اللي شبه بعض (زي الأصناف) ----------
+   اسمين شبه بعض لو: نفس الحروف من غير فرق كابيتال وسمول ومسافات وعلامات («Carrefour market» و«Carrefour Market»)،
+   أو كلام واحد منهم كله جوه التاني («Carrefour» و«Carrefour Market»)، أو فرق حرف واحد في اسم طويل («Hyber» و«Hyper»).
+   الاقتراح بيوحّد على الأكتر استخدام. «دول مختلفين» بيتحفظ في D.placeNo. */
+const plKey=x=>normTxt(cleanNm(x)).replace(/[^\p{L}\p{N}]+/gu,'');
+const plWords=x=>normTxt(cleanNm(x)).split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>1);
+function lev1(a,b){/* الفرق بين الاتنين حرف واحد بالكتير (زيادة أو ناقص أو مختلف) */
+  if(a===b)return true;if(Math.abs(a.length-b.length)>1)return false;
+  let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++d>1)return false;
+    if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++;}}
+  return d+(a.length-i)+(b.length-j)<=1;}
+function plSimilar(a,b){
+  const ka=plKey(a),kb=plKey(b);if(!ka||!kb)return false;
+  if(ka===kb)return true;
+  if(Math.min(ka.length,kb.length)>=6&&lev1(ka,kb))return true;
+  const wa=plWords(a),wb=plWords(b);if(!wa.length||!wb.length)return false;
+  const [x,y]=wa.length<=wb.length?[wa,wb]:[wb,wa];
+  return x.length<y.length&&x.join('').length>=4&&x.every(w=>y.indexOf(w)>-1);
+}
+const plNoKey=(a,b)=>[a,b].sort().join('||');
+const plIsNo=(a,b)=>(D.placeNo||[]).indexOf(plNoKey(a,b))>-1;
+let _plIdx=null,_plKey='';
+function placeIndex(){
+  const key=D._sv+'|'+D.txns.length+'|'+(D.placeNo||[]).length;
+  if(_plIdx&&_plKey===key)return _plIdx;
+  const m={};
+  D.txns.forEach(t=>{[...new Set([t.place,t.merchant].map(cleanNm).filter(Boolean))].forEach(n=>{
+    if(!m[n])m[n]={name:n,n:0,last:''};m[n].n++;if(t.date>m[n].last)m[n].last=t.date;});});
+  _plIdx=m;_plKey=key;return m;
+}
+let plSel={}, plCustom={};
+function placeGroups(){
+  const L=Object.values(placeIndex()), par={};
+  const f=x=>{while(par[x]&&par[x]!==x)x=par[x];return x;};
+  for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++){const a=L[i],b=L[j];
+    if(plIsNo(a.name,b.name)||!plSimilar(a.name,b.name))continue;
+    const ra=f(a.name),rb=f(b.name);if(ra!==rb)par[rb]=ra;}
+  const g={};L.forEach(x=>{const r=f(x.name);(g[r]=g[r]||[]).push(x);});
+  return Object.values(g).filter(l=>l.length>1)
+    /* «دول مختلفين» مع حد في المجموعة: الاسم يطلع منها */
+    .map(l=>l.sort((a,b)=>b.n-a.n||b.name.length-a.name.length))
+    .map(l=>l.filter((x,i)=>i===0||!l.some(y=>y!==x&&plIsNo(x.name,y.name))))
+    .filter(l=>l.length>1)
+    .map(l=>({key:l.map(x=>x.name).sort().join('||'),root:l[0],list:l}))
+    .sort((a,b)=>b.list.reduce((s,y)=>s+y.n,0)-a.list.reduce((s,y)=>s+y.n,0));
+}
+const plGrp=k=>placeGroups().find(g=>g.key===k);
+const plGrpSel=g=>{const v=plSel[g.key];return (v==='__new__'||g.list.some(x=>x.name===v))?v:g.root.name;};
 /* وانت بتكتب صنف: اسم قديم شبهه يبقى أحسن منه */
 let simNoSet={};
 function simFor(name,cat){
@@ -4958,6 +5262,10 @@ const scanShareTxt=()=>scanSplitOver()?'<b style="color:var(--clay)">اللي ع
 function scanMyShare(){
   return Math.max(0,Math.round((scanMineNet()-scanOthers())*100)/100);
 }
+/* صنف اتشال بـ× من الفاتورة: سطر صغير مكانه «رجّعه» لحد ما تعمل حاجة تانية */
+let scanDel=null;
+const delItemBar=k=>(scanDel&&scanDel.s===scan&&scanDel.k===k)?`<div class="rl" style="justify-content:space-between;color:#6E6759;font-size:12px">
+  <span>اتشال «${esc(scanDel.item.name||'صنف')}»</span><button class="chip sm" onclick="app.undoDelItem()">رجّعه</button></div>`:'';
 function vScan(){return scan.stage==='review'?ynWrap(vScan0,'saveRec',scanSaveOk):vScan0();}
 function vScan0(){
   if(scan.stage==='working')return `<div style="padding:90px 0;text-align:center">
@@ -4969,11 +5277,11 @@ function vScan0(){
     <div style="padding-top:20px">${editBanner()}
       <div class="receipt">
         <div class="rh"><b>${esc(scan.merchant||(scan.manual?'فاتورة بإيدك':'فاتورة'))}</b><div style="direction:rtl;font-family:var(--f-body)">${scan.date?dayLabel(scan.date)+' · ':''}${nItems(scan.items.length)}</div></div>
-        ${scan.items.map((it,k)=>`
+        ${scan.items.map((it,k)=>`${delItemBar(k)}
         <div class="rl r1" onfocusin="scanFocusK=${k}">
           <div class="nmb">
             <div class="nml"><span class="qx${Number(it.qty)>1?' on':''}" dir="ltr">×<input aria-label="العدد" type="text" inputmode="numeric" value="${Number(it.qty)||1}" onfocus="this.select()" oninput="app.iset(${k},'qty',numFix(this,0))" onchange="app.qtyDone()"></span><textarea class="nm" rows="1" aria-label="اسم الصنف" placeholder="اسم الصنف" oninput="app.iset(${k},'name',this.value);fitNm(this)" onchange="app.itemNameDone(${k})">${esc(it.name)}</textarea></div>
-            <div class="sub"><span class="ct${it.cat?'':' ph'}">${it.cat?esc(catOf(it.cat).label):'التصنيف'} ▾<select aria-label="التصنيف" onchange="app.setItemCat(${k},this.value)">
+            <div class="sub"><span class="ct${it.cat?'':' ph'}"><span class="ctl">${it.cat?esc(catOf(it.cat).label):'التصنيف'}</span>${it.cat&&!it.who&&!it.off?lvDot(lvOf(it.cat,it.name)):''}&nbsp;▾<select aria-label="التصنيف" onchange="app.setItemCat(${k},this.value)">
             ${it.cat?'':'<option value="" selected disabled hidden>التصنيف</option>'}${D.cats.map(c=>`<option value="${c.id}"${c.id===it.cat?' selected':''}>${esc(c.label)}</option>`).join('')}
           </select></span>${(function(){const h=itemLast(it.name,it.amount,it.qty);return h&&Math.abs(h.pct)>=1?`<button class="pa2 ${h.pct>0?'up':'down'}" aria-label="${h.pct>0?'السعر زاد':'السعر قل'}" onclick="app.priceFor(${k})">${h.pct>0?'↑ أغلى':'↓ أرخص'}</button>`:'';})()}</div>
           </div>
@@ -4990,10 +5298,13 @@ function vScan0(){
           ${peopleNames().map(n=>`<button class="chip sm${it.who===n?' on':''}" onclick="app.setOwner(${k},'${jsArg(n)}')">${esc(n)}</button>`).join('')}
           <input class="f" style="margin:6px 0 0" placeholder="اسم جديد" onchange="app.setOwner(${k},this.value)">
         </div>`:''}`).join('')}
+        ${delItemBar(scan.items.length)}
         <div class="rs"><span>المجموع</span><span id="rsum">${fmt(scanSums().raw)}</span></div>
         <div class="rs"><span>خصم</span><span class="rd">−<input id="rdisc" aria-label="الخصم" type="text" inputmode="decimal" dir="ltr" placeholder="0" value="${esc(scan.disc||'')}" onfocus="this.select()" oninput="app.scanDisc(numFix(this,1))"></span></div>
         <div class="rt"><span>الإجمالي</span><span id="rtot">${fmt(scanSums().net)}</span></div>
       </div>
+      ${book==='office'?'':(function(){const add={};(scan.items||[]).forEach(i=>{if(!i.cat||i.who||i.off)return;const l=lvOf(i.cat,i.name);if(l)add[l.id]=(add[l.id]||0)+(Number(i.amount)||0);});
+        return lvLiveLine(Object.keys(add),add);})()}
 
       <button class="btn ghost" style="margin-top:22px" onclick="app.addItem()">ضيف صنف ناقص</button>
       ${(function(){/* تعديل فاتورة متسجلة: مفيش ربط بخصم تاني (الفاتورة ليها حركتها خلاص) */
@@ -5019,14 +5330,16 @@ function vScan0(){
       ${book!=='office'&&!needsTxn?`<div class="hint">دوس على «ليا» جنب أي صنف عشان تخليه ${officeOn()?esc(toBook())+' أو ':''}لحد تاني.</div>`:''}
 
       ${(function(){const nt=needsTxn&&D.txns.find(x=>x.id===needsTxn);return nt&&nt.account?'':`<label class="f">الفاتورة دي اتدفعت من إيه؟ <b>*</b></label>
-      ${payChips(scan.account,'app.scanAccount','','me','sacct')}`;})()}
+      ${book==='office'
+        ?pickRow('sacct',officeAccs().filter(x=>!isFxAcc(x.id)||x.id===scan.account).map(x=>({id:x.id,label:esc(offAccLabel(x))})),scan.account,'app.scanAccount')
+        :payChips(scan.account,'app.scanAccount','','me','sacct')}`;})()}
 
       ${book!=='office'&&(scan.items||[]).some(i=>i.off)?`
         <div class="note warn">فيه <span class="n">${scan.items.filter(i=>i.off).length}</span> صنف متعلّم إنه للعهدة بإجمالي <span class="n">${fmt(scan.items.filter(i=>i.off).reduce((a,i)=>a+(Number(i.amount)||0),0))}</span> — هيتسجلوا في دفتر المكتب لوحدهم.</div>
         <label class="f">اسم البند <b>*</b></label>
         <input class="f" value="${esc(scan.oitem||scan.merchant||'')}" oninput="app.scanOItem(this.value)">
         <label class="f">التصنيف <b>*</b></label>
-        ${pickRow('socat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat',1)}
+        <div id="socatrow1">${pickRow('socat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat',1)}${ocatAutoHint(scan)}</div>
         <div class="hint">الفاتورة كلها هتتخصم من الحساب اللي فوق، وأصناف العهدة هتتسجل إنها <b style="color:var(--mint)">ليك في العهدة</b> لحد ما تستردها.</div>
       `:''}
 
@@ -5035,7 +5348,7 @@ function vScan0(){
         <input class="f" value="${esc(scan.item||scan.merchant||'')}" oninput="app.scanItem(this.value)">
         ${itemSuggestions('app.scanItemPick')}
         <label class="f">التصنيف <b>*</b></label>
-        ${pickRow('socat2',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat')}
+        <div id="socatrow">${pickRow('socat2',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat')}${ocatAutoHint(scan)}</div>
       `:needsTxn?'':`<div id="vchbox">${vchPicker(scan.voucherId,scanSums().net,'app.scanVch')}</div>`}
 
       <label class="f">اسم المحل (اختياري)</label>
@@ -5486,7 +5799,8 @@ function wAccounts(){
         ${accDraft.stamp?`<label class="f">نسبة الدمغة ٪</label>
           <input class="f" type="text" inputmode="decimal" value="${esc(accDraft.stampRate)}" oninput="app.accSet('stampRate',numFix(this,1))">
           <div class="hint">كل 3 شهور، على أعلى مبلغ كان عليك للكارت خلال الربع.</div>`:''}`:''}
-      <button class="btn" onclick="app.addAccount()">ضيف الحساب</button>`}
+      ${accYnOk()?'':'<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div>'}
+      <button class="btn" ${accYnOk()?'':'disabled'} onclick="app.addAccount()">ضيف الحساب</button>`}
     </div>
   </div>`;
 }
@@ -5625,6 +5939,8 @@ function wSubs(){
       <label class="f">اسم الاشتراك</label>
       <input class="f" value="${esc(subDraft.name)}" oninput="app.subSet('name',this.value)">
 
+      ${subOwnerFields(subDraft,'app.subPick','app.subSet','subown')}
+
       <label class="f">النوع</label>
       ${pickRow('subcycle',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'},{id:'trial',label:'تجربة مجانية'}],subDraft.cycle,"((v)=>app.subPick('cycle',v))",1)}
 
@@ -5639,9 +5955,9 @@ function wSubs(){
       ${subDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
       ${promoFields(subDraft,'app.subSet','app.subPick','subpromo')}
 
-      <label class="f">الاشتراك ده متقسم مع ناس؟</label>
-      ${yesNo('subsplit',subDraft.split,"((v)=>app.subPick('split',v))",'لأ، كله عليا')}
-      ${subDraft.split?`
+      ${subDraft.owner==='me'?`<label class="f">الاشتراك ده متقسم مع ناس؟</label>
+      ${yesNo('subsplit',subDraft.split,"((v)=>app.subPick('split',v))",'لأ، كله عليا')}`:''}
+      ${(subDraft.owner==='me'&&subDraft.split)?`
         <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
         ${subDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
           <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.personSet(${i},'name',this.value)">
@@ -5666,6 +5982,7 @@ function wSubs(){
           ${pickRow('subaft',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'}],subDraft.afterCycle,"((v)=>app.subPick('afterCycle',v))",1)}`:''}
       `:''}
 
+      ${(!ok&&subDraft.name.trim()&&(subDraft.owner===undefined||(subDraft.cycle==='trial'?subDraft.willRenew===undefined:(subDraft.promo===undefined||(subDraft.owner==='me'&&subDraft.split===undefined)))))?'<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div>':''}
       <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>
     `:''}
     ${list.length?`<div class="stats" style="margin-bottom:16px">
@@ -5688,7 +6005,9 @@ function wSubs(){
           ${td?'':`<span style="color:${!subEnded(s)&&daysTo(s.next)<=3?'var(--clay)':'var(--muted)'}">${subEnded(s)?'متوقف':whenLabel(s.next)}</span>`}`;})()}
         </div>
         ${!trial&&s.cur==='USD'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">≈ ${money(Math.round(subCost(s)),'EGP')}</div>`:''}
-        ${!trial&&subShared(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
+        ${subOwner(s)==='other'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بتاع <bdi>${esc(s.ownerName||'حد')}</bdi> · كل دفعة ليك عنده</div>`
+          :subOwner(s)==='office'?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">بتاع ${esc(bookName())} · ${esc(ocatOf(s.ocat).label)} · بيتسجل عليه متقرّب لأقرب 5</div>`
+          :(!trial&&subShared(s))?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">نصيبك ${money(subMine(s),s.cur)}${subPeople(s).length?' · '+subPeople(s).map(p=>esc(p.name)+' '+fmt(p.amount)).join(' · '):' · الباقي على الناس'}</div>`:''}
         ${!trial&&subLastPay(s)?`<div style="font-size:11.5px;color:var(--muted);margin-top:6px">آخر دفعة: ${dLabel(subLastPay(s).d)}${
           subLastPay(s).fee?` · <span class="n">${fmt(subLastPay(s).paid||s.amount)}</span> + <span class="n">${fmt(subLastPay(s).fee)}</span> تدبير${subLastPay(s).feePending?' (تقديري — لسه ماتخصمش)':''}${subLastPay(s).feePending?'':` = <span class="n">${fmt((subLastPay(s).paid||Number(s.amount))+Number(subLastPay(s).fee))}</span>`}`:''}</div>`:''}
         ${!trial&&subLastPay(s)&&subLastPay(s).feePending?`<div class="hint">مصاريف التدبير تقديرية <span class="n">${ARRRATE}%</span> لحد ما تأكدها من «محتاج انتباهك».</div>`:''}
@@ -5758,9 +6077,10 @@ function wSubs(){
 
           ${promoFields(sDraft,'app.sdSet','app.sdPick','sdpromo')}
 
-          <label class="f">متقسم مع ناس؟</label>
-          ${yesNo('sdsplit'+s.id,sDraft.split,"((v)=>app.sdPick('split',v))",'لأ، كله عليا')}
-          ${sDraft.split?`
+          ${subOwnerFields(sDraft,'app.sdPick','app.sdSet','sdown'+s.id)}
+          ${sDraft.owner!=='me'?'':`<label class="f">متقسم مع ناس؟</label>
+          ${yesNo('sdsplit'+s.id,sDraft.split,"((v)=>app.sdPick('split',v))",'لأ، كله عليا')}`}
+          ${(sDraft.owner==='me'&&sDraft.split)?`
             <label class="f">مين معاك وكل واحد بيدفع كام؟</label>
             ${sDraft.people.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 100px 34px;gap:8px;margin-bottom:8px">
               <input class="f" placeholder="الاسم" value="${esc(p.name)}" oninput="app.sdPerson(${i},'name',this.value)">
@@ -5777,7 +6097,17 @@ function wSubs(){
           <label class="f">دفعته إمتى؟</label>
           ${dateField(paySubDate,'app.setPaySubDate')}
           ${(s.cur==='USD'&&isCreditAcc(subAcc(s)))?holdField('psbal',paySubBal,"app.setPaySubBal(app.holdLive('psbal','"+(subAcc(s))+"',0))",subAcc(s),0):''}
-          <button class="btn" onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(subPrice(s),s.cur)}</button>
+          ${subOwner(s)==='office'?(s.cur==='USD'
+            ?`<div class="hint">الاشتراك بتاع ${esc(bookName())}: هيتسجل عليه ليك متقرّب لأقرب 5، وتاخدها من «سوّها» بعد ما المبلغ يتأكد.</div>`
+            :`<label class="f">خدت الفلوس من ${esc(bookName())}؟</label>
+            ${yesNo('pstake'+s.id,paySubTake,'app.setPaySubTake','لأ، لسه','أيوه')}
+            ${paySubTake?`<label class="f">من أنهي حساب في ${esc(bookName())}؟ <b>*</b></label>
+              ${pickRow('psfrom'+s.id,officeAccs().filter(a=>!isFxAcc(a.id)).map(a=>({id:a.id,label:esc(offAccLabel(a))})),paySubFrom,'app.setPaySubFrom')}
+              ${(function(){const f=D.accounts.find(a=>a.id===paySubFrom);return (f&&f.scope!=='both')?kindPick('ودخلت على أنهي حساب عندك؟','ودخلت على',subTakeTo(s),'app.setPaySubTo',paySubFrom):'';})()}`:''}
+            <div class="hint">${paySubTake===false?`هيتسجل على ${esc(bookName())} ليك متقرّب لأقرب 5 لفوق، وتاخدها وقت ما تحب من «سوّها».`
+              :`${esc(bookName())} هيتسجل عليه ${money(ceil5(subPrice(s)),'EGP')}، والفرق «باقي تقريب» ليك.`}</div>`):''}
+          ${subTakeOk(s)?'':'<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div>'}
+          <button class="btn" ${subTakeOk(s)?'':'disabled'} onclick="app.confirmPaySub('${s.id}')">أكد دفع ${money(subPrice(s),s.cur)}</button>
           <button class="btn ghost" onclick="app.cancelPaySub()">إلغاء</button>
         </div>`:''}
         ${openDues(s).map(d=>`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
@@ -6049,11 +6379,11 @@ function wCerts(){
       <label class="f">المبلغ</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.amount)}" oninput="app.certSet('amount',numFix(this,1))">
       <label class="f">اتخصم من الحساب ده؟</label>
-      ${pickRow('certded',[{id:false,label:'لأ، رصيدي متظبط من غيرها'},{id:true,label:'أيوه'}],certDraft.ded!==false,'app.certDed',1,1)}
+      ${pickRow('certded',[{id:false,label:'لأ، رصيدي متظبط من غيرها'},{id:true,label:'أيوه'}],certDraft.ded===undefined?null:certDraft.ded,'app.certDed',1,1)}
       ${(certDraft.ded===false&&certLastDue(certDraft))?`<label class="f">آخر عائد وصلك كان شهر إيه؟</label>
         <input class="f" type="month" value="${esc(certDraft.lastGot===undefined?certLastDue(certDraft):certDraft.lastGot)}" onchange="app.certSet('lastGot',this.value)">
         <div class="hint">العوائد اللي قبله داخلة في رصيدك خلاص، فمش هتتسجل تاني. اللي بعده بس هيتسجل.</div>`:''}
-      ${certDraft.ded!==false?`<label class="f">مصاريف الشراء (اختياري)</label>
+      ${certDraft.ded===true?`<label class="f">مصاريف الشراء (اختياري)</label>
         <input class="f" type="text" inputmode="decimal" value="${esc(certDraft.fee||'')}" oninput="app.certSet('fee',numFix(this,1))">`:''}
       <label class="f">العائد الشهري</label>
       <input class="f" type="text" inputmode="decimal" placeholder="اللي بينزل كل شهر" value="${esc(certDraft.monthly)}" oninput="app.certSet('monthly',numFix(this,1))">
@@ -6070,6 +6400,7 @@ function wCerts(){
       ${pickRow('certret',certRetAccs().map(a=>({id:a.id,label:esc(a.name)})),certDraft.account,'app.certAccount')}
       ${isSave(D.accounts.find(a=>a.id===certDraft.account))?'<div class="hint">العائد اللي بينزل في وعاء بيتسجل «عايد»، مش دخل.</div>':''}
       <div class="hint">أول عائد بعد شهر من التاريخ ده، وبيتكرر كل شهر في نفس اليوم.</div>
+      ${certDraft.ded===undefined?'<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div>':''}
       <button class="btn" id="certsave" ${ok?'':'disabled'} onclick="app.addCert()">احفظ</button>
     `:''}
     ${list.length?`<div class="stats" style="margin-bottom:16px">
@@ -6284,14 +6615,28 @@ function shareRow(e){
     <span class="a" style="color:var(--clay)">${e.amt<0?'+'+fmt(-e.amt):'−'+fmt(e.amt)}</span>
   </div>${openItem===key?`<div style="margin:0 10px 12px;border:1px solid var(--line);border-radius:14px">${txnRow(t,1)}</div>`:''}`;
 }
-function logDaysItems(ents){
+/* السجل بيرسم أول جزء بس (عشان يفتح بسرعة)، والباقي بزرار «ورّي أقدم».
+   الحركة المفتوحة أو اللي بتعدلها بتفضل مرسومة، والقطع بيبقى في آخر يوم (عشان مجموع اليوم يفضل صح) */
+const LOG_STEP=80;
+let logShow=LOG_STEP;
+function logCut(arr){
+  let n=logShow;
+  const want=[openTxn,editInline].filter(Boolean);
+  if(want.length){const i=arr.reduce((m,e,k)=>want.indexOf((e.t||e).id)>-1?k:m,-1);if(i+1>n)n=i+1;}
+  if(arr.length<=n)return {list:arr,more:0};
+  const d=arr[n-1].date;while(n<arr.length&&arr[n].date===d)n++;
+  return {list:arr.slice(0,n),more:arr.length-n};
+}
+const logMoreBtn=m=>m>0?`<button class="btn ghost" onclick="app.logMore()">ورّي أقدم (فاضل ${nTx(m)})</button>`:'';
+function logDaysItems(ents0){
+  const C=logCut(ents0), ents=C.list;
   const days=[];let cur=null;
   ents.forEach(e=>{if(!cur||cur.d!==e.date){cur={d:e.date,l:[]};days.push(cur);}cur.l.push(e);});
   return days.map(g=>{
     const out=Math.round(g.l.reduce((a,e)=>a+e.amt,0)*100)/100;
     return `<div class="dayh"><b>${dLabel(g.d)}</b><span>${out>0?'<span style="color:var(--clay)">مصروف <span class="n">'+fmt(out)+'</span></span>':out<0?'<span style="color:var(--mint)">راجع <span class="n">'+fmt(-out)+'</span></span>':''}</span></div>`
       +g.l.map(e=>e.i?itemRow(e):(!e.whole&&Math.abs(e.amt-mySpend(e.t))>0.004&&e.t.kind==='expense'?shareRow(e):txnRow(e.t,1)+logItemHits(e.t))).join('');
-  }).join('');
+  }).join('')+logMoreBtn(C.more);
 }
 /* السجل متقسم بالأيام، وجنب كل يوم إجماليه */
 /* فاتورة متسجلة كعملية: «رجّعته» تحت الصنف في السجل (الفورم بتاعها مافيهوش الزرار ده) */
@@ -6308,7 +6653,8 @@ function itemRetRow(t,i,ix){
     <button class="btn" onclick="app.doReturn('${t.id}',${ix})">أكد الإرجاع</button>
     <button class="btn ghost" onclick="app.cancelReturn()">إلغاء</button></div>`;
 }
-function logDays(list){
+function logDays(list0){
+  const C=logCut(list0), list=C.list;
   const days=[];let cur=null;
   list.forEach(t=>{if(!cur||cur.d!==t.date){cur={d:t.date,l:[]};days.push(cur);}cur.l.push(t);});
   return days.map(g=>{
@@ -6324,7 +6670,7 @@ function logDays(list){
         fDir!=='out'&&inn?'<span style="color:var(--mint)">دخل <span class="n">'+fmt(inn)+'</span></span>':''];
     return `<div class="dayh"><b>${dLabel(g.d)}</b><span>${parts.filter(Boolean).join(' · ')}</span></div>`
       +g.l.map(t=>txnRow(t,1)+logItemHits(t)).join('');
-  }).join('');
+  }).join('')+logMoreBtn(C.more);
 }
 
 /* ---------- الإعدادات: كروت، وكل كارت فيه صفوف، وصف واحد بس مفتوح ---------- */
@@ -6487,6 +6833,25 @@ function vSettings(){
       </div>
     `:''}
         `)])}
+    ${setCard('',[setSec('cutlv','الحاجات اللي عايز أقللها',lvOn()?plural(Object.keys(D.cutCat||{}).filter(k=>lvById(D.cutCat[k])).length+Object.keys(D.cutItem||{}).filter(k=>lvById(D.cutItem[k])).length,'حاجة واحدة','حاجتين','حاجات','حاجة'):'',()=>`
+      <p class="hint" style="margin-top:0">حط درجة على تصنيف كامل أو على صنف لوحده (درجة الصنف تكسب). في الرئيسية هتشوف صرفت كام وكام مرة الشهر ده، وبقالك قد إيه من غيرها، وفي ملخص الشهر قصاد متوسط آخر 3 شهور. تقدر كمان تحددها من السجل بدوسة على الصنف.</p>
+      <h4 style="font-size:13px;margin:16px 0 8px">الدرجات</h4>
+      ${lvList().map(l=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">${lvDot(l)}
+        <input class="f" style="margin:0;flex:1" value="${esc(l.label)}" onchange="app.lvRename('${l.id}',this.value)">
+        ${delBtn('lv'+l.id,`app.lvDel('${l.id}')`,'امسح')}</div>`).join('')}
+      <div class="frow"><input class="f" id="newlv" placeholder="درجة جديدة"><button class="btn" onclick="app.lvAdd()">ضيف</button></div>
+      <h4 style="font-size:13px;margin:18px 0 8px">التصنيفات</h4>
+      ${(function(){/* اللي عليه درجة (أو مفتوح دلوقتي) بصف درجاته، والباقي أسامي تدوس عليها */
+        const on=D.cats.filter(c=>c.id!=='lentcat'&&(lvById((D.cutCat||{})[c.id])||lvCatOpen===c.id));
+        const rest=D.cats.filter(c=>c.id!=='lentcat'&&on.indexOf(c)<0);
+        return on.map(c=>`<div style="margin-bottom:12px"><div style="font-size:12.5px;margin-bottom:6px">${esc(c.label)}</div>
+          ${lvChips((D.cutCat||{})[c.id]||'','((v)=>app.lvSetCat(\''+c.id+'\',v))','')}</div>`).join('')
+          +(rest.length?`<div class="hint" style="margin:${on.length?'14px':'0'} 0 8px">${on.length?'تصنيف تاني':'اختار تصنيف'}</div>
+          <div class="chips">${rest.map(c=>`<button class="chip sm" onclick="app.lvCatOpen('${c.id}')">${esc(c.label)}</button>`).join('')}</div>`:'');})()}
+      ${Object.keys(D.cutItem||{}).length?`<h4 style="font-size:13px;margin:18px 0 8px">أصناف لوحدها</h4>
+        <div class="panel">${Object.keys(D.cutItem).map(k=>{const l=lvById(D.cutItem[k]);return `<div class="arow">
+          <span class="nm"><bdi>${esc(k)}</bdi><span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${l?lvDot(l)+' '+esc(l.label):'من غير درجة'}</span></span>
+          <button class="chip sm" onclick="app.lvItemDel('${jsArg(k)}')">شيلها</button></div>`;}).join('')}</div>`:''}`)])}
     ${(function(){const G=simGroups();return setCard('',[setSec('names','أسامي الأصناف',G.length?plural(G.length,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح'):'',()=>`
       <p class="hint" style="margin-top:0">أسامي في فواتيرك شكلها نفس الحاجة. اختار الاسم اللي يفضل أو اكتب اسم جديد، والباقي بيتغيّر في كل الفواتير القديمة، ومقارنة الأسعار والملخص بيحسبوهم حاجة واحدة.</p>
       ${G.length?G.map((g,gi)=>{const sel=grpSel(g), cus=sel==='__new__';return `<div class="simp">
@@ -6500,7 +6865,20 @@ function vSettings(){
         <div class="chips" style="margin-top:10px">
           <button class="chip sm on" onclick="app.nameGroupMerge('${jsArg(g.key)}')">وحّدهم</button>
           <button class="chip sm" onclick="app.nameGroupNo('${jsArg(g.key)}')">دول مختلفين</button>
-        </div></div>`;}).join(''):'<div class="hint">مفيش أسامي شبه بعض دلوقتي.</div>'}`)]);})()}
+        </div></div>`;}).join(''):'<div class="hint">مفيش أسامي شبه بعض دلوقتي.</div>'}`),
+      (function(){const P=placeGroups();return setSec('places','أسامي الأماكن',P.length?plural(P.length,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح'):'',()=>`
+      <p class="hint" style="margin-top:0">أماكن متسجلة بأكتر من اسم شكلها نفس المكان. اختار الاسم اللي يفضل أو اكتب اسم جديد، والباقي بيتغيّر في كل الحركات القديمة${officeOn()?' في الدفترين':''}.</p>
+      ${P.length?P.map(g=>{const sel=plGrpSel(g), cus=sel==='__new__';return `<div class="simp">
+        ${g.list.map((x,xi)=>`<div class="simn"><span><bdi${x===g.root?' style="font-weight:700"':''}>${esc(x.name)}</bdi> <span class="mut">${plural(x.n,'مرة','مرتين','مرات','مرة')}${x.last?' · آخر مرة '+dLabel(x.last):''}</span></span>
+          ${g.list.length>2?`<button class="simx" aria-label="مش زيهم" onclick="app.placeNoOne('${jsArg(g.key)}',${xi})">مش زيهم</button>`:''}</div>`).join('')}
+        <div class="mut" style="margin-top:8px">يتوحّدوا على:</div>
+        <div class="chips" style="margin-top:6px">${g.list.map(x=>`<button class="chip sm${sel===x.name?' on':''}" onclick="app.placeGroupPick('${jsArg(g.key)}','${jsArg(x.name)}')">${esc(x.name)}</button>`).join('')}
+          <button class="chip sm${cus?' on':''}" onclick="app.placeGroupPick('${jsArg(g.key)}','__new__')">اسم تاني</button></div>
+        ${cus?`<input class="f" style="margin-top:8px" placeholder="اكتب الاسم" value="${esc(plCustom[g.key]||'')}" oninput="app.placeGroupCustom('${jsArg(g.key)}',this.value)">`:''}
+        <div class="chips" style="margin-top:10px">
+          <button class="chip sm on" onclick="app.placeGroupMerge('${jsArg(g.key)}')">وحّدهم</button>
+          <button class="chip sm" onclick="app.placeGroupNo('${jsArg(g.key)}')">دول مختلفين</button>
+        </div></div>`;}).join(''):'<div class="hint">مفيش أماكن شبه بعض دلوقتي.</div>'}`);})()]);})()}
     ${setCard('',[setSec('cats','التصنيفات',D.cats.length+' مصروف · '+D.icats.length+' دخل'+(officeOn()?' · '+D.ocats.length+' '+bookName():''),()=>`
       ${subRow('mine','تصنيفات المصروف',plural(D.cats.length,'تصنيف واحد','تصنيفين','تصنيفات','تصنيف'),()=>`
 
@@ -6754,6 +7132,7 @@ function keepPills(){
 
 /* مكان السكرول لكل صفحة (ولكل تاب في المحفظة ولكل دفتر) */
 const scrollMem={};
+let _backY=null;
 const pageKey=()=>book+'|'+tab+(tab==='wallet'?'|'+wtab:'');
 const curY=()=>(window.scrollY||window.pageYOffset||0);
 function rememberY(){scrollMem[pageKey()]=curY();}
@@ -6791,6 +7170,8 @@ function render(){
   const _y=curY();
   document.getElementById('view').innerHTML=showWel?vWelcome():views[tab]();
   if(Math.abs(curY()-_y)>1)window.scrollTo(0,_y);
+  /* رجوع من تعديل عملية (حفظ أو إلغاء): نفس المكان اللي كنت فيه، مش أول الصفحة */
+  if(_backY!==null&&!editOp){window.scrollTo(0,_backY||0);_backY=null;}
   if(tab==='scan'||editInline)document.querySelectorAll('.rl .nm').forEach(fitNm);
   keepPills();
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
@@ -6950,18 +7331,18 @@ function legacyReceiptOp(t){
 function openOp(id){
   const op=D.ops&&D.ops[id];if(!op)return false;
   const inl=_inlNext;_inlNext=false;
-  editBack={tab,wtab,book,openTxn};editOp=id;eTxn=null;openRow={};needsTxn=null;scanFocusK=null;
+  editBack={tab,wtab,book,openTxn,y:curY()};editOp=id;eTxn=null;openRow={};needsTxn=null;scanFocusK=null;
   const d=JSON.parse(JSON.stringify(op.d));
   /* عمليات قديمة اتسجلت بتاريخ يومها ماكانش التاريخ بيتحفظ فيها: بناخده من سطورها */
   if(!d.date){const t0=D.txns.find(t=>t.op===id)||(D.floatLoans||[]).find(l=>l.op===id);if(t0&&t0.date)d.date=t0.date;}
   /* العمليات الجديدة (v2) بتتحفظ بالإجابات زي ما هي؛ القديمة بقيمها الافتراضية القديمة */
   const t0=tab;
   if(op.f==='entry'){draft=Object.assign(op.v===2?newDraft():draftDef(),d);if(draft.cat)draft.catPicked=true;book='me';tab='add';}
-  else if(op.f==='office'){draftO=Object.assign(op.v===2?newDraftO():draftODef(),d);
+  else if(op.f==='office'){draftO=Object.assign(op.v===2?newDraftO():draftODef(),d);if(draftO.ocat)draftO.ocatPicked=true;
     if(draftO.toMe&&!draftO.toMeIcat){const mi=D.txns.find(x=>x.op===id&&x.fromOffice&&x.kind==='income');if(mi)draftO.toMeIcat=icatOf(mi).id;}
     book='office';tab='add';}
   else{if(d.match&&d.matchYes===undefined)d.matchYes=false;
-    scan=Object.assign({stage:'review',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]},d);book=op.b||'me';tab='scan';}
+    scan=Object.assign({stage:'review',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:'',oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]},d);if(scan.ocat)scan.ocatPicked=true;book=op.b||'me';tab='scan';}
   /* من السجل: الفورم بيفتح تحت الحركة نفسها، والشاشة ماتتحركش */
   if(inl){tab=t0;editInline=inl;render();return true;}
   render();window.scrollTo(0,0);
@@ -7033,7 +7414,7 @@ function linkSync(t,old,same){
   }
   grp.forEach(p=>{
     if(same&&old.amount!==t.amount)p.amount=Math.sign(Number(p.amount)||1)*Math.abs(Number(t.amount));
-    if(old.date!==t.date)p.date=t.date;
+    if(old.date!==t.date&&!(t.sofP&&(p.sofP===t.sofP||p.sof===t.sofP)))p.date=t.date;
     if(I&&I2&&I2!==I){
       if(p.book==='office'){if(p.item===I)p.item=I2;if(p.note===I)p.note=I2;}
       else if(String(p.note||'').indexOf(I)>-1)p.note=String(p.note).replace(I,I2);
@@ -7124,7 +7505,7 @@ function opWrap(o,f,k,args){
   if(!editOp&&form==='entry'&&draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();if(g){draft.salary=g==='salary';draft.icat=g==='salary'?'':g;draft.icatPicked=true;}}
   if(form==='receipt'&&scan&&Array.isArray(scan.items))scan.items.forEach(i=>{if(i&&typeof i.name==='string')i.name=cleanNm(i.name);});
   const spec=JSON.parse(JSON.stringify(form==='entry'?draft:form==='office'?draftO:scan));
-  delete spec.catPicked;delete spec.catAuto;
+  delete spec.catPicked;delete spec.catAuto;delete spec.ocatPicked;delete spec.ocatAuto;
   const inl=editInline, inlNm=inlineFocusName();
   /* عملية مكتب قديمة: نوع الدخل اللي اتملى من الدخل الموجود مش تغيير */
   if(form==='office'&&editOp&&D.ops&&D.ops[editOp]&&D.ops[editOp].d&&D.ops[editOp].d.toMeIcat===undefined&&spec.toMeIcat){
@@ -7141,7 +7522,7 @@ function opWrap(o,f,k,args){
   if(gone&&oldSpec&&jeq(oldSpec,opPrune(spec,defs()))){
     D=JSON.parse(pre);const b=editBack;editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();
     if(form==='receipt')scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};
-    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;}
+    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;_backY=b.y;}
     if(inl){inlineDone(id,inl,inlNm);return;}
     render();return;
   }
@@ -7172,7 +7553,7 @@ function opWrap(o,f,k,args){
       if(form==='entry')draft=spec;else if(form==='office')draftO=spec;else scan=spec;
       render();app.toast(err);return r;}
     const b=editBack;editOp=null;editBack=null;
-    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;}
+    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;_backY=b.y;}
     _lastToast='اتعدلت';
   }
   sortTxns();save();render();
@@ -7210,7 +7591,7 @@ const app=new Proxy({
     const inl=editInline, nm=inlineFocusName(), oid=editOp;
     const b=editBack;editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();
     scan={stage:'idle',items:[],merchant:'',date:today(),account:'',err:'',voucherId:'',voucherAmt:''};
-    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;}
+    if(b){tab=b.tab;wtab=b.wtab;book=b.book;openTxn=b.openTxn;_backY=b.y;}
     if(inl){inlineDone(oid,inl,nm);return;}
     render();
   },
@@ -7231,16 +7612,19 @@ const app=new Proxy({
     const t=document.getElementById('toast');if(t)t.classList.remove('on');
     app.toast('اترجعت');
   },
-  setBook(bk){editInline=null;if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();}rememberY();book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();restoreY();},
+  setBook(bk){editInline=null;logShow=LOG_STEP;if(editOp){editOp=null;editBack=null;draft=newDraft();draftO=newDraftO();}rememberY();book=bk;try{localStorage.setItem(BKEY,bk);}catch(e){}fMonth='';fCat='';fAcct='';fDir='';openRow={};alertsOpen=false;eTxn=null;tab='home';wtab=bk==='office'?'accounts':'accounts';confirmKey='';q='';render();restoreY();},
   goClose(){tab='wallet';wtab='close';closeTo=today();render();window.scrollTo(0,0);},
-  oSet(k,v){draftO[k]=v;setDisabled('osave',oOk());
+  oSet(k,v){draftO[k]=v;
+    if(draftO.kind==='expense'&&(k==='item'||k==='onote'||k==='place')&&ocatAutoSet(draftO,draftO.item,draftO.onote,draftO.place)){
+      const r=document.getElementById('ocatrow');if(r)r.innerHTML=pickRow('ocat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),draftO.ocat,'app.oCat')+ocatAutoHint(draftO);}
+    setDisabled('osave',oOk());
     const el=document.getElementById('ominehint');
     if(el)el.textContent=fmt(Math.max(0,(Number(onlyNum(draftO.amount))||0)-(Number(onlyNum(draftO.mineAmt))||0)));
     const px=document.getElementById('opaidx');
     if(px&&(k==='amount'||k==='paid'))px.innerHTML=oPaidInfo();},
   oKind(k){draftO.kind=k;render();},
   oAccount(id){draftO.account=id;draftO.cardFrom='';draftO.cardTo='';draftO.xFee=undefined;draftO.xFeeAmt='';render();},
-  oCat(id){draftO.ocat=id;render();},
+  oCat(id){draftO.ocat=id;draftO.ocatPicked=true;draftO.ocatAuto=false;render();},
   oDir(d){draftO.dir=d;render();},
   oMine(v){draftO.mine=v;if(!v){draftO.mineAmt='';draftO.mineAll=undefined;}render();},
   oMineAll(v){draftO.mineAll=v==='all';if(draftO.mineAll){draftO.mineAmt='';draftO.paid='';draftO.diffTo='';}render();},
@@ -7256,7 +7640,7 @@ const app=new Proxy({
   oCardFrom(id){draftO.cardFrom=id;draftO.cardTo='';render();},
   oCardTo(id){draftO.cardTo=id;render();},
   oMineFrom(id){draftO.mineFrom=id;render();},
-  oItemPick(v){draftO.item=v;render();},
+  oItemPick(v){draftO.item=v;if(draftO.kind==='expense')ocatAutoSet(draftO,draftO.item,draftO.onote,draftO.place);render();},
   oDate(v){draftO.date=v;render();},
   oTo(id){draftO.to=id;draftO.xFee=undefined;draftO.xFeeAmt='';render();},
   oXFee(v){draftO.xFee=!!v;if(draftO.xFee&&!draftO.xFeeAmt)draftO.xFeeAmt=ATMFEE;render();},
@@ -7534,10 +7918,11 @@ const app=new Proxy({
     rememberY();renderLock=0;renderPending=false;undoAsk=false;tab=t;msg='';autoMsg='';confirmKey='';eTxn=null;showKeyEdit=false;if(t!=='log'){q='';fMonth='';fCat='';fAcct='';fDir='';}setsOpen={};setSub=null;catEdit=null;openRow={};if(t==='settings')accCfgInit();render();restoreY();},
   setWtab(w){rememberY();wtab=w;payFor=null;convFor=null;editAcct=null;render();restoreY();},
   setMonth(m){month=m;render();},
-  search(v){q=v;document.getElementById('loglist').innerHTML=logList();
+  logMore(){logShow+=LOG_STEP;const y=curY();render();window.scrollTo(0,y);},
+  search(v){q=v;logShow=LOG_STEP;document.getElementById('loglist').innerHTML=logList();
     const x=document.getElementById('qx');if(x&&x.style)x.style.display=v?'block':'none';},
   clearQ(){q='';openItem=null;render();},
-  setF(k,v){if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;
+  setF(k,v){logShow=LOG_STEP;if(k==='month')fMonth=v;if(k==='cat')fCat=v;if(k==='acct')fAcct=v;
     if(k==='dir'){const g=x=>x==='in'?'in':(x===''||x==='out')?'out':'tr';if(g(v)!==g(fDir))fCat='';fDir=v;}
     render();},
   toggleTxn(id){if(editOp&&editInline===id){app.cancelEditOp();return;}
@@ -7722,6 +8107,8 @@ const app=new Proxy({
     (D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t===t.id){if(amtCh)p.paid=Number(t.amount)||0;if(dCh)p.d=t.date;}}));
     (D.certs||[]).forEach(c=>(c.payments||[]).forEach(p=>{if(p.t===t.id&&dCh)p.d=t.date;}));
     if(t.link)linkSync(t,old,same);
+    /* حركة من حركات اشتراك المكتب اتعدلت: سطور المكتب بتتبني من جديد */
+    if(t.sofP||t.sof)subOffAll();
     sortTxns();eTxn=null;save();render();app.toast('اتعدلت');
   },
   delTxn(e,id){e.stopPropagation();
@@ -7737,6 +8124,8 @@ const app=new Proxy({
       const keep=(D.owed||[]).filter(o=>o.op===t.op&&(o.got||(Number(o.gotAmount)||0)>0));
       opRemove(t.op);delete D.ops[t.op];
       keep.forEach(o=>{delete o.op;D.owed.push(o);});}
+    /* تدبير أو مرتجع اشتراك المكتب لوحده: بيتمسح هو (ومعاه تدبيره الراجع) وسطور المكتب بتتبني من جديد */
+    else if(t.sofP&&t.sofP!==t.id)ids=[id].concat(D.txns.filter(x=>x.refFee===id).map(x=>x.id));
     else ids=t.link?D.txns.filter(x=>x.link===t.link).map(x=>x.id):[id];
     /* الفاتورة اتمسحت: مرتجعات أصنافها والأصناف اللي اتحولت للمكتب منها بيتمسحوا معاها */
     for(let n0=-1,g=0;n0!==ids.length&&g<6;g++){n0=ids.length;
@@ -7803,7 +8192,13 @@ const app=new Proxy({
       c.legacy=true;D.txns.forEach(y=>{if(y.certFee===c.id&&y.date===x.date&&/^مصاريف شراء/.test(y.note||'')&&!has(y.id))ids.push(y.id);});});
     /* مرتجع اتمسح: الحركة الأصلية ترجع «مرتجعهاش» */
     D.txns.forEach(x=>{if(has(x.id)&&x.refundOf){const src=D.txns.find(y=>y.id===x.refundOf);if(src)delete src.refundDone;}});
+    /* استرداد اشتراك بتاع حد تاني اتمسح: اللي اتشال من نصيبه بيرجع */
+    D.txns.forEach(x=>{if(!has(x.id)||!x.dueCut)return;const su=(D.subs||[]).find(y=>y.id===x.dueCut.s),du=su&&(su.dues||[]).find(y=>y.id===x.dueCut.d);
+      if(du){du.amount=r2s((Number(du.amount)||0)+x.dueCut.a);if(du.got&&!(Number(du.gotAmount)>0))du.got=false;}});
+    const sofHit=D.txns.some(x=>has(x.id)&&x.sofP);
     D.txns=D.txns.filter(x=>!has(x.id));
+    /* تدبير اشتراك المكتب اتمسح: الدفعة من غير تدبير، وسطور المكتب بتتبني من جديد */
+    if(sofHit){(D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{if(p.feeTxn&&has(p.feeTxn)){p.feeTxn=undefined;p.fee=0;}}));subOffAll();}
     openTxn=null;eTxn=null;confirmKey='';save();render();},
 
   /* --- إضافة --- */
@@ -7823,6 +8218,8 @@ const app=new Proxy({
       if(veh0!==(draft.cat==='fuel'||draft.cat==='repair')){render();return;}
       const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();
       setDisabled('entrysave',entryOk());}
+    /* سطر الدرجة جنب التصنيف بيتحدّث مع المبلغ والملاحظة */
+    if(draft.kind==='expense'&&draft.cat&&(k==='amount'||(k==='note'&&draft.catPicked))){const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();}
     if(draft.kind==='income'&&!draft.icatPicked&&(k==='note'||k==='from'||k==='amount')){
       const ir=document.getElementById('icatrow');if(ir)ir.innerHTML=icatRow();}
     const A=Number(onlyNum(draft.amount))||0;
@@ -8125,14 +8522,17 @@ const app=new Proxy({
   /* المرتجع وصل: بيدخل الرصيد من يوم وصوله، وبالدولار الفرق بيتسجل لوحده */
   refArrived(id){
     const t=D.txns.find(x=>x.id===id);if(!t||!t.refWait)return;
-    const base=Math.round(-(Number(t.amount)||0)*100)/100;
-    if(t.usdRef){const v=numVal('rain');if(!(v>0))return;
+    const base=Math.round(refV(t)*100)/100;
+    /* مرتجع اشتراك المكتب بالدولار: اللي وصل فعلًا هو المرتجع (الفرق فلوس المكتب) */
+    if(t.usdRef&&t.sofRef){const v=numVal('rain');if(!(v>0))return;t.amount=v;}
+    else if(t.usdRef){const v=numVal('rain');if(!(v>0))return;
       const d=Math.round((v-base)*100)/100;
       if(Math.abs(d)>=0.01)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-d,cat:'fees',account:t.account,date:today(),
         fxDiff:true,note:'فرق سعر صرف — '+String(t.note||'').replace(/^مرتجع — /,''),refFx:t.id});}
     /* بيدخل الرصيد والكشف من يوم وصوله، وفي أرقام الشهر بيفضل بتاريخ تسجيله */
     delete t.refWait;delete t.usdRef;if(t.date<today()){t.refOn=t.date;t.date=today();}
     D.txns.forEach(x=>{if(x.refFee===t.id&&x.refWait){delete x.refWait;if(x.date<today()){x.refOn=x.date;x.date=today();}}});
+    if(t.sofP)subOffAll();
     refArrFor=null;sortTxns();save();render();app.toast('وصل');
   },
   cancelRefundBack(){rbackFor=null;render();},
@@ -8259,6 +8659,53 @@ const app=new Proxy({
     _nmIdx=null;save();render();},
   nameNo(a,b){if(!D.nameNo)D.nameNo=[];const k=nmNoKey(a,b);if(D.nameNo.indexOf(k)<0)D.nameNo.push(k);_nmIdx=null;save();render();},
   goNames(){app.go('settings');setsOpen={names:true};render();},
+  goPlaces(){app.go('settings');setsOpen={places:true};render();},
+  lvEntryToggle(){lvEntryOpen=!lvEntryOpen;const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();else render();},
+  lvScope(v){lvScope=v;app.lvEntryToggle();app.lvEntryToggle();},
+  lvEntrySet(v){const nm=String(draft.note||'').trim();
+    if(nm&&lvScope==='item')app.lvSetItem(nm,v,1);else app.lvSetCat(draft.cat,v,1);
+    lvEntryOpen=false;const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();else render();},
+  /* صنف: «من غير» وتصنيفه ليه درجة = «none» (يكسب التصنيف)، وإلا بتتشال */
+  lvSetItem(name,v,quiet){const k=lvKey(name);if(!k)return;if(!D.cutItem)D.cutItem={};
+    if(v)D.cutItem[k]=v;else{const it=(function(){let c='';D.txns.some(t=>(t.items||[]).some(i=>{if(lvKey(i.name)===k){c=i.cat;return true;}return false;}));return c;})();
+      if(it&&(D.cutCat||{})[it])D.cutItem[k]='none';else delete D.cutItem[k];}
+    save();if(!quiet)render();},
+  lvSetCat(cat,v,quiet){if(!cat)return;if(!D.cutCat)D.cutCat={};if(v)D.cutCat[cat]=v;else delete D.cutCat[cat];save();if(!quiet)render();},
+  lvCatOpen(id){lvCatOpen=id;render();},
+  lvItemFor(id,k){const key=id+':'+k;lvItem=lvItem===key?'':key;render();},
+  lvRename(id,v){const nm=String(v||'').trim();if(!nm)return;D.cutLv=lvList().map(l=>l.id===id?Object.assign({},l,{label:nm}):l);save();},
+  lvAdd(){const el=document.getElementById('newlv');const nm=el?String(el.value||'').trim():'';if(!nm)return;
+    const used=lvList().map(l=>l.color), col=['#E5484D','#E8A03C','#8C7BF0','#4FB6E0','#46C2A8','#EE93B2'].find(c=>used.indexOf(c)<0)||'#9AA8C4';
+    D.cutLv=lvList().concat([{id:uid(),label:nm,color:col}]);save();render();},
+  /* مسح درجة: التصنيفات والأصناف اللي عليها بتبقى من غير درجة (والحركات زي ما هي) */
+  lvDel(id){D.cutLv=lvList().filter(l=>l.id!==id);
+    Object.keys(D.cutCat||{}).forEach(k=>{if(D.cutCat[k]===id)delete D.cutCat[k];});
+    Object.keys(D.cutItem||{}).forEach(k=>{if(D.cutItem[k]===id)delete D.cutItem[k];});
+    confirmKey='';save();render();},
+  lvItemDel(k){if(D.cutItem)delete D.cutItem[k];save();render();},
+  placeGroupPick(k,n){const g=plGrp(k);if(!g)return;plSel[g.key]=n;render();},
+  placeGroupCustom(k,v){const g=plGrp(k);if(g)plCustom[g.key]=v;},
+  /* بيغيّر اسم المكان في كل الحركات (والعمليات عشان التعديل بعدين): المكان واسم المحل، والملاحظة لو كانت هي اسم المكان */
+  placeGroupMerge(k){
+    const g=plGrp(k);if(!g)return;
+    const sel=plGrpSel(g);
+    const to=sel==='__new__'?cleanNm(plCustom[g.key]||''):sel;
+    if(!to){app.toast('اكتب الاسم الأول');return;}
+    const names=g.list.map(x=>x.name).filter(n=>n!==to);let c=0;
+    const fix=(o,ks)=>ks.forEach(f=>{if(typeof o[f]==='string'&&names.indexOf(cleanNm(o[f]))>-1){o[f]=to;c++;}});
+    D.txns.forEach(t=>{const was=[t.place,t.merchant].map(cleanNm);fix(t,['place','merchant']);
+      if(typeof t.note==='string'&&names.indexOf(cleanNm(t.note))>-1&&was.indexOf(cleanNm(t.note))>-1)t.note=to;});
+    Object.values(D.ops||{}).forEach(o=>{if(!o||!o.d)return;const was=[o.d.place,o.d.merchant].map(cleanNm);fix(o.d,['place','merchant']);
+      if(typeof o.d.note==='string'&&names.indexOf(cleanNm(o.d.note))>-1&&was.indexOf(cleanNm(o.d.note))>-1)o.d.note=to;});
+    delete plSel[g.key];delete plCustom[g.key];_plIdx=null;
+    if(c)_undoLbl='وحّدت '+plural(g.list.length,'مكان','مكانين','أماكن','مكان')+' على «'+to+'»';
+    save();render();app.toast(c?'اتوحّدوا على «'+to+'»':'مفيش حاجة اتغيّرت');},
+  placeGroupNo(k){const g=plGrp(k);if(!g)return;if(!D.placeNo)D.placeNo=[];
+    g.list.forEach((a,i)=>g.list.forEach((b,j)=>{if(j<=i)return;const k=plNoKey(a.name,b.name);if(D.placeNo.indexOf(k)<0)D.placeNo.push(k);}));
+    _plIdx=null;save();render();},
+  placeNoOne(k,xi){const g=plGrp(k);if(!g||!g.list[xi])return;if(!D.placeNo)D.placeNo=[];const a=g.list[xi].name;
+    g.list.forEach(b=>{if(b.name===a)return;const k=plNoKey(a,b.name);if(D.placeNo.indexOf(k)<0)D.placeNo.push(k);});
+    _plIdx=null;save();render();},
   itemNameDone(k){const it=scan.items[k];if(!it)return;
     /* السطر الجديد والمسافات الزيادة جوه الاسم بيبقوا مسافة واحدة */
     const cl=cleanNm(it.name);if(cl!==it.name){it.name=cl;if(it.cat)render();}
@@ -8355,14 +8802,20 @@ const app=new Proxy({
       oitem:'',ocat:'',disc:'',split:undefined,people:[{name:'',amount:''}],manual:true};
     ownerFor=null;render();window.scrollTo(0,0);
   },
-  delItem(k){scan.items.splice(k,1);priceFor=null;render();},
-  addItem(){scan.items.push({name:'',amount:0,cat:''});render();},
+  delItem(k){const it=scan.items.splice(k,1)[0];if(it)scanDel={k,item:it,s:scan};priceFor=null;ownerFor=null;render();},
+  undoDelItem(){if(!scanDel||scanDel.s!==scan)return;scan.items.splice(Math.min(scanDel.k,scan.items.length),0,scanDel.item);scanDel=null;render();},
+  addItem(){scanDel=null;scan.items.push({name:'',amount:0,cat:''});render();},
   scanDate(v){scan.date=v;scan.dateWarn=false;render();},
-  scanMerchant(v){scan.merchant=v;},
-  scanItem(v){scan.item=v;},
-  scanItemPick(v){scan.item=v;render();},
-  scanOcat(id){scan.ocat=id;render();},
-  scanOItem(v){scan.oitem=v;},
+  scanMerchant(v){scan.merchant=v;if(book==='office')app.scanOcatRow();else if((scan.items||[]).some(i=>i.off)&&!scan.oitem)app.scanOItem('');},
+  scanItem(v){scan.item=v;if(book==='office')app.scanOcatRow();},
+  scanItemPick(v){scan.item=v;if(book==='office')ocatAutoSet(scan,scan.item||scan.merchant,'',scan.merchant);render();},
+  scanOcat(id){scan.ocat=id;scan.ocatPicked=true;scan.ocatAuto=false;render();},
+  scanOcatRow(){if(!ocatAutoSet(scan,scan.item||scan.merchant,'',scan.merchant))return;
+    const r=document.getElementById('socatrow');if(r)r.innerHTML=pickRow('socat2',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat')+ocatAutoHint(scan);
+    setDisabled('saveRec',scanSaveOk());},
+  scanOItem(v){scan.oitem=v;if(!ocatAutoSet(scan,scan.oitem||scan.merchant,'',scan.merchant))return;
+    const r=document.getElementById('socatrow1');if(r)r.innerHTML=pickRow('socat',D.ocats.map(c=>({id:c.id,label:esc(c.label)})),scan.ocat,'app.scanOcat',1)+ocatAutoHint(scan);
+    setDisabled('saveRec',scanSaveOk());},
   pickOwner(k){ownerFor=ownerFor===k?null:k;render();},
   /* بعد ما تكتب العدد: السهم وشكل «×» يتحدثوا */
   qtyDone(){render();},
@@ -8371,7 +8824,7 @@ const app=new Proxy({
   setOwner(k,v){
     const it=scan.items[k];if(!it)return;
     const name=String(v||'').trim();
-    if(name==='__office__'){it.off=true;it.who='';}
+    if(name==='__office__'){it.off=true;it.who='';ocatAutoSet(scan,scan.oitem||scan.merchant,'',scan.merchant);}
     else if(!name){it.off=false;it.who='';}
     else {it.off=false;it.who=name;}
     ownerFor=null;render();
@@ -8603,6 +9056,7 @@ const app=new Proxy({
   },
   accUse84(){accDraft.limit=String(Math.round(accDraft.secTotal()*0.84));render();},
   addAccount(){
+    if(!accYnOk())return;
     const el=document.getElementById('newacc');
     const typed=el?String(el.value||'').trim():'';
     const n=typed||String(accDraft.name||'').trim();
@@ -8623,7 +9077,7 @@ const app=new Proxy({
     {const na=D.accounts[D.accounts.length-1], c=(fxOn()&&FXTYPES.indexOf(na.atype)>-1&&accDraft.cur&&accDraft.cur!=='EGP')?accDraft.cur:'';
       if(c){na.cur=c;na.scope='me';na.openRate=fxRate(c)||undefined;}}
     if(accDraft.atype==='save'){const na=D.accounts[D.accounts.length-1];na.scope='me';applySaveCfg(na,accDraft);}
-    accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:true,insureRate:'0.9',stamp:true,stampRate:'0.05',sec:false,secured:[],
+    accDraft={name:'',atype:'cash',credit:false,limit:'',accNo:'',last4:'',stmtDay:'20',graceDay:'15',insure:undefined,insureRate:'0.9',stamp:undefined,stampRate:'0.05',sec:undefined,secured:[],
       secTotal(){return (D.certs||[]).filter(c=>this.secured.indexOf(c.id)>-1).reduce((x,c)=>x+(Number(c.amount)||0),0);}};
     accCfg=null;showAddAcc=false;
     save();render();
@@ -8812,18 +9266,23 @@ const app=new Proxy({
           if(t.acct&&to&&t.acct!==to)D.txns.unshift({id:uid(),book:'office',kind:'transfer',amount:u,
             account:t.acct,to:to,date:td,note:'سداد للعهدة'});
         });
-        D.floatLoans.push({id:uid(),dir:'back',amount:v,date:td,note:'تسوية',acct:to});
-        if(from)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:v,account:from,
+        /* مربوطة بحركتها: لو الحركة اتمسحت التسوية بتتمسح معاها */
+        const fid=uid();
+        D.floatLoans.push({id:uid(),dir:'back',amount:v,date:td,note:'تسوية',acct:to,srcTxn:from?fid:undefined});
+        if(from)D.txns.unshift({id:fid,book:'me',kind:'settle',dir:'out',amount:v,account:from,
           date:td,flOut:true,note:'سداد للعهدة'});
         sortTxns();
       }else{
         const u=Math.min(v,Math.abs(loanBalance())),td=today();
         const from=flPay.bfrom||officeCashId(), f=D.accounts.find(a=>a.id===from);
         const to=(f&&f.scope==='both')?from:(flPay.bto||(myOnly()[0]||{}).id);
-        D.floatLoans.push({id:uid(),dir:'take',amount:u,date:td,note:'تسوية',mig:1,acct:from});
-        const L=uid();
-        if(from)D.txns.unshift({id:uid(),book:'office',kind:'settle',dir:'out',amount:u,account:from,date:td,flBack:true,link:L,note:'رجعلي من فلوسي'});
-        if(to)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:u,account:to,date:td,flBack:true,link:L,note:'رجعلي من '+bookName()});
+        /* فرق تقريب اشتراكات المكتب: آخر حاجة بتتاخد، وبتدخل «باقي تقريب» مش رجوع فلوس */
+        const pr=loanRnd(), rd=r2s(Math.max(0,Math.min(pr,u-(Math.abs(loanBalance())-pr))));
+        const L=uid(), oid=uid();
+        D.floatLoans.push({id:uid(),dir:'take',amount:u,date:td,note:'تسوية',mig:1,acct:from,rnd:rd>0?rd:undefined,srcTxn:from?oid:undefined});
+        if(from)D.txns.unshift({id:oid,book:'office',kind:'settle',dir:'out',amount:u,account:from,date:td,flBack:true,link:L,note:'رجعلي من فلوسي'});
+        if(to&&u-rd>0.004)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:r2s(u-rd),account:to,date:td,flBack:true,link:L,note:'رجعلي من '+bookName()});
+        if(to&&rd>0)D.txns.unshift({id:uid(),book:'me',kind:'income',amount:rd,account:to,date:td,link:L,icat:'diff',note:'باقي تقريب — اشتراكات '+bookName()});
         sortTxns();
       }
       save();
@@ -9001,17 +9460,21 @@ const app=new Proxy({
     setText('subshare',fmt(Math.max(0,(Number(onlyNum(subDraft.amount))||0)-subDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
   personAdd(){subDraft.people.push({name:'',amount:''});render();},
   personDel(i){subDraft.people.splice(i,1);if(!subDraft.people.length)subDraft.people.push({name:'',amount:''});render();},
-  subPick(k,v){subDraft[k]=v;render();},
+  subPick(k,v){subDraft[k]=v;if(k==='owner'&&v==='office'&&!subDraft.ocat)subDraft.ocat=ocatSuggest('اشتراك '+String(subDraft.name||'').trim());render();},
   subPick_on(v){subDraft.promo=!!v;render();},
   sdPick_on(v){sDraft.promo=!!v;render();},
   subSetAt(v){subDraft.at=v;},
   sdSetAt(v){sDraft.at=v;},
   addSub(){
+    if(!subOk())return;
     D.subs.push({id:uid(),name:subDraft.name.trim(),
       amount:(subDraft.cycle==='trial'&&!subDraft.willRenew)?0:Number(onlyNum(subDraft.amount))||0,
       cur:subDraft.cur,cycle:subDraft.cycle,next:subDraft.next,
       account:subDraft.account||subDefAcc(),day:Number(String(subDraft.next||'').slice(8,10))||undefined,cat:'subs',cancelAtEnd:false,payments:[],dues:[],at:subDraft.at||'',
-      people:(subDraft.cycle!=='trial'&&subDraft.split)
+      owner:subDraft.owner==='me'?undefined:subDraft.owner,
+      ownerName:subDraft.owner==='other'?String(subDraft.ownerName||'').trim():undefined,
+      ocat:subDraft.owner==='office'?subDraft.ocat:undefined,
+      people:(subDraft.cycle!=='trial'&&subDraft.owner==='me'&&subDraft.split)
         ?subDraft.people.filter(p=>Number(onlyNum(p.amount))>0).map(p=>({name:p.name.trim()||'حد',amount:Number(onlyNum(p.amount))}))
         :[],
       myShare:null,
@@ -9020,13 +9483,13 @@ const app=new Proxy({
       willRenew:subDraft.cycle==='trial'?!!subDraft.willRenew:undefined,
       arr:(subDraft.cur!=='USD'&&subDraft.cycle!=='trial'&&typeof subDraft.arr==='boolean')?subDraft.arr:undefined,
       afterCycle:subDraft.cycle==='trial'?subDraft.afterCycle:undefined});
-    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:true,afterCycle:'monthly',at:'',promo:false,split:false,people:[{name:'',amount:''}]};
+    subDraft={name:'',amount:'',cur:'EGP',cycle:'monthly',next:today(),account:'',cat:'subs',willRenew:undefined,afterCycle:'monthly',at:'',promo:undefined,split:undefined,owner:undefined,ownerName:'',ocat:'',people:[{name:'',amount:''}]};
     showSub=false;save();render();
   },
   setPaySubBal(v){paySubBal=v;},
   paySub(id){
     const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial')return;
-    paySubBal='';paySubFor=id;paySubDate=s.next<=today()?s.next:today();
+    paySubBal='';paySubFor=id;paySubDate=s.next<=today()?s.next:today();paySubTake=undefined;paySubFrom='';paySubTo='';
     tab='wallet';wtab='subs';render();
     setTimeout(()=>{const el=document.getElementById('sub-'+id);if(el)el.scrollIntoView({block:'center'});},60);
   },
@@ -9034,7 +9497,8 @@ const app=new Proxy({
   subCharged(id){const s=D.subs.find(x=>x.id===id);if(!s||s.cycle==='trial'||daysTo(s.next)>0)return;
     /* متأخر أكتر من يوم من غير «لسه»: بيتسجل بيوم ميعاده، غير كده بالنهارده */
     const d=(daysTo(s.next)<0&&s.held!==s.next)?s.next:today();
-    if(s.cur==='USD'){app.paySub(id);paySubDate=d;render();return;}
+    /* بالدولار (خانة المحجوز) واشتراك المكتب («خدت الفلوس؟»): بيفتح خانة الدفع */
+    if(s.cur==='USD'||subOwner(s)==='office'){app.paySub(id);paySubDate=d;render();return;}
     paySubDate=d;app.confirmPaySub(id);},
   /* لسه ماتخصمش: بيفضل مستني ومش هيتسجل لوحده آخر اليوم */
   subHold(id){const s=D.subs.find(x=>x.id===id);if(!s)return;s.held=s.next;save();render();app.toast('هيفضل مستنيك');},
@@ -9047,7 +9511,7 @@ const app=new Proxy({
     sDraft={name:s.name,amount:String(s.amount||''),cur:s.cur||'EGP',cycle:s.cycle==='yearly'?'yearly':'monthly',
       next:s.next,at:s.at||'',split:!!(s.people&&s.people.length),people:ppl,
       promo:!!(s.promo&&Number(s.promo.left)>0),promoAmt:s.promo?String(s.promo.amount):'',promoN:s.promo?String(s.promo.left):'',
-      arr:s.arr,account:s.account};
+      arr:s.arr,account:s.account,owner:subOwner(s),ownerName:s.ownerName||'',ocat:s.ocat||''};
     editSub=id;paySubFor=null;render();
   },
   cancelSubEdit(){editSub=null;render();},
@@ -9104,34 +9568,65 @@ const app=new Proxy({
     if(newAmt<=0){upFor=null;render();return;}
     const hold=s.cur==='USD'?holdFromBal(subAcc(s),upBal,0):0;upBal='';
     const cat=s.cat||'subs';
-    if(refund>0){D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
+    const own=subOwner(s), lp=(s.payments||[]).filter(x=>!x.dup&&x.t).slice(-1)[0];
+    const feeBack=s.cur!=='USD'&&subArrOn(s)&&acct===subAcc(s)&&isCreditAcc(acct);
+    if(refund>0&&own==='office'&&lp&&lp.off){
+      /* مرتجع اشتراك المكتب: فلوس المكتب، بيقلل اللي عليه ليك (لما يوصل)، والإجمالي بيتقرب تاني */
+      const pt=D.txns.find(x=>x.id===lp.t), L=pt&&pt.link?pt.link:uid(), card=isCreditAcc(acct);
+      const r={id:uid(),book:'me',kind:'settle',dir:'in',amount:refund,account:acct,date:d,note:'مرتجع '+bookName()+' — استرداد ترقية '+s.name,
+        refWait:true,usdRef:s.cur==='USD'?true:undefined,ocard:card?true:undefined,omine:card?undefined:true,link:L,sofP:lp.off.k,sofRef:true};
+      D.txns.unshift(r);
+      if(feeBack){const v=arrEst(refund);if(v>0)D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:v,account:acct,date:d,
+        note:'تدبير راجع '+bookName()+' — '+s.name,refWait:true,refFee:r.id,ocard:card?true:undefined,omine:card?undefined:true,link:L,sofP:lp.off.k,sofRef:true});}
+    }else if(refund>0&&own==='other'&&lp){
+      /* بتاع حد تاني: المرتجع فلوسه، فبيقلل اللي ليك عنده من آخر دفعة (ولو كان دفعها، يبقى عليك ليه) */
+      const due=(s.dues||[]).filter(x=>x.srcTxn===lp.t&&!x.got).slice(-1)[0];
+      const who=String(s.ownerName||'').trim()||'حد';
+      if(due&&Number(due.amount)>=refund-0.005){
+        D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:'lentcat',account:acct,date:d,
+          note:'استرداد ترقية — '+s.name+' (بتاع '+who+')',refWait:true,usdRef:s.cur==='USD'?true:undefined,dueCut:{s:s.id,d:due.id,a:refund}});
+        due.amount=r2s(Number(due.amount)-refund);if(due.amount<=0.005)due.got=true;
+      }else D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:refund,account:acct,date:d,debt:true,from:who,
+        note:'استرداد ترقية — '+s.name,refWait:true,usdRef:s.cur==='USD'?true:undefined});
+      if(feeBack)addFeeBack(D.txns[0],s.name);
+    }else if(refund>0){D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
       date:d,note:'استرداد ترقية — '+s.name,refWait:true,usdRef:s.cur==='USD'?true:undefined});
-      if(s.cur!=='USD'&&subArrOn(s)&&acct===subAcc(s)&&isCreditAcc(acct))addFeeBack(D.txns[0],s.name);}
+      if(feeBack)addFeeBack(D.txns[0],s.name);}
     const usd=s.cur==='USD';
     const full=usd?(hold>0?hold:Math.round(newAmt*D.rate*100)/100):newAmt;
     const t={id:uid(),book:'me',kind:'expense',amount:full,cat:cat,account:subAcc(s),date:d,
       note:s.name+' — بعد الترقية',usd:usd?newAmt:undefined,rate:usd?(hold>0?Math.round(hold/newAmt*100)/100:D.rate):undefined,
       hold:hold>0?true:undefined,pending:usd?true:undefined};
     D.txns.unshift(t);
+    if(own==='office')subOffMark(t,s,t.id,uid()),t.note='مصروف '+bookName()+' — اشتراك '+s.name+' بعد الترقية';
     if(!s.payments)s.payments=[];
     const pay={d:d,t:t.id,paid:full};
+    if(own==='office')pay.off={k:t.id,acc:officeCashId(),from:'',to:''};
     if(!usd&&subArrOn(s)){const est=arrEst(full);if(est>0){pay.fee=est;pay.feePending=true;}}
     s.payments.push(pay);
     s.amount=newAmt;delete s.promo;
+    /* نصيب الناس في الدفعة الجديدة (كان ناقص قبل كده في الترقية) */
+    subDuesAdd(s,t,full,usd?newAmt:0,d);
+    if(pay.off)subOffSync(s,pay);
     s.next=d;s.day=Number(d.slice(8,10))||undefined;s.next=subNextOf(s);
     upFor=null;sortTxns();save();render();app.toast('اترقّى');
   },
   sdSet(k,v){sDraft[k]=v;
     setText('sdshare',fmt(Math.max(0,(Number(onlyNum(sDraft.amount))||0)-sDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
-  sdPick(k,v){sDraft[k]=v;render();},
+  sdPick(k,v){sDraft[k]=v;if(k==='owner'&&v==='office'&&!sDraft.ocat)sDraft.ocat=ocatSuggest('اشتراك '+String(sDraft.name||'').trim());render();},
   sdPerson(i,k,v){if(sDraft.people[i])sDraft.people[i][k]=v;
     setText('sdshare',fmt(Math.max(0,(Number(onlyNum(sDraft.amount))||0)-sDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
   sdPersonAdd(){sDraft.people.push({name:'',amount:''});render();},
   sdPersonDel(i){sDraft.people.splice(i,1);if(!sDraft.people.length)sDraft.people.push({name:'',amount:''});render();},
   saveSubEdit(id){
     const s=D.subs.find(x=>x.id===id);if(!s)return;
+    if(!subOwnerOk(sDraft)){app.toast(sDraft.owner==='other'?'اكتب الاسم الأول':'اختار التصنيف الأول');return;}
     const nm=String(sDraft.name||'').trim();
     if(nm)s.name=nm;
+    /* بتاع مين: بيتطبق على الدفعات الجاية بس (اللي اتدفع خلاص يفضل زي ما هو) */
+    if(sDraft.owner==='me'){delete s.owner;delete s.ownerName;delete s.ocat;}
+    else{s.owner=sDraft.owner;if(s.owner==='other'){s.ownerName=String(sDraft.ownerName||'').trim();delete s.ocat;}else{s.ocat=sDraft.ocat;delete s.ownerName;}
+      sDraft.split=false;}
     const amt=Number(onlyNum(sDraft.amount))||0;
     if(amt>0)s.amount=amt;
     if(sDraft.next&&sDraft.next!==s.next){s.next=sDraft.next;s.day=Number(s.next.slice(8,10))||undefined;}
@@ -9174,12 +9669,15 @@ const app=new Proxy({
         /* نصيب الناس بالسعر الحقيقي */
         app._reprice(t,o0);}
       p.settled=true;p.feePending=false;
+      if(p.off)subOffSync(s,p);
       feeFor=null;sortTxns();save();render();app.toast('اتظبط');return;
     }
     if(p.dup)p.settled=true;
     if(v>0){
       const t={id:uid(),book:'me',kind:'expense',amount:v,cat:'fees',account:subAcc(s),
         date:feeDate||today(),arrFee:true,note:'مصاريف تدبير — '+s.name};
+      /* اشتراك المكتب: التدبير على المكتب (نقل فلوس مش مصروف عليك) */
+      if(p.off){const pt=D.txns.find(x=>x.id===p.t);subOffMark(t,s,p.off.k,pt&&pt.link?pt.link:uid());t.note='تدبير '+bookName()+' — '+s.name;}
       D.txns.unshift(t);
       p.fee=v;p.feeTxn=t.id;p.feePending=false;
       sortTxns();
@@ -9187,6 +9685,7 @@ const app=new Proxy({
       p.fee=0;p.feePending=false;p.feeTxn=undefined;
     }
     s.arr=v>0;
+    if(p.off)subOffSync(s,p);
     feeFor=null;save();render();app.toast('اتسجلت');
   },
   noFee(key){
@@ -9197,6 +9696,7 @@ const app=new Proxy({
     if(p.feeTxn)D.txns=D.txns.filter(x=>x.id!==p.feeTxn);
     p.fee=0;p.feePending=false;p.feeTxn=undefined;
     s.arr=false;
+    if(p.off)subOffSync(s,p);
     feeFor=null;save();render();
   },
   cancelFee(){feeFor=null;render();},
@@ -9218,13 +9718,19 @@ const app=new Proxy({
       cat:s.cat||'subs',account:subAcc(s),date:paySubDate,note:s.name,
       usd:usd||undefined,rate:usd?(hold>0?Math.round(hold/usd*100)/100:D.rate):undefined,
       hold:hold>0?true:undefined,pending:usd?true:undefined};
+    const office=subOwner(s)==='office';
+    if(office&&!subTakeOk(s))return;
     let tw=null;
     if(twin){
       tw=subTwinTake(s,twin);
       if(usd&&hold>0&&!twin.hold){tw.amount=twin.amount;tw.rate=twin.rate;tw.set=hold;twin.amount=hold;twin.rate=Math.round(hold/usd*100)/100;twin.hold=true;}
+      /* اشتراك المكتب: رسالة البنك تبقى نقل فلوس مش مصروف (وبيرجع زي ما كان لو اتراجعت) */
+      if(office){['kind','dir','ocard','omine','link','sofP','arrFee'].forEach(k=>{tw[k]=twin[k]===undefined?null:twin[k];});}
     }else D.txns.unshift(t);
+    if(office){subOffMark(t,s,t.id,uid());t.note='مصروف '+bookName()+' — اشتراك '+s.name;}
     if(!s.payments)s.payments=[];
     const pay={d:t.date||paySubDate,t:t.id,paid:Number(t.amount)||full};
+    if(office)pay.off={k:t.id,acc:officeCashId(),from:(!usd&&paySubTake)?paySubFrom:'',to:(!usd&&paySubTake)?subTakeTo(s):''};
     if(tw)pay.tw=tw;
     promoStep(s,pay);paySubBal='';
     if(subArrOn(s)){
@@ -9233,9 +9739,13 @@ const app=new Proxy({
     }
     s.payments.push(pay);
     subDuesAdd(s,t,full,usd,paySubDate);
+    if(office)subOffSync(s,pay);
     s.next=subNextOf(s);
     paySubFor=null;sortTxns();save();render();app.toast('اتسجلت');
   },
+  setPaySubTake(v){paySubTake=!!v;if(!v){paySubFrom='';paySubTo='';}render();},
+  setPaySubFrom(id){paySubFrom=id;paySubTo='';render();},
+  setPaySubTo(id){paySubTo=id;render();},
   undoSubPay(id){
     const s=D.subs.find(x=>x.id===id);if(!s||!s.payments||!s.payments.length)return;
     /* آخر دفعة عادية (السحب المتكرر ليه زرار لوحده) */
@@ -9246,11 +9756,14 @@ const app=new Proxy({
     if(s.promo&&p.promoEnd)s.promo.done=false;
     /* حركة رسالة البنك اللي اتربطت بالدفعة بتفضل (الخصم حصل فعلًا)، وبترجع زي ما كانت قبل الربط */
     const tw=p.tw?D.txns.find(t=>t.id===p.t):null;
-    if(tw){['cat','note','needs'].forEach(k=>{if(!(k in p.tw))return;if(p.tw[k]===null||p.tw[k]===undefined)delete tw[k];else tw[k]=p.tw[k];});
+    if(tw){['cat','note','needs','kind','dir','ocard','omine','link','sofP','arrFee'].forEach(k=>{if(!(k in p.tw))return;if(p.tw[k]===null||p.tw[k]===undefined)delete tw[k];else tw[k]=p.tw[k];});
       /* المحجوز يرجع زي ما كان بس لو لسه محجوز بنفس المبلغ (لو المبلغ النهائي اتأكد يفضل) */
       if(p.tw.set!==undefined&&tw.pending&&Math.abs((Number(tw.amount)||0)-p.tw.set)<0.005){
         tw.amount=p.tw.amount;tw.rate=p.tw.rate;delete tw.hold;}}
     const ids=[tw?null:p.t,p.feeTxn].filter(Boolean);
+    /* اشتراك المكتب: سطوره في الدفترين والمرتجعات بتاعته بتتمسح معاه */
+    if(p.off){D.txns.forEach(x=>{if((x.sof===p.off.k||(x.sofP===p.off.k&&x.id!==p.t))&&ids.indexOf(x.id)<0)ids.push(x.id);});
+      D.floatLoans=(D.floatLoans||[]).filter(l=>l.sof!==p.off.k);}
     D.txns=D.txns.filter(t=>ids.indexOf(t.id)<0);
     s.dues=(s.dues||[]).filter(d=>d.srcTxn!==p.t||d.got);
     s.next=subPrevOf(s);
@@ -9552,13 +10065,14 @@ const app=new Proxy({
   certBank(id){certDraft.bank=id;if(!certDraft.account||!certRetAccs().some(a=>a.id===certDraft.account))certDraft.account=id;render();},
   certDed(v){certDraft.ded=!!v;render();},
   addCert(){
+    if(!certOk())return;
     const isDep=certDraft.type==='deposit';
     const cnt=(D.certs||[]).filter(c=>(c.type||'cert')===(isDep?'deposit':'cert')).length+1;
     const c=mkCert((isDep?'وديعة ':'شهادة ')+cnt,certDraft.amount,certDraft.monthly,certDraft.start,
       certDraft.account,certDraft.end,isDep?'deposit':'cert',certDraft.day);
     c.bank=certDraft.bank;
     D.certs.push(c);
-    if(certDraft.ded!==false){
+    if(certDraft.ded===true){
       D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'out',amount:c.amount,account:c.bank,
         date:c.start,certBuy:c.id,note:'شراء '+c.name});
       const fee=Number(onlyNum(certDraft.fee))||0;
@@ -9569,7 +10083,7 @@ const app=new Proxy({
       /* شهادة قديمة: العوائد اللي وصلت قبل كده مش بتتسجل تاني */
       const lg=certDraft.lastGot===undefined?certLastDue(certDraft):certDraft.lastGot;
       if(lg&&/^\d{4}-\d{2}$/.test(lg))c.covered=lg;}
-    certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:true,fee:'',type:certDraft.type};showCert=false;
+    certDraft={amount:'',monthly:'',day:'',start:today(),end:'',account:'',bank:'',ded:undefined,fee:'',type:certDraft.type};showCert=false;
     const cu=catchUp([c.id]);save();
     if(cu.n)pushNote('اتقيد '+plural(cu.n,'عائد واحد','عائدين','عوائد','عائد')+' بإجمالي <span class="n">'+fmt(cu.tot)+'</span> جنيه.');save();
     render();
