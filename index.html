@@ -654,7 +654,12 @@ let ofeeFor=false, ofeeMode='full', ofeeAcct='', ofeeTo='', grpEdit=null;
 let owedOpen=false, catsOpen=false, incsOpen=false;
 let setsOpen={}, accOpen=null, setSub=null, catEdit=null;
 let openRow={};
-let rbackFor=null, refArrFor=null;
+let rbackFor=null, refArrFor=null, spendOpen=false, stmtFor=null;
+function stmtPut(acc,key,amt,mn,due){
+  if(!D.cardStmts)D.cardStmts=[];
+  const e=stmtEntry(acc,key);
+  if(e){e.amt=amt;e.min=mn;e.due=due;}else D.cardStmts.push({id:uid(),acct:acc,key:key,amt:amt,min:mn,due:due});
+}
 let flPay={from:'',to:''};
 let feeDate='';
 let paySubBal='', repBal='', upBal='';
@@ -817,6 +822,7 @@ function normalizeData(){
   if(!D.fx)D.fx={on:false,curs:[],rates:{},at:'',manual:{}};
   if(!D.fx.rates)D.fx.rates={};if(!D.fx.manual)D.fx.manual={};if(!D.fx.curs)D.fx.curs=[];
   if(!D.closings)D.closings=[];
+  if(!D.cardStmts)D.cardStmts=[];
   if(D.lastClose===undefined)D.lastClose='';
   if(D.lastBackup===undefined)D.lastBackup='';
   /* كاش العهدة بيتعمل مرة واحدة بس؛ لو مسحته مابيرجعش */
@@ -1273,6 +1279,19 @@ function retItem(src,r){
   const its=(src&&src.items)||[];const at=its[r.retIx];
   if(at&&(r.retName===undefined||at.name===r.retName))return at;
   return its.find(i=>i.name===r.retName&&i.returned)||its.find(i=>i.name===r.retName)||null;
+}
+/* الحركة دي كان عليها مصاريف تدبير؟ (لو أيوه، أي مرتجع منها بيرجّع تدبيره بنفس النسبة) */
+function txnHasArr(src){
+  if(!src)return false;
+  if(D.txns.some(x=>x.arrFee&&x.arrOf===src.id))return true;
+  if((D.arrPend||[]).some(x=>x.src===src.id))return true;
+  return (D.subs||[]).some(su=>(su.payments||[]).some(p=>p.t===src.id&&((Number(p.fee)||0)>0||p.feeTxn)));
+}
+/* التدبير الراجع: سطر محجوز مربوط بالمرتجع، بيوصل معاه */
+function addFeeBack(ref,label){
+  const v=arrEst(Math.abs(Number(ref.amount)||0));if(!(v>0))return;
+  D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-v,cat:'fees',account:ref.account,date:ref.date,
+    note:'تدبير راجع — '+label,refWait:true,refFee:ref.id});
 }
 /* حركة مستنية: مرتجع محجوز، أو الحركة الأصلية اللي مرتجعها لسه محجوز (زي «مستني مرتجع») */
 function refHeldOrig(){const o={};D.txns.forEach(t=>{if(t.refWait&&t.refundOf)o[t.refundOf]=1;});return o;}
@@ -2877,7 +2896,9 @@ async function readSms(text){
     '- cur: USD لو العملية نفسها بالدولار (USD أو $)، غير كده EGP.\n'+
     '- bal: الرصيد المتاح بعد العملية زي ما هو مكتوب (Available limit أو Available balance أو الرصيد المتاح)، رقم من غير فواصل، أو null لو مش مكتوب. '+
     'تجاهل أي حد للصرف من بره (international limit) — ده مش الرصيد.\n'+
-    '- متخترعش تصنيفات ولا أصناف، الرسالة مفيهاش تفاصيل المشتريات.\n\n'+
+    '- متخترعش تصنيفات ولا أصناف، الرسالة مفيهاش تفاصيل المشتريات.\n'+
+    '- لو فيه رسالة كشف حساب كارت (مبلغ الكشف والحد الأدنى للسداد)، ماتحطهاش في ops، وحطها في stmts:\n'+
+    '  "stmts":[{"account":"<id>","amount":0,"min":0,"due":"YYYY-MM-DD"}] — amount مبلغ الكشف، min الحد الأدنى، due آخر ميعاد للسداد (السنة من تاريخ الكشف).\n\n'+
     'الرسايل:\n'+text;
   return aiCall([{type:'text',text:p}],3000);
 }
@@ -3242,6 +3263,8 @@ async function canvasFonts(){
 const CV={bg:'#101318',surf:'#191D23',surf2:'#212630',line:'#2B313A',text:'#F2F5F9',muted:'#8D96A2',mint:'#4FD08D',clay:'#FF6F60',
   AR:'"IBM Plex Sans Arabic",sans-serif',DS:'Alexandria,"IBM Plex Sans Arabic",sans-serif',NM:'"IBM Plex Mono",monospace'};
 /* تقرير التقفيل كصورة — نفس محتوى الطباعة */
+/* «مختصر»: الرصيد زي ما هو، والمنصرف سطر واحد بإجماليه، وبعدهم النتيجة */
+let repShort=false;
 async function reportCanvas(r){
   const cv=document.createElement('canvas');
   if(!cv||!cv.getContext)return null;
@@ -3252,8 +3275,8 @@ async function reportCanvas(r){
   r.floats.forEach(f=>rows.push({t:'l',a:(f.kind==='settle'?'رجعلك من فلوسك':'عهدة')+(f.note?' — '+f.note:''),s:accName(f.account)+RLM+' · '+dayLabel(f.date),v:f.kind==='settle'?-f.amount:f.amount}));
   rows.push({t:'tot',a:'إجمالي الرصيد',v:r.opening+r.floatsTotal});
   rows.push({t:'h',a:'المنصرف',c:CV.clay});
-  const G=groupedItems(r);
-  if(!G.length)rows.push({t:'l',a:'مفيش مصاريف في الفترة دي'});
+  const G=repShort?[]:groupedItems(r);
+  if(!G.length&&!repShort)rows.push({t:'l',a:'مفيش مصاريف في الفترة دي'});
   G.forEach(g=>{rows.push({t:'cat',a:ocatOf(g.ocat).label});
     g.items.forEach(i=>rows.push({t:'l',a:i.item+(i.n>1?' \u200E×'+i.n:''),v:i.sum,s:repNotes(i).join(' · ')||undefined}));
     rows.push({t:'sum',a:'مجموع '+ocatOf(g.ocat).label,v:g.sum});});
@@ -3452,6 +3475,111 @@ function monthStats(){
   const running=pers?((pers.find(p=>p.key===month)||pers[0]).to>=today()):monthOf(today())===month;
   return {mt,pills,periodNote,title,spent,earned,byCat,gross,max,byInc,ginc,imax,running};
 }
+/* ==========================================================================
+   «تقدر تصرف لحد المرتب»
+   X = فلوسك الجاهزة (كاش وبنك ومحافظ، من غير فلوس المكتب والتوفير)
+       ناقص كل اللي هيتخصم منها لحد يوم المرتب (يومه نفسه محسوب): اشتراكات وتدبيرها، أقساط،
+       مصاريف حسابات، وكشف الكارت اللي ميعاد سداده قبل المرتب.
+   Y = X ناقص باقي اللي عليك: الكارت اللي لسه مانزلش في كشف (ومعاه اللي هيتخصم عليه لحد المرتب)
+       وفلوس عليك لحد.
+   Z = X زايد اللي ليك عند الناس (لو اتحسب).
+   يوم المرتب = شهر من آخر مرتب؛ لو عدّى ولسه مااتسجلش، الحسبة بتمشي يوم بيوم.
+   ========================================================================== */
+function spendCalc(){
+  const r2=x=>Math.round(x*100)/100, td=today();
+  const sal=salaryDatesAll(), last=sal[sal.length-1];
+  let target=last?dAdd(last,1):(monthOf(td)+'-'+pad(dInMonth(monthOf(td))));
+  const late=target<td;if(late)target=td;
+  const isCard=id=>{const a=D.accounts.find(x=>x.id===id);return !!(a&&a.credit);};
+  const b=balances('me');
+  const liquidAccs=D.accounts.filter(a=>!a.closed&&!a.credit&&!isSave(a)&&!isFxAcc(a.id)&&a.scope!=='office');
+  const liquid=r2(liquidAccs.reduce((x,a)=>x+(b[a.id]||0),0));
+  const X=[],Y=[];
+  const add=(L,label,amt,when)=>{amt=r2(amt);if(amt>0.004)L.push({label,amt,when});};
+  /* الحساب ده فلوسه محسوبة؟ كارت ← «لو دفعت كل اللي عليك»، حساب جاهز ← الرقم الأولاني، غير كده مالوش دعوة */
+  const where=id=>isCard(id)?Y:liquidAccs.some(a=>a.id===id)?X:null;
+  /* الاشتراكات اللي ميعادها لحد يوم المرتب (ومنها اللي مستني الخصم) */
+  (D.subs||[]).forEach(s=>{
+    if(subEnded(s)||s.cancelAtEnd||(s.cycle==='trial'&&!s.willRenew))return;
+    const c=JSON.parse(JSON.stringify(s));if(c.cycle==='trial'){c.cycle=c.afterCycle||'monthly';}
+    let g=0;
+    while(c.next&&c.next<=target&&g++<24){
+      const price=c.cur==='USD'?r2(subPrice(c)*(D.rate||0)):subPrice(c);
+      const fee=c.cur==='USD'?0:subFeeAt(s,price);
+      const L0=where(subAcc(s));if(L0)add(L0,s.name+(fee?' + تدبير':''),price+fee,c.next);
+      if(c.promo&&Number(c.promo.left)>0)c.promo.left--;
+      c.next=subNextOf(c);
+    }
+  });
+  /* الأقساط اللي عليك الفترة دي (من حساب مش كارت) */
+  (D.installments||[]).forEach(i=>{if(i.mode==='bank'||isCardIns(i)||!insDue(i))return;const L0=where(i.account);if(L0)add(L0,i.name+' — قسط',insNextAmount(i),'');});
+  /* مصاريف الحسابات (زي الرسوم السنوية) */
+  (D.accounts||[]).filter(a=>!a.closed).forEach(a=>(a.fees||[]).forEach(f=>{
+    const L0=where(a.id);if(!L0)return;
+    let d=f.next,g=0;while(d&&d<=target&&g++<24){add(L0,f.name+' — '+a.name,Number(f.amount)||0,d);d=feeNext({cycle:f.cycle,day:f.day,next:d});}}));
+  /* مصاريف تدبير مستنية تأكيدك: البنك هيخصمها قريب */
+  (D.arrPend||[]).forEach(e=>{const L0=where(e.acct);if(L0)add(L0,'تدبير مستني — '+(e.note||accName(e.acct)),Number(e.amount)||0,'');});
+  (D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{if(!p.feePending||!(Number(p.fee)>0))return;
+    const L0=where(subAcc(su));if(L0)add(L0,'تدبير مستني — '+su.name,Number(p.fee),'');}));
+  /* الكارت: الكشف اللي ميعاد سداده قبل المرتب في X، والباقي عليه في Y */
+  (D.accounts||[]).filter(a=>a.credit&&!a.closed&&!isFxAcc(a.id)).forEach(a=>{
+    /* آخر كشف ميعاد سداده لحد يوم المرتب (حتى لو لسه مانزلش، أو ميعاده فات ولسه ماتسددش):
+       مبلغه بيشمل اللي قبله، فبيتحسب مرة واحدة */
+    let key=stmtKey(target,a),g=0;while(stmtDue(key,a)>target&&g++<4)key=mAdd(key,-1);
+    let inX=0;
+    if(stmtDate(key,a)<=dayShift(target,0)){inX=stmtLeft(a,key);add(X,'كشف '+a.name+' — '+mLabel(key),inX,stmtDue(key,a));}
+    const debt=Math.max(0,cardDebt(a)-(inX>0?insRemainOn(a.id):insOnAccount(a.id)));
+    add(Y,inX?'باقي '+a.name+' بعد الكشف':'اللي عليك لـ'+a.name,debt-inX,'');
+  });
+  const L=peopleLedger();
+  const owe=r2(L.reduce((x,g)=>x+(g.debtTot||0),0)), rec=r2(L.reduce((x,g)=>x+(g.recTot||0),0));
+  if(owe>0.004)Y.push({label:'فلوس عليك لناس',amt:owe});
+  const sx=r2(X.reduce((x,i)=>x+i.amt,0)), sy=r2(Y.reduce((x,i)=>x+i.amt,0));
+  const x=r2(liquid-sx);
+  return {target,late,liquid,X,Y,x,y:r2(x-sy),z:r2(x+rec),rec};
+}
+/* اللي فاضل من كشف: لو كتبت مبلغه (أو اتقرا من الرسالة) بيتاخد هو، غير كده حسبة البرنامج */
+function stmtLeft(a,key){
+  const e=stmtEntry(a.id,key);if(!e)return cardStmtLeft(a,key);
+  return Math.max(0,Math.round(((Number(e.amt)||0)-cardPaidAfter(a,stmtDate(key,a)))*100)/100);
+}
+/* حسبة البرنامج لمبلغ الكشف يوم نزوله (من غير السداد اللي بعده) — للمقارنة بالكشف */
+function cardStmtFull(a,key){
+  return Math.round((cardStmtLeft(a,key)+cardPaidAfter(a,stmtDate(key,a)))*100)/100;
+}
+/* اللي نزل على الكارت من يوم الكشف (سداد ومرتجعات) — نفس حسبة cardStmtLeft */
+function cardPaidAfter(a,sd){
+  const HO=refHeldOrig();let x=0;
+  D.txns.forEach(t=>{const v=Number(t.amount)||0;
+    if(t.to===a.id&&t.kind==='transfer'){if(t.date>=sd)x+=inAmt(t);return;}
+    if(t.account!==a.id||t.date<sd)return;
+    if(t.pending||t.refWait||HO[t.id]||(t.refundSince&&!t.refundDone))return;
+    let e=0;
+    if(t.kind==='expense'||t.kind==='transfer')e=-v;
+    else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')e=v;
+    else if(t.kind==='settle')e=t.dir==='in'?v:-v;
+    if(e>0)x+=e;});
+  return Math.round(x*100)/100;
+}
+const stmtEntry=(acc,key)=>(D.cardStmts||[]).find(e=>e.acct===acc&&e.key===key)||null;
+function spendHtml(){
+  if(!salaryDatesAll().length&&!(D.accounts||[]).some(a=>!a.credit))return '';
+  const S=spendCalc(), f=v=>`<span class="n">${fmt(v)}</span>`;
+  const lst=(L)=>L.map(i=>`<div class="arow"><span class="nm">${esc(i.label)}${i.when?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${dLabel(i.when)}</span>`:''}</span><span class="vl n">${fmt(i.amt)}</span></div>`).join('');
+  return `<div class="sec" style="margin-top:24px">
+    <div class="panel" style="padding:14px 16px;cursor:pointer" onclick="app.spendToggle()">
+      <div style="font-size:12px;color:var(--muted)">تقدر تصرف لحد ${S.late?'ما المرتب ينزل':'المرتب ('+dLabel(S.target)+')'}</div>
+      <div style="font-size:24px;font-weight:700;margin-top:4px;color:${S.x<0?'var(--clay)':'var(--text)'}">${f(S.x)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.8">لو دفعت كل اللي عليك: ${f(S.y)}${S.rec>0.004?`<br>ولو اتحسب اللي ليك: ${f(S.z)}`:''}</div>
+    </div>
+    ${spendOpen?`<div class="panel" style="margin-top:10px">
+      <div class="arow"><span class="nm">فلوسك الجاهزة (كاش وبنك ومحافظ)</span><span class="vl n">${fmt(S.liquid)}</span></div>
+      ${S.X.length?`<div class="hint" style="margin:10px 0 4px">بيتخصم لحد المرتب</div>${lst(S.X)}`:''}
+      ${S.Y.length?`<div class="hint" style="margin:10px 0 4px">وفي «لو دفعت كل اللي عليك» كمان</div>${lst(S.Y)}`:''}
+      ${S.rec>0.004?`<div class="hint" style="margin:10px 0 4px">ليك عند الناس <span class="n">${fmt(S.rec)}</span></div>`:''}
+    </div>`:''}
+  </div>`;
+}
 function vHome(){
   if(book==='office')return vHomeOffice();
   const b=balances();
@@ -3463,6 +3591,7 @@ function vHome(){
   ${autoNoteHtml()}
   ${installHtml()}
   ${editInline?'':alertsPanel()}
+  ${editInline?'':spendHtml()}
   ${(done&&D.sumSeen!==done.key&&!editInline)?`<div class="sec" style="margin-top:24px">
     <div class="sec-h" style="${sumNew?'':'margin-bottom:0'}"><h3 style="font-size:14px">ملخص الشهر اللي فات جاهز</h3>
       <span style="display:flex;gap:8px"><button class="chip sm${sumNew?' on':''}" onclick="app.sumNewToggle()">${sumNew?'اقفله':'افتحه'}</button>
@@ -3628,15 +3757,36 @@ function alertsPanel(){
       <button class="btn ghost" onclick="app.cancelRefundBack()">إلغاء</button>
     </div>`:''}`);});
 
+  /* كشف الكارت نزل: اكتب مبلغه والحد الأدنى (أو الصق رسالته من فوق) */
+  if(book==='me')(D.accounts||[]).filter(a=>a.credit&&!a.closed&&!isFxAcc(a.id)).forEach(a=>{
+    const key=stmtKey(today(),a), sd=stmtDate(key,a), due=stmtDue(key,a);
+    if(today()<sd||today()>due)return;
+    const e=stmtEntry(a.id,key), calc=cardStmtLeft(a,key);
+    if(e){const d=Math.round(((Number(e.amt)||0)-cardStmtFull(a,key))*100)/100;
+      if(Math.abs(d)<0.01||e.seen)return;
+      rows.push(`<div class="alert">${RAIL(4,sd)}<span class="g"><span class="t">كشف ${esc(a.name)} — ${mLabel(key)}</span>
+        <span class="s" style="display:block">البرنامج حاسب <span class="n">${fmt(cardStmtFull(a,key))}</span> والكشف <span class="n">${fmt(e.amt)}</span>، والفرق <span class="n">${fmt(Math.abs(d))}</span></span></span>
+        <div class="side"><button class="chip sm" onclick="app.stmtSeen('${e.id}')">تمام</button></div></div>`);
+      return;}
+    rows.push(`<div class="alert">${RAIL(2,sd)}<span class="g"><span class="t">نزل كشف ${esc(a.name)}</span>
+      <span class="s" style="display:block">${mLabel(key)} · السداد قبل ${dLabel(due)} · البرنامج حاسب <span class="n">${fmt(calc)}</span></span></span>
+      <div class="side"><button class="chip sm" onclick="app.stmtOpen('${a.id}')">${stmtFor===a.id?'إخفاء':'اكتبه'}</button></div></div>
+      ${stmtFor!==a.id?'':`<div class="inline">
+        <label class="f">مبلغ الكشف</label><input class="f" id="stin${a.id}" type="text" inputmode="decimal" oninput="numFix(this,1)">
+        <label class="f">الحد الأدنى للسداد (اختياري)</label><input class="f" id="stmin${a.id}" type="text" inputmode="decimal" oninput="numFix(this,1)">
+        <div class="hint">أو الصق رسالة الكشف من «الصق رسالة البنك» وهيتقرا لوحده.</div>
+        <button class="btn" onclick="app.stmtSave('${a.id}','${key}')">احفظ</button></div>`}`);
+  });
   /* مرتجع محجوز: مستني يوصل */
-  if(book==='me')D.txns.filter(t=>t.refWait).forEach(t=>{
+  if(book==='me')D.txns.filter(t=>t.refWait&&!t.refFee).forEach(t=>{
     const w=Math.max(0,-daysTo(t.date));
+    const fb=D.txns.filter(x=>x.refFee===t.id&&x.refWait).reduce((a,x)=>a-Number(x.amount),0);
     rows.push(`
     <div class="alert">
       ${RAIL(4,t.date)}
       <span class="g"><span class="t">${esc(String(t.note||'مرتجع'))}</span>
-        <span class="s" style="display:block">مرتجع محجوز · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}</span></span>
-      <div class="side"><span class="vl" style="white-space:nowrap;color:var(--mint)">${money(-Number(t.amount),'EGP')}</span>
+        <span class="s" style="display:block">مرتجع محجوز · ${w===0?'من النهارده':'بقاله '+w+' يوم'} · ${esc(accName(t.account))}${fb>0.004?' · منه تدبير <span class="n">'+fmt(fb)+'</span>':''}</span></span>
+      <div class="side"><span class="vl" style="white-space:nowrap;color:var(--mint)">${money(-Number(t.amount)+fb,'EGP')}</span>
       <button class="chip sm" onclick="${t.usdRef?`app.startRefArr('${t.id}')`:`app.refArrived('${t.id}')`}">${t.usdRef&&refArrFor===t.id?'إخفاء':'وصل'}</button></div>
     </div>
     ${(t.usdRef&&refArrFor===t.id)?`<div class="inline">
@@ -4087,7 +4237,7 @@ function txnRow(t,noDate){
       return eTxn&&eTxn.id===t.id?txnEditForm(t):icq+`<div class="chips" style="margin-top:10px">
         <button class="chip sm" onclick="app.startTxnEdit(event,'${t.id}')">عدّل</button>
         ${(t.book!=='office'&&t.kind==='expense'&&!t.refundDone)?`<button class="chip sm${t.refundSince?' on':''}" onclick="app.toggleRefundWait(event,'${t.id}')">${t.refundSince?'مش مستني مرتجع':'مستني مرتجع'}</button>`:''}
-        <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('txn'+t.id,`app.delTxn(event,'${t.id}')`,(txnGroup(t).length>1||D.txns.some(x=>x.retOf===t.id||x.itemOf===t.id||x.refFx===t.id||(t.insBuy&&x.insId===t.insBuy)))?'امسح العملية كلها':'امسح')}</span>
+        <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('txn'+t.id,`app.delTxn(event,'${t.id}')`,(txnGroup(t).length>1||D.txns.some(x=>x.retOf===t.id||x.itemOf===t.id||x.refFx===t.id||x.refFee===t.id||(t.insBuy&&x.insId===t.insBuy)))?'امسح العملية كلها':'امسح')}</span>
       </div>`;})()}
   </div>`:''}`;
 }
@@ -5125,6 +5275,9 @@ function wClose(){
 
     ${repLines(r)}
 
+    <label class="f">التقرير</label>
+    ${pickRow('repshort',[{id:'full',label:'مفصّل'},{id:'short',label:'مختصر'}],repShort?'short':'full','app.setRepShort')}
+    <div class="hint" style="margin-top:0">${repShort?'المختصر: الرصيد بتفاصيله، والمنصرف إجماليه بس، والنتيجة.':'المفصّل: كل بنود المنصرف بملاحظاتها.'}</div>
     <button class="btn" onclick="app.shareReport()">ابعت كصورة</button>
     <button class="btn ghost" onclick="app.printReport()">طبع أو احفظ PDF</button>
 
@@ -5146,6 +5299,7 @@ function wClose(){
         ${viewClose===c.id?`<div style="padding:4px 14px 14px;border-bottom:1px solid var(--line)">
           ${repLines(officeReport(c.from,c.to))}
           ${c.settled&&c.out?`<div class="hint">${closeOutLine(c)}</div>`:''}
+          ${pickRow('repshort'+c.id,[{id:'full',label:'مفصّل'},{id:'short',label:'مختصر'}],repShort?'short':'full','app.setRepShort')}
           <div class="chips" style="margin-top:12px">
             <button class="chip sm" onclick="app.shareReport('${c.from}','${c.to}')">ابعت كصورة</button>
             <button class="chip sm" onclick="app.printOld('${c.from}','${c.to}')">طبع</button>
@@ -5226,7 +5380,7 @@ function printHTML(r){
   <div class="tot"><span>${fmt(r.opening+r.floatsTotal)}</span><span>إجمالي الرصيد</span></div>
 
   <h2 class="out">المنصرف</h2>
-  ${groupedItems(r).map(g=>`
+  ${(repShort?[]:groupedItems(r)).map(g=>`
     <div class="catline">${esc(ocatOf(g.ocat).label)}</div>
     ${g.items.map(i=>`<div class="l"><span>${fmt(i.sum)}</span><span>${esc(i.item)}${i.n>1?' <span dir="ltr">×'+i.n+'</span>':''}${repNotes(i).length?'<small style="display:block">'+repNotes(i).map(esc).join(' · ')+'</small>':''}</span></div>`).join('')}
     <div class="l catsum"><span>${fmt(g.sum)}</span><span>مجموع ${esc(ocatOf(g.ocat).label)}</span></div>
@@ -6527,8 +6681,8 @@ function vSettings(){
   </div>`;
 }
 /* رقم الإصدار بيزيد مع كل رفع، ومعاه سطر بالتغيير — عشان تعرف أنهي نسخة على موبايلك */
-const APP_VER='4.0';
-const APP_NOTE='فاوتشر لحد تاني، مرتجع محجوز، وتصليحات الربط والأرقام';
+const APP_VER='4.1';
+const APP_NOTE='تقدر تصرف لحد المرتب، كشف الكارت، التدبير الراجع، والتقرير المختصر';
 
 
 /* ==========================================================================
@@ -6678,7 +6832,7 @@ function undoRecord(k,pre,ui){
   const txChanged=!jeq(a.txns,b.txns);
   /* تغيير في اشتراك أو حساب أو شهادة... من غير رسالة: برضو بيتسجل، عشان زرار التراجع
      مايفضلش شايل عملية قديمة ويرجّعها بعد حاجة اتعملت بعدها */
-  const UNDO_COLS=['subs','certs','installments','owed','accounts','vouchers','vehicles','gams','closings','floatLoans','ofees','cats','icats','ocats','arrPend'];
+  const UNDO_COLS=['cardStmts','subs','certs','installments','owed','accounts','vouchers','vehicles','gams','closings','floatLoans','ofees','cats','icats','ocats','arrPend'];
   const chCol=UNDO_COLS.find(c=>!jeq(a[c],b[c]));
   if(!txChanged&&!_lastToast&&!chCol)return;
   if(!txChanged&&!_lastToast&&!_undoLbl)_undoLbl=undoColLabel(chCol,a,b);
@@ -6687,7 +6841,7 @@ function undoRecord(k,pre,ui){
   showUndoToast();
   if(tab==='log')bgRender();
 }
-const UNDO_COL_NM={subs:'اشتراك',certs:'شهادة',installments:'قسط',owed:'فلوس عند حد',accounts:'حساب',vouchers:'فاوتشر',
+const UNDO_COL_NM={cardStmts:'كشف',subs:'اشتراك',certs:'شهادة',installments:'قسط',owed:'فلوس عند حد',accounts:'حساب',vouchers:'فاوتشر',
   vehicles:'عربية',gams:'جمعية',closings:'تقفيل',floatLoans:'سلفة عهدة',ofees:'رسوم',cats:'تصنيف',icats:'نوع دخل',ocats:'تصنيف مكتب',arrPend:'مصاريف تدبير'};
 function undoColLabel(c,a,b){
   const n=UNDO_COL_NM[c]||'';const la=(a[c]||[]).length,lb=(b[c]||[]).length;
@@ -6716,7 +6870,7 @@ function undoLabel(a,b){
    التعديل بيفتح نفس الشاشة بنفس الخانات، والحفظ بيشيل السطور القديمة ويعمل الجديدة،
    فالدفترين مايختلفوش أبدًا. المسح بيمسح العملية كلها. */
 /* الحركات القديمة (قبل العمليات): لو بسيطة من شاشة التسجيل بنبني خاناتها منها عشان تتعدل بنفس الشاشة */
-const OP_SPECIAL=['refWait','retOf','itemOf','refFx','refOn','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
+const OP_SPECIAL=['refWait','retOf','itemOf','refFx','refOn','refFee','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
   'flIn','flOut','flBack','ocard','omine','debt','debtPay','paidBy','saveInt','link','items','usd','swap','toAmt','fxGain','repay','pending','hold','stampFee','fromOffice','fromSms','needs','egp','egpv','returned','closeSet'];
 function legacyOk(t){
   if(!t||t.op||(t.book||'me')!=='me')return false;
@@ -7276,6 +7430,7 @@ const app=new Proxy({
     closeMode='carry';closeAcct='';closeTo=today();closeFee=undefined;closeFeeAmt='';
     save();render();window.scrollTo(0,0);
   },
+  setRepShort(v){repShort=v==='short';render();},
   printReport(){
     const r=officeReport(periodFrom(),closeTo);
     const el=document.getElementById('printarea');
@@ -7440,6 +7595,7 @@ const app=new Proxy({
       item:(t.book==='office')?normItem(it.name||'مرتجع'):undefined,
       account:acct,date:retDate,note:'مرتجع — '+(it.name||t.merchant||''),
       place:t.merchant||t.place||undefined,retOf:t.id,retIx:ix,retName:it.name,refWait:(t.book==='office')?undefined:true});
+    if(t.book!=='office'&&acct===t.account&&isCreditAcc(acct)&&txnHasArr(t))addFeeBack(D.txns[0],it.name||t.merchant||'');
     retFor=null;retAcct='';sortTxns();save();render();app.toast('رجعت');
   },
   eItemOffice(id,ix){
@@ -7583,7 +7739,8 @@ const app=new Proxy({
       keep.forEach(o=>{delete o.op;D.owed.push(o);});}
     else ids=t.link?D.txns.filter(x=>x.link===t.link).map(x=>x.id):[id];
     /* الفاتورة اتمسحت: مرتجعات أصنافها والأصناف اللي اتحولت للمكتب منها بيتمسحوا معاها */
-    D.txns.forEach(x=>{if((x.retOf&&ids.indexOf(x.retOf)>-1)||(x.itemOf&&ids.indexOf(x.itemOf)>-1)||(x.refFx&&ids.indexOf(x.refFx)>-1)){if(ids.indexOf(x.id)<0)ids.push(x.id);}});
+    for(let n0=-1,g=0;n0!==ids.length&&g<6;g++){n0=ids.length;
+    D.txns.forEach(x=>{if((x.retOf&&ids.indexOf(x.retOf)>-1)||(x.itemOf&&ids.indexOf(x.itemOf)>-1)||(x.refFx&&ids.indexOf(x.refFx)>-1)||(x.refFee&&ids.indexOf(x.refFee)>-1)){if(ids.indexOf(x.id)<0)ids.push(x.id);}});}
     if(D.lastClose&&D.txns.some(x=>ids.indexOf(x.id)>-1&&(x.closeSet||(x.book==='office'&&x.date<=D.lastClose)))){app.toast('اتراجع عن التقفيل الأول');return;}
     /* شراية بالتقسيط على الكارت: القسط وفوايده بيتمسحوا معاها (عملية واحدة) */
     {const buys=D.txns.filter(x=>ids.indexOf(x.id)>-1&&x.insBuy).map(x=>x.insBuy);
@@ -7975,6 +8132,7 @@ const app=new Proxy({
         fxDiff:true,note:'فرق سعر صرف — '+String(t.note||'').replace(/^مرتجع — /,''),refFx:t.id});}
     /* بيدخل الرصيد والكشف من يوم وصوله، وفي أرقام الشهر بيفضل بتاريخ تسجيله */
     delete t.refWait;delete t.usdRef;if(t.date<today()){t.refOn=t.date;t.date=today();}
+    D.txns.forEach(x=>{if(x.refFee===t.id&&x.refWait){delete x.refWait;if(x.date<today()){x.refOn=x.date;x.date=today();}}});
     refArrFor=null;sortTxns();save();render();app.toast('وصل');
   },
   cancelRefundBack(){rbackFor=null;render();},
@@ -7984,8 +8142,10 @@ const app=new Proxy({
     const lbl=String(t.note||t.merchant||catOf(t.cat).label||'مرتجع').trim();
     /* زي إرجاع الصنف واسترداد الترقية: مصروف بالسالب في نفس التصنيف، مش دخل.
        المرتجع بيرجع محجوز الأول: بيستنى «وصل» (ولو بالدولار ساعتها بيتكتب اللي وصل بالجنيه) */
-    D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-base,account:t.account,
-      cat:refundCat(t),date:today(),note:'مرتجع — '+lbl,refundOf:t.id,refWait:true,usdRef:t.usd?true:undefined});
+    const rf={id:uid(),book:'me',kind:'expense',amount:-base,account:t.account,
+      cat:refundCat(t),date:today(),note:'مرتجع — '+lbl,refundOf:t.id,refWait:true,usdRef:t.usd?true:undefined};
+    D.txns.unshift(rf);
+    if(!t.usd&&isCreditAcc(rf.account)&&txnHasArr(t))addFeeBack(rf,lbl);
     t.refundDone=true;delete t.refundSince;
     rbackFor=null;sortTxns();save();render();
   },
@@ -8128,6 +8288,14 @@ const app=new Proxy({
       const num=v=>Number(onlyNum(String(v==null?'':v)))||0;
       const all=r.ops||[];
       const ops=all.filter(o=>num(o.amount)>0);
+      /* رسالة كشف الكارت: مبلغه والحد الأدنى بيتحفظوا على كشف الشهر بتاعه */
+      let stN=0;
+      (r.stmts||[]).forEach(x=>{const a=D.accounts.find(y=>y.id===x.account&&y.credit);
+        if(!a||!/^\d{4}-\d{2}-\d{2}$/.test(x.due||'')||x.amount===''||x.amount==null||isNaN(Number(onlyNum(String(x.amount)))))return;
+        const key=mAdd(monthOf(x.due),-1);
+        stmtPut(a.id,key,Math.round(num(x.amount)*100)/100,Math.round(num(x.min)*100)/100,x.due);stN++;});
+      if(!ops.length&&stN){sms={busy:false,err:''};save();render();window.scrollTo(0,0);app.toast('اتسجل الكشف');return;}
+      const stMsg=stN?' واتسجل الكشف':'';
       if(!ops.length)throw new Error('مالقتش عمليات في الرسالة.');
       let n=0,upd=0,dup=0;
       /* الحركات اللي اتسجلت من نفس اللزقة مش بتتحسب تكرار (ممكن تسحب ٥٠٠ مرتين في نفس اليوم) */
@@ -8172,7 +8340,7 @@ const app=new Proxy({
       sms={busy:false,err:''};
       if(skipped>0)sms.err='فيه '+skipped+' عملية في الرسالة مقدرتش أقرا مبلغها — سجلها بإيدك.';
       sortTxns();save();render();window.scrollTo(0,0);
-      app.toast(n>0?('اتسجل '+n+(n===1?' عملية':' عمليات')+(upd?' واتظبط '+upd:'')+(dup?' — '+dup+' كانت متسجلة قبل كده':''))
+      app.toast(n>0?('اتسجل '+n+(n===1?' عملية':' عمليات')+(upd?' واتظبط '+upd:'')+(dup?' — '+dup+' كانت متسجلة قبل كده':'')+stMsg)
         :upd?'اتظبط المحجوز':'الرسالة دي متسجلة قبل كده');
     }catch(e){
       sms.busy=false;
@@ -8505,6 +8673,15 @@ const app=new Proxy({
   noInstall(){try{localStorage.setItem('masareef:noinstall',today());}catch(e){}render();},
   sumHide(k){D.sumSeen=k;sumNew=false;save();render();},
   sumToggle(){sumOpen=!sumOpen;render();},
+  spendToggle(){spendOpen=!spendOpen;render();},
+  stmtOpen(id){stmtFor=stmtFor===id?null:id;render();},
+  stmtSeen(id){const e=(D.cardStmts||[]).find(x=>x.id===id);if(e){e.seen=true;_undoLbl='خبّيت فرق الكشف';save();render();app.toast('اتخبى');}},
+  /* كشف الكارت: المبلغ والحد الأدنى زي ما في رسالة البنك */
+  stmtSave(acc,key){
+    const amt=numVal('stin'+acc), mn=numVal('stmin'+acc);
+    if(!(amt>=0)||document.getElementById('stin'+acc).value.trim()==='')return;
+    const a=D.accounts.find(x=>x.id===acc);if(!a)return;
+    stmtPut(acc,key,amt,mn>0?mn:0,stmtDue(key,a));stmtFor=null;_undoLbl='سجلت كشف '+a.name;save();render();app.toast('اتسجل');},
   sumNewToggle(){sumNew=!sumNew;render();},
   async shareReport(from,to){shareCanvas(await reportCanvas(officeReport(from||periodFrom(),to||closeTo)),'masareef-report.png','تقرير عهدة '+bookName());},
   welAdd(kind){
@@ -8927,8 +9104,9 @@ const app=new Proxy({
     if(newAmt<=0){upFor=null;render();return;}
     const hold=s.cur==='USD'?holdFromBal(subAcc(s),upBal,0):0;upBal='';
     const cat=s.cat||'subs';
-    if(refund>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
+    if(refund>0){D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:-refund,cat:cat,account:acct,
       date:d,note:'استرداد ترقية — '+s.name,refWait:true,usdRef:s.cur==='USD'?true:undefined});
+      if(s.cur!=='USD'&&subArrOn(s)&&acct===subAcc(s)&&isCreditAcc(acct))addFeeBack(D.txns[0],s.name);}
     const usd=s.cur==='USD';
     const full=usd?(hold>0?hold:Math.round(newAmt*D.rate*100)/100):newAmt;
     const t={id:uid(),book:'me',kind:'expense',amount:full,cat:cat,account:subAcc(s),date:d,
