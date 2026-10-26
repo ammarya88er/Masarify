@@ -23,7 +23,7 @@ const sal={id:'s',book:'me',kind:'income',amount:10000,account:'cib',date:'2026-
   t('وفي «بعد اشتراكات الكارت»', c.C.some(i=>/كارتي/.test(i.label))&&c.c===c.x-103, JSON.stringify(c.C));
   t('الرقم الأولاني', c.x===liquid-300-50, c.x+' '+liquid);
   t('«بعد كل اللي عليك» فيه الكارت وفلوس الناس كمان', Math.abs(c.y-(c.c-2000-700))<0.01, c.y);
-  t('«ولو رجعلك اللي ليك» على الرقم الأولاني', c.z===c.x+400);
+  t('«ولو رجعلك اللي ليك» على «بعد كل اللي عليك»', Math.abs(c.z-(c.y+400))<0.01, c.z);
   // المرتب اتأخر
   const r=boot(Object.assign(seed({txns:[Object.assign({},sal,{date:'2026-09-20'})]})),NOW);
   t('المرتب عدّى ميعاده: الحسبة لحد النهارده', JSON.parse(r.run("JSON.stringify(spendCalc())")).late===true);
