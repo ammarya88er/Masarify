@@ -118,11 +118,10 @@ const offLines=(run,sid)=>JSON.parse(run("JSON.stringify(D.txns.filter(x=>x.book
   const S=seed({txns:[{id:'s',book:'me',kind:'income',amount:10000,account:'cib',date:'2026-10-25',salary:true}],
     subs:[sub({next:'2026-11-05'})]});
   const {run,V}=boot(S,NOW);run("app.go('home');");
-  t('اشتراك الكارت: «بعد اشتراكات الكارت» ظاهر', V().indexOf('بعد اشتراكات الكارت')>-1);
-  t('مفيش عليك حاجة تانية: «بعد كل اللي عليك» مش ظاهر', V().indexOf('بعد كل اللي عليك')<0);
+  t('اشتراك الكارت لوحده: «بعد كل اللي عليك» ظاهر (سطر واحد)', V().indexOf('بعد كل اللي عليك')>-1&&V().indexOf('بعد اشتراكات الكارت')<0);
   t('مفيش ليك عند حد: «ولو رجعلك» مش ظاهر', V().indexOf('ولو رجعلك اللي ليك')<0);
   const c=JSON.parse(run("JSON.stringify(spendCalc())"));
-  t('ممكن يبقى بالسالب', c.c===r2(c.x-999-arrEstOf(999)), c.c);
+  t('ممكن يبقى بالسالب', c.y===r2(c.x-999-arrEstOf(999)), c.y);
   function arrEstOf(v){return r2(v*0.03);}
 }
 done();
