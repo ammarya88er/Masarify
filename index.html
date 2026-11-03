@@ -145,6 +145,8 @@ input[type=time].f::-webkit-datetime-edit{padding:0;line-height:1;}
 :where(.chips,.drow){margin-top:12px;}
 :where(.chips,.drow):first-child,label.f+.chips,label.f+.drow,.sec-h+.chips{margin-top:0;}
 .chips+.chips{margin-top:8px;}
+/* أي حاجة (كارت، أرقام، عنوان) جاية بعد زرار كبير على طول ليها مسافة فوقها، عشان ماتلزقش فيه */
+.btn+:not(.btn):not(button):not(.hint):not(input):not(label){margin-top:22px;}
 .chip{border:1px solid var(--line);background:var(--surf);color:var(--tx2);border-radius:12px;
   padding:8px 12px;font:inherit;font-size:12.5px;cursor:pointer;transition:.15s;}
 .chip.on{background:var(--accent);color:var(--on);border-color:var(--accent);font-weight:600;}
