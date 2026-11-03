@@ -3701,6 +3701,8 @@ function spendCalc(){
   (D.accounts||[]).filter(a=>!a.closed).forEach(a=>(a.fees||[]).forEach(f=>{
     const L0=where(a.id);if(!L0)return;
     let d=f.next,g=0;while(d&&d<=target&&g++<24){add(L0,f.name+' — '+a.name,Number(f.amount)||0,d);d=feeNext({cycle:f.cycle,day:f.day,next:d});}}));
+  /* باقات الرصيد: الشحن اللي محتاجه للتجديدات لحد المرتب (بيتحسب على الرقم الأولاني لأن الحساب مش ثابت) */
+  (D.lines||[]).forEach(l=>{const n=lineNeed(l,target);if(n.pay>0)add(X,'شحن رصيد '+l.name+' (تقريبًا)',n.pay,l.next<td?td:l.next);});
   /* مصاريف تدبير مستنية تأكيدك: البنك هيخصمها قريب */
   (D.arrPend||[]).forEach(e=>{const L0=where(e.acct)||(isCard(e.acct)?C:null);if(L0)add(L0,'تدبير مستني — '+(e.note||accName(e.acct)),Number(e.amount)||0,'');});
   (D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{if(!p.feePending||!(Number(p.fee)>0))return;
@@ -3871,6 +3873,7 @@ function alertsPanel(){
         <span class="s" style="display:block">${plural(n,'اقتراح واحد','اقتراحين','اقتراحات','اقتراح')} توحّدهم</span></span>
       <div class="side"><button class="chip sm" onclick="app.goNames()">راجعها</button></div>
     </div>`);}
+  if(book==='me')lineAlerts(rows);
   /* تذكير التبرع: بعد ما تسجل المرتب ولحد ما تسجل مصروف على «تبرعات» (أو تدوس «فوّت») — برّه «تقدر تصرف» */
   if(book==='me'&&donDue()){const L=salaryDatesAll().slice(-1)[0];rows.push(`<div class="alert">
       ${RAIL(3,L)}
@@ -5939,6 +5942,137 @@ function vchPicker(selId,total,fnPick){
     ${v?`<div class="hint">هيتخصم من حسابك <span class="n">${fmt(Math.max(0,total-Number(v.amount)))}</span> جنيه بس.</div>`:''}`;
 }
 
+/* ==========================================================================
+   باقات بالرصيد (زي باقة الراوتر وفليكس): كل خط ليه رصيد لوحده، وباقة بسعر ثابت بالرصيد ومدة.
+   - «شحنت»: فلوس طلعت من حساب (مصروف «فواتير» عليه line) وبتكتب رصيدك بقى كام.
+   - «اتجددت»: الباقة خدت من الرصيد — مفيش مصروف تاني (الفلوس اتسجلت وقت الشحن) — وبتكتب رصيدك بقى كام.
+   الرصيد = آخر رقم كتبته (شحن أو تجديد أو ظبط) — كده الرسوم والدمغة بتتظبط لوحدها.
+   نسبة الشحن (D.lineRate: بتدفع كام عشان ياخد 100) والتقريب (D.lineStep) من الإعدادات.
+   ========================================================================== */
+const lineRate=()=>(Number(D.lineRate)||143)/100;
+const lineStep=()=>Number(D.lineStep)||10;
+const lineAhead=()=>Number(D.lineAhead)||3;
+/* سجل الرصيد: آخر رقم مكتوب (شحنة اتمسحت حركتها مالهاش لازمة) */
+function lineBal(l){
+  const has={};D.txns.forEach(t=>{if(t.line===l.id)has[t.id]=1;});
+  const L=(l.log||[]).filter(e=>!e.tx||has[e.tx]);
+  return L.length?Number(L[L.length-1].bal)||0:0;
+}
+/* اللي محتاج تدفعه لحد يوم معين (التجديدات لحد اليوم ده ناقص الرصيد) × النسبة، متقرّب لفوق */
+function lineNeed(l,upTo){
+  let d=l.next,k=0,g=0;const per=Number(l.period)||30;
+  while(d&&d<=upTo&&g++<12){k++;d=dayShift(d,per);}
+  const short=k*(Number(l.price)||0)-lineBal(l);
+  if(!(k>0)||short<=0.004)return {k,pay:0};
+  const st=lineStep();return {k,pay:Math.ceil(r2s(short*lineRate())/st)*st};
+}
+/* الشحن اللي محتاجه للتجديد الجاي بس (للتنبيهات والكارت) */
+const lineNextPay=l=>lineNeed(l,l.next).pay;
+let lineFor=null, lineMode='', lineDraft={};
+function lineCard(l){
+  const b=lineBal(l), pay=lineNextPay(l), dn=daysTo(l.next), open=lineFor===l.id;
+  const f=(fld,lbl,v,inp)=>`<label class="f">${lbl}</label><input class="f" type="text" inputmode="${inp||'decimal'}" value="${esc(v)}" oninput="app.lineSet('${fld}',numFix(this,${inp==='numeric'?0:1}))">`;
+  return `<div class="panel" id="line-${l.id}" style="padding:15px 16px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+      <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(l.name)}</span>
+      <span style="font-size:14px;white-space:nowrap">باقة <span class="n">${fmt(l.price)}</span> رصيد</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.8">
+      الرصيد <span class="n">${fmt(b)}</span> · ${pay>0?'محتاج تشحن تقريبًا <span class="n">'+fmt(pay)+'</span>':'الرصيد مكفّي التجديد'}<br>
+      التجديد الجاي ${dayLabel(l.next)} · ${dn<=0?'<b style="color:var(--clay);font-weight:500">'+(dn===0?'النهارده':'عدّى ميعاده')+'</b>':whenLabel(l.next)}</div>
+    <div class="chips" style="margin-top:12px">
+      <button class="chip sm${open&&lineMode==='charge'?' on':''}" onclick="app.lineOpen('${l.id}','charge')">شحنت</button>
+      <button class="chip sm${open&&lineMode==='renew'?' on':''}" onclick="app.lineOpen('${l.id}','renew')">${dn<=0?'اتجددت':'جددت بدري'}</button>
+      <button class="chip sm${open&&(lineMode==='more'||lineMode==='set'||lineMode==='edit')?' on':''}" aria-label="باقي الاختيارات" onclick="app.lineOpen('${l.id}','more')">⋯</button>
+      ${open&&lineMode==='more'?`<button class="chip sm" onclick="app.lineOpen('${l.id}','set')">ظبّط الرصيد</button>
+        <button class="chip sm" onclick="app.lineOpen('${l.id}','edit')">عدّل</button>
+        <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('line'+l.id,`app.lineDel('${l.id}')`)}</span>`:''}
+    </div>
+    ${open&&lineMode==='charge'?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      ${f('paid','دفعت كام؟',lineDraft.paid||'')}
+      <label class="f">من أنهي حساب؟ <b>*</b></label>
+      ${payChips(lineDraft.acct,'app.lineAcct','','me','lacct')}
+      <label class="f">إمتى؟</label>
+      ${dateField(lineDraft.date,'app.lineDate')}
+      <label class="f">رصيدك بقى كام؟</label>
+      <input class="f" id="linebal" type="text" inputmode="decimal" placeholder="${esc(n2(lineChargeEst(l)))}" value="${esc(lineDraft.bal||'')}" oninput="app.lineSet('bal',numFix(this,1))">
+      <div class="hint">سيبها فاضية ونحسبها تقدير (<span id="lineest">${fmt(lineChargeEst(l))}</span>)، أو اكتب الرقم اللي في رسالة فودافون.</div>
+      <button class="btn" id="linesave" ${lineOk()?'':'disabled'} onclick="app.lineCharge('${l.id}')">احفظ</button>
+      <button class="btn ghost" onclick="app.lineOpen('','')">إلغاء</button></div>`:''}
+    ${open&&lineMode==='renew'?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <label class="f">اتجددت إمتى؟</label>
+      ${dateField(lineDraft.date,'app.lineDate')}
+      <label class="f">التجديد الجاي</label>
+      <input class="f" type="date" value="${esc(lineDraft.next||'')}" onchange="app.lineSet('next',this.value,1)">
+      <div class="hint">محسوب بعد ${plural(Number(l.period)||30,'يوم','يومين','أيام','يوم')} — غيّره لو «أنا فودافون» قال غير كده.</div>
+      <label class="f">رصيدك بقى كام؟</label>
+      <input class="f" type="text" inputmode="decimal" placeholder="${esc(n2(Math.max(0,r2s(b-(Number(l.price)||0)))))}" value="${esc(lineDraft.bal||'')}" oninput="app.lineSet('bal',numFix(this,1))">
+      <div class="hint">${b<(Number(l.price)||0)-0.004?'الرصيد اللي متسجل أقل من سعر الباقة — لو شحنت قبلها سجّل الشحنة الأول، أو اكتب رصيدك هنا.':'سيبها فاضية ونخصم سعر الباقة (<span class="n">'+fmt(r2s(b-(Number(l.price)||0)))+'</span>).'}</div>
+      <button class="btn" id="linesave" ${lineOk()?'':'disabled'} onclick="app.lineRenew('${l.id}')">تمام</button>
+      <button class="btn ghost" onclick="app.lineOpen('','')">إلغاء</button></div>`:''}
+    ${open&&lineMode==='set'?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      ${f('bal','الرصيد دلوقتي كام؟',lineDraft.bal||'')}
+      <div class="hint">من «أنا فودافون». مش بيتسجل مصروف — بيظبط الرصيد بس.</div>
+      <button class="btn" id="linesave" ${lineOk()?'':'disabled'} onclick="app.lineSetBal('${l.id}')">احفظ</button>
+      <button class="btn ghost" onclick="app.lineOpen('','')">إلغاء</button></div>`:''}
+    ${open&&lineMode==='edit'?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <label class="f">الاسم</label><input class="f" value="${esc(lineDraft.name||'')}" oninput="app.lineSet('name',this.value)">
+      ${f('price','سعر الباقة بالرصيد',lineDraft.price||'')}
+      ${f('period','المدة كام يوم؟',lineDraft.period||'','numeric')}
+      <label class="f">التجديد الجاي</label>
+      <input class="f" type="date" value="${esc(lineDraft.next||'')}" onchange="app.lineSet('next',this.value,1)">
+      <button class="btn" id="linesave" ${lineOk()?'':'disabled'} onclick="app.lineEdit('${l.id}')">احفظ التعديل</button>
+      <button class="btn ghost" onclick="app.lineOpen('','')">إلغاء</button></div>`:''}
+  </div>`;
+}
+/* تقدير رصيدك بعد الشحن: الرصيد + المدفوع ÷ النسبة */
+const lineChargeEst=l=>r2s(lineBal(l)+(Number(onlyNum(lineDraft.paid||''))||0)/lineRate());
+function lineOk(){
+  const n=k=>Number(onlyNum(lineDraft[k]||''));
+  if(lineMode==='charge')return n('paid')>0&&!!lineDraft.acct&&!!lineDraft.date;
+  if(lineMode==='renew')return !!lineDraft.date&&!!lineDraft.next&&lineDraft.next>lineDraft.date;
+  if(lineMode==='set')return String(lineDraft.bal||'').trim()!==''&&n('bal')>=0;
+  if(lineMode==='edit')return !!String(lineDraft.name||'').trim()&&n('price')>0&&n('period')>0&&!!lineDraft.next;
+  return false;
+}
+/* الإضافة من «ضيف اشتراك» ← النوع «باقة برصيد» */
+function lineAddHtml(){
+  const d=subDraft, f=(fld,lbl,inp)=>`<label class="f">${lbl} <b>*</b></label><input class="f" type="text" inputmode="${inp||'decimal'}" value="${esc(d[fld]||'')}" oninput="app.subSet('${fld}',numFix(this,${inp==='numeric'?0:1}))">`;
+  return `${f('lprice','سعر الباقة بالرصيد')}
+    ${f('lperiod','المدة كام يوم؟','numeric')}
+    ${f('lbal','الرصيد دلوقتي كام؟')}
+    <label class="f">التجديد الجاي إمتى؟ <b>*</b></label>
+    <input class="f" type="date" value="${esc(d.lnext||'')}" onchange="app.subPick('lnext',this.value)">
+    <div class="hint">الشحن بيتسجل مصروف «فواتير» يوم ما تدفع، والتجديد بياخد من الرصيد بس. النسبة (${fmt(Number(D.lineRate)||143)} لكل 100) من الإعدادات.</div>
+    <button class="btn" id="subsave" ${lineAddOk()?'':'disabled'} onclick="app.lineAdd()">احفظ</button>`;
+}
+const lineAddOk=()=>{const d=subDraft,n=k=>Number(onlyNum(d[k]||''));
+  return !!String(d.name||'').trim()&&n('lprice')>0&&n('lperiod')>0&&String(d.lbal||'').trim()!==''&&!!d.lnext;};
+/* التنبيهات: بعد المرتب «اشحن رصيد» (لحد ما يكفي أو «فكّرني قبلها»)، وقبل الميعاد بكام يوم، ويوم الميعاد «اتجددت؟» */
+function lineAlerts(rows){
+  const L=D.lines||[];if(!L.length)return;
+  const sal=salaryDatesAll().slice(-1)[0], td=today();
+  const due=L.filter(l=>daysTo(l.next)<=0&&l.wait!==td);
+  const soon=L.filter(l=>{const dn=daysTo(l.next);return dn>0&&dn<=lineAhead()&&lineNextPay(l)>0;});
+  const afterSal=sal?L.filter(l=>daysTo(l.next)>lineAhead()&&lineNextPay(l)>0&&l.snooze!==sal&&(l.since||'')<=sal):[];
+  const btn=(l,m,t,on)=>`<button class="chip sm${on?' on':''}" onclick="app.lineGo('${l.id}','${m}')">${t}</button>`;
+  /* نفس اليوم = تنبيه واحد */
+  const byDay=a=>{const g={};a.forEach(l=>{(g[l.next]=g[l.next]||[]).push(l);});return Object.values(g);};
+  byDay(due).forEach(G=>rows.push(`<div class="alert">${RAIL(2,G[0].next)}
+    <span class="g"><span class="t">${G.length>1?'الباقات':'باقة '+esc(G[0].name)} اتجددت؟</span>
+      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(l.name)+': ':'')+'الرصيد <span class="n">'+fmt(lineBal(l))+'</span> · الباقة <span class="n">'+fmt(l.price)+'</span>').join('<br>')}</span></span>
+    <div class="side">${G.map(l=>btn(l,'renew',G.length>1?'اتجددت '+esc(l.name):'اتجددت',1)).join('')}
+      <button class="chip sm" onclick="app.lineWait('${G.map(l=>l.id).join(',')}')">لسه</button></div></div>`));
+  byDay(soon).forEach(G=>rows.push(`<div class="alert">${RAIL(3,G[0].next)}
+    <span class="g"><span class="t">${G.map(l=>esc(l.name)).join(' و')} ${G.length>1?'بيتجددوا':'بيتجدد'} ${whenLabel(G[0].next)}</span>
+      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(l.name)+': ':'')+'محتاج تشحن تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span>').join('<br>')}</span></span>
+    <div class="side">${G.map(l=>btn(l,'charge',G.length>1?'شحنت '+esc(l.name):'شحنت',1)).join('')}${G.map(l=>btn(l,'renew',G.length>1?'خلصت بدري — '+esc(l.name):'خلصت بدري')).join('')}</div></div>`));
+  if(afterSal.length)rows.push(`<div class="alert">${RAIL(3,sal)}
+    <span class="g"><span class="t">اشحن رصيد</span>
+      <span class="s" style="display:block">${afterSal.map(l=>esc(l.name)+' تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span> · بيتجدد '+dayLabel(l.next)).join('<br>')}</span></span>
+    <div class="side">${afterSal.map(l=>btn(l,'charge',afterSal.length>1?'شحنت '+esc(l.name):'شحنت',1)).join('')}
+      <button class="chip sm" onclick="app.lineSnooze('${afterSal.map(l=>l.id).join(',')}')">فكّرني قبلها</button></div></div>`);
+}
 /* اشتراك وقفت تجديده (حتى لو مدته لسه ماخلصتش): بينزل تحت وباهت زي الفاوتشر المستخدم */
 const subStopped=s=>s.cycle!=='trial'&&!!s.cancelAtEnd;
 function subStoppedCard(s){
@@ -5989,11 +6123,12 @@ function wSubs(){
       <label class="f">اسم الاشتراك</label>
       <input class="f" value="${esc(subDraft.name)}" oninput="app.subSet('name',this.value)">
 
-      ${subOwnerFields(subDraft,'app.subPick','app.subSet','subown')}
+      ${subDraft.cycle==='line'?'':subOwnerFields(subDraft,'app.subPick','app.subSet','subown')}
 
       <label class="f">النوع</label>
-      ${pickRow('subcycle',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'},{id:'trial',label:'تجربة مجانية'}],subDraft.cycle,"((v)=>app.subPick('cycle',v))",1)}
+      ${pickRow('subcycle',[{id:'monthly',label:'شهري'},{id:'yearly',label:'سنوي'},{id:'trial',label:'تجربة مجانية'},{id:'line',label:'باقة برصيد'}],subDraft.cycle,"((v)=>app.subPick('cycle',v))",1)}
 
+      ${subDraft.cycle==='line'?lineAddHtml():`
       ${subDraft.cycle!=='trial'?`
       <label class="f">القيمة</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
@@ -6033,8 +6168,9 @@ function wSubs(){
       `:''}
 
       ${(!ok&&subDraft.name.trim()&&(subDraft.owner===undefined||(subDraft.cycle==='trial'?subDraft.willRenew===undefined:(subDraft.promo===undefined||(subDraft.owner==='me'&&subDraft.split===undefined)))))?'<div class="hint" style="text-align:center;margin:14px 0 -6px">جاوب على كل الأسئلة الأول</div>':''}
-      <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>
+      <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>`}
     `:''}
+    ${(D.lines||[]).length?`<div class="sec-h" style="margin-top:4px"><h3 style="font-size:14px">باقات بالرصيد</h3></div>${D.lines.map(lineCard).join('')}<div style="height:10px"></div>`:''}
     ${list.length?`<div class="stats" style="margin-bottom:16px">
       <div class="stat"><b>${fmt(mo)}</b><span>في الشهر</span></div>
       <div class="stat"><b>${fmt(yr)}</b><span>في السنة</span></div>
@@ -6888,6 +7024,14 @@ function vSettings(){
       </div>
     `:''}
         `)])}
+    ${(D.lines||[]).length?setCard('',[setSec('lines','باقات بالرصيد',plural(D.lines.length,'خط واحد','خطين','خطوط','خط'),()=>`
+      <label class="f" style="margin-top:0">نسبة الشحن: بتدفع كام عشان ياخد 100 رصيد؟</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(Number(D.lineRate)||143))}" onchange="app.lineCfg('lineRate',numFix(this,1))">
+      <label class="f">قرّب الشحن لأقرب كام لفوق؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineStep()))}" onchange="app.lineCfg('lineStep',numFix(this,0))">
+      <label class="f">فكّرني قبل التجديد بكام يوم؟</label>
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineAhead()))}" onchange="app.lineCfg('lineAhead',numFix(this,0))">
+      <div class="hint">النسبة بتستخدم بس في التقدير — الرصيد الحقيقي بتكتبه وقت الشحن والتجديد.</div>`)]):''}
     ${setCard('',[setSec('cutlv','الحاجات اللي عايز أقللها',lvOn()?plural(Object.keys(D.cutCat||{}).filter(k=>lvById(D.cutCat[k])).length+Object.keys(D.cutItem||{}).filter(k=>lvById(D.cutItem[k])).length,'حاجة واحدة','حاجتين','حاجات','حاجة'):'',()=>`
       <p class="hint" style="margin-top:0">حط درجة على تصنيف كامل أو على صنف لوحده (درجة الصنف تكسب). في الرئيسية هتشوف صرفت كام وكام مرة الشهر ده، وبقالك قد إيه من غيرها، وفي ملخص الشهر قصاد متوسط آخر 3 شهور. تقدر كمان تحددها من السجل بدوسة على الصنف.</p>
       <h4 style="font-size:13px;margin:16px 0 8px">الدرجات</h4>
@@ -9512,7 +9656,7 @@ const app=new Proxy({
   hideSubAlert(id){const s=D.subs.find(x=>x.id===id);if(s){s.hideUntil=s.next;save();render();}},
   goSubs(){tab='wallet';wtab='subs';render();window.scrollTo(0,0);},
   toggleSub(){showSub=!showSub;render();},
-  subSet(k,v){subDraft[k]=v;setDisabled('subsave',subOk());
+  subSet(k,v){subDraft[k]=v;setDisabled('subsave',subDraft.cycle==='line'?lineAddOk():subOk());
     setText('subshare',fmt(Math.max(0,(Number(onlyNum(subDraft.amount))||0)-subDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
   personSet(i,k,v){if(subDraft.people[i])subDraft.people[i][k]=v;
     setText('subshare',fmt(Math.max(0,(Number(onlyNum(subDraft.amount))||0)-subDraft.people.reduce((a,p)=>a+(Number(onlyNum(p.amount))||0),0))));},
@@ -9828,6 +9972,51 @@ const app=new Proxy({
     save();render();app.toast('رجعت');
   },
   cancelEnd(id){const s=D.subs.find(x=>x.id===id);if(!s)return;s.cancelAtEnd=true;save();render();},
+  lineAdd(){if(!lineAddOk())return;const d=subDraft,n=k=>Number(onlyNum(d[k]||''))||0;
+    if(!D.lines)D.lines=[];
+    D.lines.push({id:uid(),name:String(d.name).trim(),price:n('lprice'),period:n('lperiod'),next:d.lnext,since:today(),
+      log:[{t:'set',bal:n('lbal'),d:today()}]});
+    subDraft.cycle='monthly';['name','lprice','lperiod','lbal','lnext'].forEach(k=>{subDraft[k]='';});showSub=false;save();render();},
+  lineOpen(id,m){if(lineFor===id&&lineMode===m||!id){lineFor=null;lineMode='';render();return;}
+    const l=(D.lines||[]).find(x=>x.id===id);if(!l)return;lineFor=id;lineMode=m;confirmKey='';
+    const per=Number(l.period)||30;
+    lineDraft={paid:'',acct:'',date:today(),bal:'',next:dayShift(today(),per),name:l.name,price:String(l.price),period:String(per)};
+    if(m==='edit')lineDraft.next=l.next;
+    render();},
+  /* من التنبيه: يروح للخط ويفتح الخانة */
+  lineGo(id,m){tab='wallet';wtab='subs';book='me';lineFor=null;app.lineOpen(id,m);
+    setTimeout(()=>{const el=document.getElementById('line-'+id);if(el&&el.scrollIntoView)el.scrollIntoView({block:'center'});},60);},
+  lineSet(k,v,re){lineDraft[k]=v;
+    if(k==='date'&&lineMode==='renew'){const l=(D.lines||[]).find(x=>x.id===lineFor);if(l)lineDraft.next=dayShift(v,Number(l.period)||30);}
+    if(re){render();return;}
+    if(k==='paid'){const l=(D.lines||[]).find(x=>x.id===lineFor);const e=document.getElementById('lineest');if(l&&e)e.textContent=fmt(lineChargeEst(l));
+      const b=document.getElementById('linebal');if(l&&b)b.placeholder=n2(lineChargeEst(l));}
+    setDisabled('linesave',lineOk());},
+  lineAcct(id){lineDraft.acct=id;render();},
+  lineDate(v){app.lineSet('date',v,1);},
+  lineCharge(id){const l=(D.lines||[]).find(x=>x.id===id);if(!l||!lineOk())return;
+    const paid=r2s(Number(onlyNum(lineDraft.paid))||0), bal=String(lineDraft.bal||'').trim()!==''?(Number(onlyNum(lineDraft.bal))||0):lineChargeEst(l);
+    const t={id:uid(),book:'me',kind:'expense',amount:paid,cat:'bills',account:lineDraft.acct,date:lineDraft.date,note:'رصيد — '+l.name,line:l.id};
+    D.txns.unshift(t);if(!l.log)l.log=[];l.log.push({t:'charge',bal:r2s(bal),d:lineDraft.date,tx:t.id});
+    lineFor=null;lineMode='';sortTxns();save();render();app.toast('اتسجل الشحن');},
+  lineRenew(id){const l=(D.lines||[]).find(x=>x.id===id);if(!l||!lineOk())return;
+    const b=lineBal(l), bal=String(lineDraft.bal||'').trim()!==''?(Number(onlyNum(lineDraft.bal))||0):Math.max(0,r2s(b-(Number(l.price)||0)));
+    if(!l.log)l.log=[];l.log.push({t:'renew',bal:r2s(bal),d:lineDraft.date,was:l.next});
+    l.next=lineDraft.next;delete l.wait;delete l.snooze;
+    lineFor=null;lineMode='';save();render();app.toast('اتجددت');},
+  lineSetBal(id){const l=(D.lines||[]).find(x=>x.id===id);if(!l||!lineOk())return;
+    if(!l.log)l.log=[];l.log.push({t:'set',bal:r2s(Number(onlyNum(lineDraft.bal))||0),d:today()});
+    lineFor=null;lineMode='';save();render();app.toast('اتظبط');},
+  lineEdit(id){const l=(D.lines||[]).find(x=>x.id===id);if(!l||!lineOk())return;
+    l.name=String(lineDraft.name).trim();l.price=Number(onlyNum(lineDraft.price));l.period=Number(onlyNum(lineDraft.period));l.next=lineDraft.next;
+    lineFor=null;lineMode='';save();render();app.toast('اتعدل');},
+  /* مسح الخط: الشحنات اللي اتسجلت بتفضل مصاريف «فواتير» زي ما هي */
+  lineDel(id){D.lines=(D.lines||[]).filter(l=>l.id!==id);D.txns.forEach(t=>{if(t.line===id)delete t.line;});
+    lineFor=null;lineMode='';confirmKey='';save();render();},
+  lineWait(ids){String(ids).split(',').forEach(id=>{const l=(D.lines||[]).find(x=>x.id===id);if(l)l.wait=today();});save();render();},
+  lineSnooze(ids){const sal=salaryDatesAll().slice(-1)[0];if(!sal)return;
+    String(ids).split(',').forEach(id=>{const l=(D.lines||[]).find(x=>x.id===id);if(l)l.snooze=sal;});save();render();},
+  lineCfg(k,v){const n=Number(onlyNum(v));if(!(n>0))return;D[k]=n;save();},
   /* «رجّع التجديد»: الميعاد بيبدأ بالنهارده (تغيّره لو مش هو)، والمبلغ والدورة زي ما كانوا لحد ما تغيّرهم */
   resOpen(id){const s=D.subs.find(x=>x.id===id);if(!s)return;
     resFor=id;resDraft={next:today(),amount:String(Number(s.amount)||''),cycle:s.cycle==='yearly'?'yearly':'monthly'};confirmKey='';render();},
