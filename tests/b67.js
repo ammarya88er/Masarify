@@ -36,7 +36,7 @@ const {boot,seed,t,done}=require('./harness');
   t('«ضيف حساب» زرار مقفول', v.indexOf("app.toggleAddAcc()")>-1&&v.indexOf('id="newacc"')<0);
   run("app.toggleAddAcc();");
   t('بيفتح الفورم', V().indexOf('id="newacc"')>-1);
-  t('تبويبات المحفظة على سطرين و«الشهادات»', V().indexOf('class="mpills wrap"')>-1&&V().indexOf('>الشهادات<')>-1);
+  t('تبويبات المحفظة شريط واحد بيتسحب وفيه «الشهادات»', V().indexOf('class="mpills"')>-1&&V().indexOf('mpills wrap')<0&&V().indexOf('>الشهادات<')>-1);
 }
 { // الشهادات: العائد الجاي في سطر لوحده، والتعديل بنفس ترتيب الإضافة
   const c={id:'c1',name:'شهادة 1',amount:10000,monthly:162.5,start:'2026-08-10',account:'cib',bank:'cib',end:'2029-08-12',covered:'2026-09',payments:[]};
