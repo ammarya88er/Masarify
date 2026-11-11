@@ -625,7 +625,7 @@ let showIns=false, showCert=false, showSub=false;
 let showGam=false, gamEdit=null, gamAct=null, gamDraft=null;
 const gamNew=()=>({name:'',role:'member',amount:'',months:'',start:monthOf(today()),turn:'',prePaid:'',payMode:'day',day:'5',account:'',members:[{name:'',turn:''}]});
 /* الخانات زي ما كانت بتتحفظ (أيوه/لأ = لأ، والمرتب) — للعمليات المتسجلة */
-const draftDef=()=>({kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',vc:'pay',fee:'',to2:'cash',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''});
+const draftDef=()=>({kind:'expense',amount:'',cat:'',account:'',to:'',note:'',date:today(),cur:'EGP',voucherId:'',voucherAmt:'',salary:true,owed:false,owedKind:'share',owedPeople:[{name:'',amount:''}],fromFloat:false,floatAmt:'',place:'',hasFee:false,feeAmt:'',hasDisc:false,discAmt:'',veh:'',fuelType:'92',liters:'',odo:'',arr:false,hold:'',balAfter:'',svFee:false,svFeeAmt:'',swap:false,sdir:'take',sMy:'',sOff:'',sShared:''});
 /* أسئلة «أيوه ولا لأ» ونوع الدخل بيبدأوا من غير اختيار: لازم تجاوبهم بنفسك */
 const YN_ENTRY=['owed','fromFloat','hasFee','hasDisc','arr','svFee','swap'];
 const newDraft=()=>{const d=draftDef();YN_ENTRY.forEach(k=>{d[k]=undefined;});d.salary=undefined;return d;};
@@ -1692,12 +1692,40 @@ function atmFrom(from,to){
   const a=D.accounts.find(x=>x.id===from), b=D.accounts.find(x=>x.id===to);
   return (a&&b&&!a.credit&&a.atype==='bank'&&!isFxAcc(a.id)&&b.atype==='cash')?a:null;
 }
+/* رسوم التحويل البنكي (من الإعدادات): نسبة بحد أدنى وأقصى — بتتملى لوحدها لما تسلّف حد بتحويل من البنك */
+const xfeeCfg=()=>Object.assign({rate:0.1,min:0.5,max:20},D.xferFee||{});
+function xferFeeFor(amt){const c=xfeeCfg(), a=Number(amt)||0;if(!(a>0)||!(c.rate>0))return 0;
+  return Math.round(Math.min(c.max>0?c.max:Infinity,Math.max(c.min||0,a*c.rate/100))*100)/100;}
+/* سحب كاش من محفظة: تحويل من المحفظة للكاش، والعمولة بتتخصم من المحفظة */
+function walletOut(from,to){
+  const a=D.accounts.find(x=>x.id===from), b=D.accounts.find(x=>x.id===to);
+  return (a&&b&&a.atype==='wallet'&&b.atype==='cash')?a:null;
+}
+/* ==========================================================================
+   التحويل في دفترك — أنهي حساب ينفع يروح لأنهي حساب:
+   - المحفظة: بيتدفع منها (مصروف) أو بيتسحب منها كاش بس ← وجهتها الكاش بس. وبيتحط فيها من البنك أو الكاش.
+   - الكارت الائتماني: مش مصدر خالص، ووجهة بس من الحساب اللي بيتسدد منه (أو أي بنك لو مش مربوط بحساب).
+   - حسابات العملات والأوعية زي ما هي.
+   ========================================================================== */
+function xferOk(from,to){
+  const a=D.accounts.find(x=>x.id===from), b=D.accounts.find(x=>x.id===to);
+  if(!a||!b||a.id===b.id||a.credit||a.scope==='office'||b.scope==='office')return false;
+  if(a.atype==='wallet')return b.atype==='cash';
+  if(b.credit)return b.payFrom?b.payFrom===a.id:a.atype==='bank';
+  if(b.atype==='wallet')return a.atype==='bank'||a.atype==='cash';
+  return true;
+}
+/* وقت تعديل تحويل قديم: اللي كان متسجل بيفضل مسموح (التعديل من غير تغيير مايغيرش حاجة) */
+function xferWas(from,to){const od=editOp&&D.ops&&D.ops[editOp]&&D.ops[editOp].d;return !!(od&&od.account===from&&od.to===to);}
+const xferToIds=from=>D.accounts.filter(b=>xferOk(from,b.id)||xferWas(from,b.id)).map(b=>b.id);
 /* العمولة وقت التحويل: بتظهر لو التحويل من أو إلى وعاء، أو سحب من مكنة */
 function saveXferRole(){
   if(draft.kind!=='transfer')return null;
   const inA=saveAcc(draft.to), outA=saveAcc(draft.account);
   if(inA)return {a:inA,lbl:'عمولة إيداع'};
   if(outA)return {a:outA,lbl:'عمولة سحب'};
+  const w=walletOut(draft.account,draft.to);
+  if(w)return {a:w,lbl:'عمولة سحب'};
   const atm=atmFrom(draft.account,draft.to);
   if(atm)return {a:atm,lbl:'عمولة سحب',atm:true};
   return null;
@@ -1842,15 +1870,13 @@ function accFeesHtml(a){
 }
 function runAuto(){
   if(autoHold)return;
-  const ac=autoCharge();
-  ac.forEach(r=>pushNote('اتسجل اشتراك '+esc(r.name)+' بـ<span class="n">'+fmt(r.amount)+'</span> جنيه'+(r.usd?' (تقديري)':'')+' · '+dLabel(r.date)+'.',r.sid,r.t));
   const af=accFeesAuto();
   af.forEach(r=>pushNote('اتسجل '+esc(r.f.name)+' على '+esc(r.a.name)+' بـ<span class="n">'+fmt(r.t.amount)+'</span> جنيه · '+dLabel(r.date)+'.',undefined,r.t.id,{acc:r.a.id,fid:r.f.id}));
   const cu={n:0};
   const tr=autoTrials();
   if(cardInsAdvance())save();
   if(tr.length)pushNote('خلصت تجربة '+tr.map(esc).join(' و')+' واتحولت لاشتراك زي ما ظبطت.');
-  if(ac.length||af.length||cu.n||tr.length)save();
+  if(af.length||cu.n||tr.length)save();
 }
 /* حركات بتنقل فلوسك من مكان لمكان — مش دخل ولا مصروف */
 /* ocard على مصروف دفتر الشغل نفسه بيقول بس إنه اتدفع بالكارت — ده مصروف مش تحويل */
@@ -2248,34 +2274,7 @@ function autoTrials(){
   return done;
 }
 
-/* الاشتراك في يومه بيستنى «اتخصم»، وبيفضل «مستني الخصم» حتى لو اليوم عدّى — مفيش تسجيل لوحده.
-   (لو دوست «اتخصم» بعد يومه ومادستش «لسه»، بيتسجل بتاريخ يومه) */
-function chargedAlready(s){
-  return false;
-}
-function chargeSub(s,d){
-  const usd=s.cur==='USD'?subPrice(s):0;
-  const full=usd?Math.round(usd*D.rate*100)/100:subPrice(s);
-  if(!(full>0))return null;
-  const acc=subAcc(s);
-  const twin=subTwin(s,d,full,usd);
-  const t=twin||{id:autoId('sub',s.id,d),book:'me',kind:'expense',amount:full,
-    cat:s.cat||'subs',account:acc,date:d,note:s.name,
-    usd:usd||undefined,rate:usd?D.rate:undefined,pending:usd?true:undefined};
-  if(!twin)D.txns.unshift(t);
-  if(!s.payments)s.payments=[];
-  const pay={d:t.date||d,t:t.id,paid:Number(t.amount)||full,auto:true};
-  if(twin)pay.tw=subTwinTake(s,twin);
-  promoStep(s,pay);
-  if(subArrOn(s)){
-    const est=arrEst(full);
-    if(est>0){pay.fee=est;pay.feePending=true;}
-  }
-  s.payments.push(pay);
-  subDuesAdd(s,t,full,usd,d);
-  s.next=subNextOf(s);
-  return {name:s.name,amount:full,usd:!!usd,sid:s.id,t:t.id,date:d};
-}
+/* الاشتراك في يومه بيستنى «اتخصم»، وبيفضل «مستني الخصم» حتى لو اليوم عدّى — مفيش تسجيل لوحده. */
 /* ==========================================================================
    اشتراك المكتب: الخصم من حسابك (غالبًا الكارت) بيتسجل نقل فلوس مش مصروف عليك،
    وفي دفتر المكتب بند «اشتراك X» متقرّب لأقرب 5 لفوق، كل خصم لوحده (999 ← 1000، وتدبيره 29 ← 30).
@@ -2383,23 +2382,6 @@ function subDuesAdd(s,t,full,usd,d,price){
     if(owed>0.01)s.dues.push({id:uid(),amount:owed,date:d,got:false,srcTxn:t.id});
   }
 }
-function autoCharge(){
-  const done=[];
-  (D.subs||[]).forEach(s=>{
-    if(s.cycle==='trial'||subEnded(s))return;
-    /* من غير ما يرجع لدفعات فاتت قبل ما الميزة تشتغل (الاشتراكات من غير ساعة: من بعد التحديث ده) */
-    if(String(s.next||'')<(s.at?D._autoSince:(D._pendSince||today())))return;
-    let guard=0;
-    while(guard++<24&&chargedAlready(s)){
-      const d=s.next;
-      const r=chargeSub(s,d);
-      if(!r)break;
-      done.push(r);
-    }
-  });
-  if(done.length){sortTxns();save();}
-  return done;
-}
 /* العوائد اللي فاتت بتتسجل لوحدها بس وقت إضافة الشهادة (ids)؛ غير كده العائد بيستنى «نزل» */
 function catchUp(ids){
   let n=0,tot=0;
@@ -2482,16 +2464,8 @@ const subLastPay=s=>{
 const subDups=s=>(s.payments||[]).filter(p=>p.dup&&!p.settled);
 const openDues=s=>(s.dues||[]).filter(d=>!d.got);
 const subEnded=s=>!!s.cancelAtEnd&&daysTo(s.next)<=0;
-function beforeChargeTime(s){
-  return false;
-  if(!s.at||daysTo(s.next)!==0)return false;
-  const p=String(s.at).split(':');
-  const hh=Number(p[0])||0, mm=Number(p[1])||0;
-  const n=new Date();
-  return (n.getHours()*60+n.getMinutes())<(hh*60+mm);
-}
 const subSoon=s=>subEnded(s)?false:(s.cycle==='trial'?daysTo(s.next)<=14
-  :(!s.cancelAtEnd&&daysTo(s.next)<=3&&!beforeChargeTime(s)));
+  :(!s.cancelAtEnd&&daysTo(s.next)<=3));
 /* ---------- إجمالي الاشتراكات ----------
    بيتحسب بس الاشتراك اللي ليه دفعات جاية: مش متوقف، ومش معلّم إنه هيتلغي،
    والتجربة بتتحسب بس لو هتجددها (بسعرها ودورتها بعد التجربة). */
@@ -3044,7 +3018,7 @@ function payChips(sel,fn,exclude,bk,key,allowSave,opt){
   opt=opt||{};
   const b=opt.bal?balances(bk||'me'):null;
   return pickRow(key,accountsFor(bk||'me')
-    .filter(a=>a.id!==exclude&&(allowSave||!isSave(a))&&!(opt.src&&a.credit)&&(opt.fx||!isFxAcc(a.id)))
+    .filter(a=>a.id!==exclude&&(allowSave||!isSave(a))&&!(opt.src&&a.credit)&&(opt.fx||!isFxAcc(a.id))&&(!opt.only||opt.only.indexOf(a.id)>-1))
     .map(a=>({id:a.id,label:esc(a.name)+(b?` · <span class="n">${fmt(b[a.id]||0)}</span>${curTag(a.id)}`:'')}))
     .concat(opt.other?[{id:'__other__',label:'حد دفعهالي'}]:[]),sel,fn);
 }
@@ -3066,6 +3040,18 @@ function kindVal(sel,srcId,field,srcField){const l=kindList(srcId,sel,field,srcF
   const od=editOp&&field&&D.ops&&D.ops[editOp]&&D.ops[editOp].d;
   if(od&&!od[field])return '';
   return l.length===1?l[0].id:'';}
+/* حسابات الدفتر اللي من نفس نوع حسابك (لو حسابك مشترك يبقى نصيب الدفتر فيه هو هو) */
+function offKindList(myId){const m=D.accounts.find(a=>a.id===myId);if(!m)return [];
+  if(m.scope==='both')return [m];
+  return officeAccs().filter(a=>a.scope==='office'&&!isFxAcc(a.id)&&moneyKind(a)===moneyKind(m));}
+/* حساباتك اللي من نفس نوع حساب في الدفتر (لو مشترك يبقى هو نفسه) */
+function myKindList(offId){const o=D.accounts.find(a=>a.id===offId);if(!o)return [];
+  if(o.scope==='both')return [o];
+  return myOnly().filter(a=>a.scope!=='both'&&moneyKind(a)===moneyKind(o));}
+/* التبديل مع العهدة: حسابك من نفس نوع حساب العهدة (ولو لسه مااخترتش، من أنواع حسابات العهدة) */
+function swapMyList(offId){const ks=offId?[moneyKind(D.accounts.find(a=>a.id===offId))]:officeOnly().map(moneyKind);
+  return myOnly().filter(x=>x.scope!=='both'&&ks.indexOf(moneyKind(x))>-1);}
+const pickIn=(L,sel)=>L.some(a=>a.id===sel)?sel:(L[0]||{}).id||'';
 /* لو فيه حساب واحد بس مناسب بيتختار لوحده والسؤال مايظهرش */
 function kindPick(label,one,sel,fn,srcId,field,srcField){
   const l=kindList(srcId,sel,field,srcField), src=D.accounts.find(a=>a.id===srcId);
@@ -4106,13 +4092,16 @@ ${s.cycle==='trial'
       ${loanBalance()>0?`<label class="f">سددت من أنهي حساب؟</label>
         ${pickRow('flfrom',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.from||(myOnly()[0]||{}).id,'app.flPaySet_from',1)}
         <label class="f">على أنهي حساب في العهدة؟</label>
-        ${pickRow('flto',officeAccs().map(a=>({id:a.id,label:esc(a.name)})),flPay.to||officeCashId(),'app.flPaySet_to',1)}
-        <div class="hint">المبلغ هيتخصم من حسابك، ولو سددت على حساب غير اللي خدت منه، فلوس العهدة هتتنقل بينهم.</div>`
+        ${(function(){const L=offKindList(flPay.from||(myOnly()[0]||{}).id);
+          return L.length?pickRow('flto',L.map(a=>({id:a.id,label:esc(offAccLabel(a))})),pickIn(L,flPay.to),'app.flPaySet_to',1)
+            :'<div class="note warn" style="margin-top:0">مفيش في '+esc(bookName())+' حساب من نفس نوع الحساب ده — اختار حساب تاني.</div>';})()}
+        <div class="hint">الفلوس بتفضل من نفس النوع: كاش لكاش وبنك لبنك. المبلغ هيتخصم من حسابك، ولو سددت على حساب غير اللي خدت منه، فلوس العهدة هتتنقل بينهم.</div>`
       :`<label class="f">خدتها من أنهي حساب في ${esc(bookName())}؟</label>
         ${pickRow('flbfrom',officeAccs().map(a=>({id:a.id,label:esc(offAccLabel(a))})),flPay.bfrom||officeCashId(),'app.flPaySet_bfrom',1)}
         ${(function(){const f=D.accounts.find(a=>a.id===(flPay.bfrom||officeCashId()));
           return (f&&f.scope==='both')?'':`<label class="f">ودخلت على أنهي حساب عندك؟</label>
-          ${pickRow('flbto',myOnly().map(a=>({id:a.id,label:esc(a.name)})),flPay.bto||(myOnly()[0]||{}).id,'app.flPaySet_bto',1)}`;})()}
+          ${(function(){const L=myKindList(f?f.id:'');return L.length?pickRow('flbto',L.map(a=>({id:a.id,label:esc(a.name)})),pickIn(L,flPay.bto),'app.flPaySet_bto',1)
+            :'<div class="note warn" style="margin-top:0">مفيش عندك حساب من نفس نوع الحساب ده.</div>';})()}`;})()}
         <div class="hint">المبلغ هيطلع من ${esc(bookName())} ويدخل حسابك.</div>`}
       <button class="btn" onclick="app.settleLoan()">سجّل</button>
       <button class="btn ghost" onclick="app.cancelLoan()">إلغاء</button>
@@ -4484,8 +4473,6 @@ function entryOk0(){const k=draft.kind;
   if(k==='expense'&&draft.account==='__other__'&&!nm)return false;
   if(k==='transfer'&&draft.swap)return !!(Number(onlyNum(draft.amount))>0&&draft.sMy&&draft.sOff
     &&(draft.sShared||sharedAccs().length===1));
-  if(k==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw')
-    return !!(Number(onlyNum(draft.amount))>0&&draft.to2&&draft.to2!=='vcash');
   const lent=k==='expense'&&draft.owed&&draft.owedKind==='lent';
   if(xchOn()&&!(Number(onlyNum(draft.toAmt))>0&&(!xchAsk()||draft.fxOf)))return false;
   /* حساب بعملة تانية من غير سعر: القيمة بالجنيه هتطلع صفر */
@@ -4539,7 +4526,7 @@ function vAddOffice0(){
         <label class="f">حساب العهدة <b>*</b></label>
         ${pickRow('osacc',officeOnly().map(x=>({id:x.id,label:esc(x.name)})),draftO.account,'app.oAccount')}
         <label class="f">حسابي <b>*</b></label>
-        ${pickRow('osmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draftO.myAcc,'app.oMyAcc')}
+        ${pickRow('osmy',swapMyList(draftO.account).map(x=>({id:x.id,label:esc(x.name)})),draftO.myAcc,'app.oMyAcc')}
         ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
           ${pickRow('osshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draftO.shared,'app.oShared')}`:''}
         <div class="hint">${(draftO.sdir||'take')==='take'
@@ -4728,7 +4715,8 @@ function lvItemPick(t,i,ik){
 /* «حدد درجة» جنب التصنيف في التسجيل العادي: على التصنيف كله أو على الحاجة دي بس (الملاحظة) */
 let lvEntryOpen=false, lvScope='cat';
 function entryLvHtml(){
-  if(!draft.cat||draft.cat==='lentcat')return '';
+  /* الزرار بيظهر بس بعد ما تحط أول درجة من الإعدادات */
+  if(!draft.cat||draft.cat==='lentcat'||!lvOn())return '';
   const nm=String(draft.note||'').trim(), l=lvOf(draft.cat,nm);
   const itemSet=nm&&D.cutItem&&D.cutItem[lvKey(nm)];
   const scope=nm?lvScope:'cat';
@@ -4939,7 +4927,7 @@ function vAdd0(){
         <label class="f">حساب العهدة <b>*</b></label>
         ${pickRow('psoff',officeOnly().map(x=>({id:x.id,label:esc(x.name)})),draft.sOff,'app.setPSoff')}
         <label class="f">حسابي <b>*</b></label>
-        ${pickRow('psmy',myOnly().filter(x=>x.scope!=='both').map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
+        ${pickRow('psmy',swapMyList(draft.sOff).map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
         ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
           ${pickRow('psshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draft.sShared,'app.setPSshared')}`:''}
         <div class="hint">${swapHint(draft.sdir||'take',sh)}</div>`;})():`
@@ -4948,15 +4936,7 @@ function vAdd0(){
     ${(k==='expense'&&draft.account==='__other__')?`${fromField('مين دفع؟',1)}
       <div class="hint">هتتحسب في مصاريفك، بس مش هتتخصم من أي حساب عندك، وهتتسجل عليك في «فلوس عليك».</div>`:''}`}
 
-    ${draft.account==='vcash'&&k==='expense'?`<label class="f">العملية دي إيه؟</label>
-      ${pickRow('vc',[{id:'pay',label:'دفعت حاجة'},{id:'withdraw',label:'سحبت من المكنة'}],draft.vc,'app.setVc',1)}
-      ${draft.vc==='withdraw'?`
-        <label class="f">الكاش راح فين؟</label>
-        ${payChips(draft.to2,'app.setTo2','vcash','me','to2')}
-        <label class="f">عمولة السحب</label>
-        <input class="f" type="text" inputmode="decimal" value="${esc(draft.fee)}" oninput="app.dset('fee',numFix(this,1))">
-        <div class="hint">المبلغ هيتحول من فودافون كاش للحساب اللي اخترته، والعمولة هتتسجل مصروف في «عمولات ورسوم».</div>`:''}
-    `:''}
+
 
     ${draft.account==='card'&&k!=='transfer'?`<label class="f">العملة</label>
       ${pickRow('cur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],draft.cur,'app.setCur',1)}`:''}
@@ -4966,7 +4946,8 @@ function vAdd0(){
       ${yesNo('arr',draft.arr,'app.setArr')}
     ${draft.arr?`<div class="hint">مش هتتخصم دلوقتي. هتظهر في التنبيهات بحوالي <span class="n" id="arrprev">${fmt(arrEst(Number(onlyNum(draft.amount))||0))}</span> جنيه (<span class="n">${ARRRATE}%</span>)، وتأكدها لما تتخصم فعلًا.</div>`:''}`:''}
 
-    ${(k==='transfer'&&!draft.swap)?`<label class="f">لأنهي حساب؟ <b>*</b></label>${payChips(draft.to,'app.setTo',draft.account,'me','to',1,{fx:1})}
+    ${(k==='transfer'&&!draft.swap)?`<label class="f">لأنهي حساب؟ <b>*</b></label>${draft.account?payChips(draft.to,'app.setTo',draft.account,'me','to',1,{fx:1,only:xferToIds(draft.account)}):'<div class="hint" style="margin-top:0">اختار «من أنهي حساب» الأول.</div>'}
+      ${walletOut(draft.account,draft.to)?'<div class="hint">ده سحب كاش من المحفظة.</div>':''}
       ${xchAsk()?`<label class="f">الفلوس دي كانت إيه؟ <b>*</b></label>
         ${pickRow('fxof',[{id:'income',label:'دخل جالي'},{id:'bought',label:'اشتريتها'}],draft.fxOf,'app.setFxOf',1)}`:''}
       ${saveXferRole()?(function(){const R=saveXferRole();return `<label class="f">فيه ${R.lbl}؟</label>
@@ -4984,10 +4965,10 @@ function vAdd0(){
       ${fromField('من مين؟',0)}`}`:''}
 
 
-    ${(k==='expense'&&!(draft.owed&&draft.owedKind==='lent')&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`<label class="f">التصنيف <b>*</b></label>
+    ${(k==='expense'&&!(draft.owed&&draft.owedKind==='lent'))?`<label class="f">التصنيف <b>*</b></label>
       <div id="catrow">${catRowHtml()}</div>`:''}
 
-    ${(k==='expense'&&!fxA&&draft.account!=='__other__'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
+    ${(k==='expense'&&!fxA&&draft.account!=='__other__')?`
       ${(officeOn()&&floatAsk())?`<label class="f">فيه جزء من كاش العهدة؟</label>
       ${yesNo('fromFloat',draft.fromFloat,'app.setFromFloat')}
       ${draft.fromFloat&&officeAccs().length>1?`<label class="f">خدته من أنهي حساب في العهدة؟</label>
@@ -5031,7 +5012,7 @@ function vAdd0(){
       <div class="hint">لو كتبت العداد واللترات، البرنامج هيحسبلك استهلاك المركبة في «مركباتي».</div>
     `:''}
 
-    ${(k==='expense'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?`
+    ${(k==='expense')?`
       <label class="f">فيها خصم؟</label>
       ${yesNo('hasDisc',draft.hasDisc,'app.setHasDisc')}
       ${draft.hasDisc?`<label class="f">قيمة الخصم</label>
@@ -5041,7 +5022,7 @@ function vAdd0(){
       ${(fxA||draft.account==='__other__')?'':`<label class="f">فيها عمولات ورسوم؟</label>
       ${yesNo('hasFee',draft.hasFee,'app.setHasFee')}
       ${draft.hasFee?`<label class="f">قيمة الرسوم</label>
-        <input class="f" type="text" inputmode="decimal" value="${esc(draft.feeAmt)}" oninput="app.dset('feeAmt',numFix(this,1))">
+        <input class="f" id="feeamt" type="text" inputmode="decimal" value="${esc(draft.feeAmt)}" oninput="app.dset('feeAmt',numFix(this,1))">
         <div class="hint">هتتسجل حركة منفصلة بتصنيف عمولات ورسوم.</div>`:''}`}
     `:''}
 
@@ -5068,7 +5049,7 @@ function vAdd0(){
     </div>
     <div class="hint" style="text-align:center" id="xchhint">${xchHint()}</div>`:''}
 
-    <div id="vchbox">${(k==='expense'&&!fxA&&draft.cur==='EGP'&&draft.account!=='__other__'&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
+    <div id="vchbox">${(k==='expense'&&!fxA&&draft.cur==='EGP'&&draft.account!=='__other__')?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
 
     <button class="btn" id="entrysave" ${ok?'':'disabled'} onclick="app.saveEntry()">احفظ</button>
   </div>`;
@@ -7146,6 +7127,14 @@ function vSettings(){
 
       <p class="hint" style="margin-top:-4px">بيأثر على تقارير الشهر بس. الأقساط بتفضل مربوطة بالمرتب في الحالتين.</p>
       ${pickRow('monthmode',[{id:'salary',label:'من المرتب'},{id:'cal',label:'من أول الشهر'}],D.monthMode==='cal'?'cal':'salary','app.setMonthMode',1)}
+            `),setSec('xfee','رسوم التحويل البنكي',fmt(xfeeCfg().rate)+'% · من '+fmt(xfeeCfg().min)+' لـ'+fmt(xfeeCfg().max),()=>`
+      <p class="hint" style="margin-top:0">بتتملى لوحدها في خانة الرسوم لما تسلّف حد بتحويل من حساب بنك، وتقدر تغيّرها وقتها.</p>
+      <label class="f">النسبة ٪</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().rate))}" onchange="app.xfeeSet('rate',numFix(this,1))">
+      <label class="f">الحد الأدنى</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().min))}" onchange="app.xfeeSet('min',numFix(this,1))">
+      <label class="f">الحد الأقصى</label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().max))}" onchange="app.xfeeSet('max',numFix(this,1))">
             `),setSec('prices','الأسعار','دولار الكارت '+fmt(D.rate)+' · بنزين '+fmt(D.p92||0)+' و'+fmt(D.p95||0),()=>`
 
 <label class="f" style="margin-top:0">سعر دولار الكارت</label>
@@ -7706,7 +7695,7 @@ function opWrap(o,f,k,args){
   if(!editOp&&form==='entry'&&draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();if(g){draft.salary=g==='salary';draft.icat=g==='salary'?'':g;draft.icatPicked=true;}}
   if(form==='receipt'&&scan&&Array.isArray(scan.items))scan.items.forEach(i=>{if(i&&typeof i.name==='string')i.name=cleanNm(i.name);});
   const spec=JSON.parse(JSON.stringify(form==='entry'?draft:form==='office'?draftO:scan));
-  delete spec.catPicked;delete spec.catAuto;delete spec.ocatPicked;delete spec.ocatAuto;
+  delete spec.catPicked;delete spec.catAuto;delete spec.ocatPicked;delete spec.ocatAuto;delete spec.feeAuto;
   const inl=editInline, inlNm=inlineFocusName();
   /* عملية مكتب قديمة: نوع الدخل اللي اتملى من الدخل الموجود مش تغيير */
   if(form==='office'&&editOp&&D.ops&&D.ops[editOp]&&D.ops[editOp].d&&D.ops[editOp].d.toMeIcat===undefined&&spec.toMeIcat){
@@ -7824,7 +7813,8 @@ const app=new Proxy({
     const px=document.getElementById('opaidx');
     if(px&&(k==='amount'||k==='paid'))px.innerHTML=oPaidInfo();},
   oKind(k){draftO.kind=k;render();},
-  oAccount(id){draftO.account=id;draftO.cardFrom='';draftO.cardTo='';draftO.xFee=undefined;draftO.xFeeAmt='';render();},
+  oAccount(id){draftO.account=id;draftO.cardFrom='';draftO.cardTo='';draftO.xFee=undefined;draftO.xFeeAmt='';
+    if(draftO.swap&&draftO.myAcc&&!swapMyList(id).some(a=>a.id===draftO.myAcc))draftO.myAcc='';render();},
   oCat(id){draftO.ocat=id;draftO.ocatPicked=true;draftO.ocatAuto=false;render();},
   oDir(d){draftO.dir=d;render();},
   oMine(v){draftO.mine=v;if(!v){draftO.mineAmt='';draftO.mineAll=undefined;}render();},
@@ -8419,6 +8409,9 @@ const app=new Proxy({
       if(veh0!==(draft.cat==='fuel'||draft.cat==='repair')){render();return;}
       const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();
       setDisabled('entrysave',entryOk());}
+    /* رسوم التحويل اللي اتملت لوحدها بتمشي مع المبلغ لحد ما تغيّرها بنفسك */
+    if(k==='feeAmt')draft.feeAuto=false;
+    if(k==='amount'&&draft.feeAuto&&draft.hasFee){const f=xferFeeFor(onlyNum(draft.amount));draft.feeAmt=f>0?String(f):'';const fe=document.getElementById('feeamt');if(fe)fe.value=draft.feeAmt;}
     /* سطر الدرجة جنب التصنيف بيتحدّث مع المبلغ والملاحظة */
     if(draft.kind==='expense'&&draft.cat&&(k==='amount'||(k==='note'&&draft.catPicked))){const cr=document.getElementById('catrow');if(cr)cr.innerHTML=catRowHtml();}
     if(draft.kind==='income'&&!draft.icatPicked&&(k==='note'||k==='from'||k==='amount')){
@@ -8439,7 +8432,7 @@ const app=new Proxy({
       if(!v||Number(v.amount)>total)draft.voucherId='';
     }
     const box=document.getElementById('vchbox');
-    if(box)box.innerHTML=(draft.kind==='expense'&&draft.cur==='EGP'&&!isFxAcc(draft.account)&&!(draft.account==='vcash'&&draft.vc==='withdraw'))?vchPicker(draft.voucherId,total,'app.setVch'):'';
+    if(box)box.innerHTML=(draft.kind==='expense'&&draft.cur==='EGP'&&!isFxAcc(draft.account))?vchPicker(draft.voucherId,total,'app.setVch'):'';
   },
   setArr(v){draft.arr=!!v;render();},
   async pasteBal(id,usd){
@@ -8461,7 +8454,7 @@ const app=new Proxy({
   setPSwap(v){draft.swap=!!v;render();},
   setPSdir(v){draft.sdir=v;render();},
   setPSmy(v){draft.sMy=v;render();},
-  setPSoff(v){draft.sOff=v;render();},
+  setPSoff(v){draft.sOff=v;if(draft.sMy&&!swapMyList(v).some(a=>a.id===draft.sMy))draft.sMy='';render();},
   setPSshared(v){draft.sShared=v;render();},
   setFloatAcct(v){draft.floatAcct=v;render();},
   setSvFee(v){draft.svFee=!!v;const R=saveXferRole();
@@ -8472,7 +8465,10 @@ const app=new Proxy({
   donGo(){editInline=null;if(editOp)app.cancelEditOp();draft=newDraft();draft.kind='expense';draft.cat='donation';draft.catPicked=true;book='me';tab='add';render();window.scrollTo(0,0);},
   donSkip(){const L=salaryDatesAll().slice(-1)[0];if(!L)return;D.donSkip=L;save();render();},
   setKind(k){draft.kind=k;if(k==='transfer')draft.cur='EGP';if(k!=='expense'&&draft.account==='__other__')draft.account='';render();},
-  setAccount(id){draft.account=id;draft.svFee=undefined;draft.svFeeAmt='';if(draft.to===id)draft.to='';draft.toAmt='';draft.fxOf='';if(id!=='card')draft.cur='EGP';if(id!=='vcash')draft.vc='pay';render();},
+  setAccount(id){draft.account=id;draft.svFee=undefined;draft.svFeeAmt='';if(draft.to===id)draft.to='';draft.toAmt='';draft.fxOf='';if(id!=='card')draft.cur='EGP';
+    /* الوجهة اللي ماينفعش يتحوّل لها من الحساب ده بتتشال، ولو فاضل وجهة واحدة بس بتتختار */
+    if(draft.kind==='transfer'){const L=xferToIds(id);if(draft.to&&L.indexOf(draft.to)<0)draft.to='';if(!draft.to&&L.length===1)draft.to=L[0];}
+    render();},
   setTo(id){draft.to=id;draft.svFee=undefined;draft.svFeeAmt='';draft.toAmt='';draft.fxOf='';render();},
   setFxOf(v){draft.fxOf=v;render();},
   setCat(id){draft.cat=id;draft.catPicked=true;
@@ -8480,7 +8476,12 @@ const app=new Proxy({
       draft.veh=(D.vehicles[D.vehicles.length-1]||{}).id||'';render();},
   setIcat(v){draft.icat=v;draft.salary=v==='salary';draft.icatPicked=true;render();},
   setFromFloat(v){draft.fromFloat=v;if(!v)draft.floatAmt='';render();},
-  setHasFee(v){draft.hasFee=v;if(!v)draft.feeAmt='';render();},
+  setHasFee(v){draft.hasFee=v;if(!v)draft.feeAmt='';
+    /* سلفة لحد بتحويل من البنك: الرسوم بتتملى بحسبة التحويل، وتغيّرها لو مختلفة */
+    else if(!draft.feeAmt&&draft.kind==='expense'&&draft.owed&&draft.owedKind==='lent'){const a=D.accounts.find(x=>x.id===draft.account);
+      if(a&&a.atype==='bank'&&!a.credit){const f=xferFeeFor(onlyNum(draft.amount));if(f>0){draft.feeAmt=String(f);draft.feeAuto=true;}}}
+    render();},
+  xfeeSet(k,v){const n=Number(onlyNum(v));if(!(n>=0))return;D.xferFee=Object.assign(xfeeCfg(),{[k]:n});save();},
   setHasDisc(v){draft.hasDisc=v;if(!v)draft.discAmt='';render();},
   setVeh(id){draft.veh=id;render();},
   setFuelType(f){draft.fuelType=f;render();},
@@ -8495,8 +8496,6 @@ const app=new Proxy({
   },
   owedPersonAdd(){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.push({name:'',amount:''});render();},
   owedPersonDel(i){if(!draft.owedPeople)draft.owedPeople=[];draft.owedPeople.splice(i,1);if(!draft.owedPeople.length)draft.owedPeople.push({name:'',amount:''});render();},
-  setVc(m){draft.vc=m;render();},
-  setTo2(id){draft.to2=id;render();},
   startOwedGet(gid){
     if(owedFor===gid){owedFor=null;render();return;}
     owedFor=gid;owedAcct='';
@@ -8581,20 +8580,9 @@ const app=new Proxy({
     if(ynLast||(draft.kind==='income'&&!draft.loan&&!draftIcat()))return;
     const amt=Number(onlyNum(draft.amount))||0;
     if(draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();draft.salary=g==='salary';draft.icat=g==='salary'?'':g;}
-    if(draft.kind==='expense'&&draft.account==='vcash'&&draft.vc==='withdraw'){
-      if(amt<=0)return;
-      const dest=draft.to2||'cash';
-      D.txns.unshift({id:uid(),book:'me',kind:'transfer',amount:amt,account:'vcash',to:dest,
-        date:draft.date,note:'سحب من مكنة فودافون كاش'});
-      const fee=Number(onlyNum(draft.fee))||0;
-      if(fee>0)D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:fee,cat:'fees',
-        account:'vcash',date:draft.date,note:'عمولة سحب فودافون كاش'});
-      sortTxns();save();
-      draft=newDraft();
-      render();window.scrollTo(0,0);app.toast('اتسجل السحب');return;
-    }
     if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
     if(draft.kind==='transfer'&&!draft.swap&&isCreditAcc(draft.account)){app.toast('الكارت مش بيتحوّل منه');return;}
+    if(draft.kind==='transfer'&&!draft.swap&&draft.to&&!xferOk(draft.account,draft.to)&&!xferWas(draft.account,draft.to)){app.toast('التحويل ده ماينفعش بين الحسابين دول');return;}
     if(draft.kind==='transfer'&&draft.swap){
       const a=Number(onlyNum(draft.amount))||0,sh=draft.sShared||(sharedAccs().length===1?sharedAccs()[0].id:'');
       if(!(a>0)||!draft.sMy||!draft.sOff||!sh)return;
@@ -9452,7 +9440,7 @@ const app=new Proxy({
   seeDue(id,due){const a=D.accounts.find(x=>x.id===id);if(a){a.dueSeen={due:due,q:Number(D._qmax||0)};save();render();}},
   goLoans(){loanFor=!loanFor;render();},
   cancelLoan(){loanFor=false;render();},
-  flPaySet_from(v){flPay.from=v;render();},
+  flPaySet_from(v){flPay.from=v;flPay.to='';render();},
   flPaySet_to(v){flPay.to=v;render();},
   flPaySet_bfrom(v){flPay.bfrom=v;flPay.bto='';render();},
   flPaySet_bto(v){flPay.bto=v;render();},
@@ -9461,7 +9449,8 @@ const app=new Proxy({
     if(v>0){
       if(!D.floatLoans)D.floatLoans=[];
       if(loanBalance()>0){
-        const from=flPay.from||(myOnly()[0]||{}).id, to=flPay.to||officeCashId(), td=today();
+        const from=flPay.from||(myOnly()[0]||{}).id, to=pickIn(offKindList(from),flPay.to), td=today();
+        if(!to){app.toast('اختار حساب من نفس النوع');return;}
         /* فلوس العهدة: اللي اتاخد من حساب واتسدد على حساب تاني بيتنقل بينهم */
         let left=Math.min(v,loanBalance());
         takesOutstanding().forEach(t=>{
@@ -9479,7 +9468,8 @@ const app=new Proxy({
       }else{
         const u=Math.min(v,Math.abs(loanBalance())),td=today();
         const from=flPay.bfrom||officeCashId(), f=D.accounts.find(a=>a.id===from);
-        const to=(f&&f.scope==='both')?from:(flPay.bto||(myOnly()[0]||{}).id);
+        const to=(f&&f.scope==='both')?from:pickIn(myKindList(from),flPay.bto);
+        if(!to){app.toast('اختار حساب من نفس النوع');return;}
         /* فرق تقريب اشتراكات المكتب: آخر حاجة بتتاخد، وبتدخل «باقي تقريب» مش رجوع فلوس */
         const pr=loanRnd(), rd=r2s(Math.max(0,Math.min(pr,u-(Math.abs(loanBalance())-pr))));
         const L=uid(), oid=uid();

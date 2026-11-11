@@ -29,7 +29,7 @@ const {boot,seed,t,done,r2}=require('./harness');
 }
 { // زراير الإشعار
   const S=seed({_autoSince:'2026-09-01',subs:[{id:'a',name:'Upwork',amount:10,cur:'USD',next:'2026-09-24',at:'10:00',account:'card',cycle:'monthly',payments:[],dues:[]}]});
-  const {run,V}=boot(S);run("const r=chargeSub(D.subs[0],'2026-09-24');pushNote('اتسجل',r.sid,r.t);save();app.go('home');");
+  const {run,V}=boot(S);run("paySubDate='2026-09-24';app.confirmPaySub(D.subs[0].id);(function(){const s=D.subs[0],p=s.payments[s.payments.length-1];pushNote('اتسجل',s.id,p.t);save();})();app.go('home');");
   const v=V();const i=v.indexOf('undoAuto'),j=v.indexOf('dropNote');
   const chips=v.slice(v.lastIndexOf('<div class="chips"',i),j+40);
   t('تراجع وتمام في نفس الصف', i>-1&&j>i&&v.slice(i,j).indexOf('</div>')<0);
