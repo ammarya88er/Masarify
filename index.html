@@ -6457,7 +6457,9 @@ function wIns(){
       <label class="f">مقسط على إيه؟ <b>*</b></label>
       ${pickRow('inssrc',accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})).concat([{id:'office',label:'سلفة'}]),insDraft.src,'app.insSrc',1)}
       ${insDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
-      <input class="f" value="${esc(insDraft.from||'')}" oninput="app.insSet('from',this.value)">`:''}
+      <input class="f" value="${esc(insDraft.from||'')}" oninput="app.insSet('from',this.value)">
+      <label class="f">المكان</label>
+      <input class="f" placeholder="اسم المحل أو المكان" value="${esc(insDraft.place||'')}" oninput="app.insSet('place',this.value)">`:''}
       ${isCreditAcc(insDraft.src)?`
       <label class="f">تاريخ الشراء</label>
       ${dateField(insDraft.buyDate||today(),'app.insBuyDate')}
@@ -6543,9 +6545,11 @@ function wIns(){
             '<div class="hint" style="margin-top:0">سلفة</div>'}
           ${iDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
           <input class="f" value="${esc(iDraft.from||'')}" oninput="app.iDraftSet('from',this.value)">`:''}
+          <label class="f">المكان</label>
+      <input class="f" placeholder="اسم المحل أو المكان" value="${esc(iDraft.place||'')}" oninput="app.iDraftSet('place',this.value)">
           <label class="f">بيتدفع من أنهي حساب؟</label>
           ${payChips(iDraft.account,'app.iDraftAcct','','me','',0,{src:1})}
-          <div class="hint">الدفعات اللي اتسجلت قبل كده هتفضل زي ما هي.</div>
+          <div class="hint">الدفعات اللي اتسجلت قبل كده مبالغها هتفضل زي ما هي، والمكان بيتغير فيها كمان.</div>
           <button class="btn" onclick="app.saveInsEdit('${i.id}')">احفظ التعديل</button>
           <button class="btn ghost" onclick="app.cancelInsEdit()">إلغاء</button>
         </div>`:''}
@@ -10344,7 +10348,8 @@ const app=new Proxy({
       months:Number(onlyNum(insDraft.months))||0,paid:Number(onlyNum(insDraft.paid))||0,
       day:clampDay(Number(onlyNum(insDraft.day))||1),account:insDraft.account,
       covered:mAdd(monthOf(today()),-1),firstMonth:monthOf(today()),tail:0,payments:[],
-      src:insDraft.src||'office',from:(insDraft.src||'office')==='office'?String(insDraft.from||'').trim():'',total:Number(onlyNum(insDraft.total))||0});
+      src:insDraft.src||'office',from:(insDraft.src||'office')==='office'?String(insDraft.from||'').trim():'',total:Number(onlyNum(insDraft.total))||0,
+      place:String(insDraft.place||'').trim()||undefined});
     insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};showIns=false;save();render();
   },
   startPay(id,mode){payFor=id;payMode=mode||'front';editAmt=false;payDate=today();tab='wallet';wtab='ins';render();
@@ -10356,7 +10361,7 @@ const app=new Proxy({
     if(insEdit===id){insEdit=null;render();return;}
     const i=D.installments.find(x=>x.id===id);if(!i)return;
     iDraft={name:i.name||'',total:String(i.total||''),monthly:String(i.monthly||''),
-      months:String(i.months||''),day:String(i.day||'1'),src:i.src||'office',from:i.from||'',account:i.account||''};
+      months:String(i.months||''),day:String(i.day||'1'),src:i.src||'office',from:i.from||'',account:i.account||'',place:i.place||''};
     if(i.mode==='bank'){const t=insBuyTxn(i);
       iDraft={name:i.name||'',total:String(i.principal||''),buyDate:i.buyDate||'',place:(t&&t.place)||'',cat:(t&&t.cat)||''};}
     insEdit=id;payFor=null;render();
@@ -10378,6 +10383,8 @@ const app=new Proxy({
     const dy=Number(onlyNum(iDraft.day))||0;if(dy>0)i.day=clampDay(dy);
     if(iDraft.src&&(iDraft.src==='office')===(i.src==='office'))i.src=iDraft.src;
     i.from=i.src==='office'?String(iDraft.from||'').trim():'';
+    {const pl=String(iDraft.place||'').trim()||undefined;if(pl!==i.place){i.place=pl;
+      (i.payments||[]).forEach(p=>{const t=p.t&&D.txns.find(x=>x.id===p.t);if(t)t.place=pl;});}}
     if(iDraft.account)i.account=iDraft.account;
     insEdit=null;save();render();app.toast('اتعدل');
   },
@@ -10388,7 +10395,7 @@ const app=new Proxy({
     const ahead=forMonth>curPeriodMonth();
     const amt=(i.src==='office'&&editAmt&&document.getElementById('insamt'))?(numVal('insamt')||insNextAmount(i)):insNextAmount(i);
     const t={id:uid(),book:'me',kind:'expense',amount:amt,cat:'installment',account:i.account,
-      date:payDate,note:i.name+' — قسط '+mLabel(forMonth)+(ahead?' (مقدم)':'')};
+      date:payDate,note:i.name+' — قسط '+mLabel(forMonth)+(ahead?' (مقدم)':''),place:i.place||undefined};
     D.txns.unshift(t);sortTxns();
     i.paid=(Number(i.paid)||0)+1;
     i.covered=forMonth;
