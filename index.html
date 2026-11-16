@@ -888,6 +888,7 @@ function normalizeData(){
     if(!a.secured)a.secured=[];
   });
   if(!D.owed)D.owed=[];
+  if(!D.sales)D.sales=[];
   if(!D.floatLoans)D.floatLoans=[];
   if(!D.ofees)D.ofees=[];
   if(!D.groups)D.groups=[];
@@ -947,6 +948,8 @@ function normalizeData(){
     });
     D._icfix1=1;
   }
+  /* نوع دخل «بيع حاجات» بيتضاف مرة واحدة (لو مسحته بعدها مايرجعش) */
+  if(!D._icSale){D._icSale=1;if(D.icats&&!D.icats.some(c=>c.id==='sale'))D.icats.push({id:'sale',label:'بيع حاجات',color:'#E0A458'});}
   /* الأرقام العربي في الكلام المتسجل بتبقى إنجليزي (مرة واحدة) */
   if(!D._digits1){
     const fx=v=>typeof v==='string'&&/[٠-٩۰-۹]/.test(v)?toEn(v):v;
@@ -1032,6 +1035,10 @@ const certHeldBy=(cid,exceptId)=>{
   return a?a.name:'';
 };
 const openOwed=()=>(D.owed||[]).filter(o=>!o.got);
+/* بيعة: المبلغ المتفق عليه ناقص اللي استلمته (دخل «بيع حاجات» مربوط بيها بـ saleOf) */
+const salePaid=s=>Math.round(D.txns.filter(t=>t.saleOf===s.id&&t.kind==='income').reduce((a,t)=>a+(Number(t.amount)||0),0)*100)/100;
+const saleLeft=s=>Math.max(0,Math.round(((Number(s.amount)||0)-salePaid(s))*100)/100);
+const openSales=()=>(D.sales||[]).filter(s=>!s.closed&&saleLeft(s)>0.005);
 /* ==========================================================================
    فلوس عليك
    - السلفة: settle داخل على حسابك (debt، واسم الشخص في from) — مش دخل.
@@ -1101,6 +1108,11 @@ function collectOwed(list,got,acct,who){
       D.txns.unshift({id:uid(),book:'me',kind:'settle',dir:'in',amount:take,account:owedAcct,date:today(),
         debt:true,from:who,note:'رجّعلك الزيادة'+(who?' — '+who:'')});
       got=Math.round((got-take)*100)/100;return;}
+    /* بيعة: اللي وصل بيتسجل دخل «بيع حاجات» مربوط بيها */
+    if(x.src==='sale'){const sl=x.ref, take=Math.round(Math.min(got,saleLeft(sl))*100)/100;if(take<=0.001)return;
+      D.txns.unshift({id:uid(),book:'me',kind:'income',amount:take,account:owedAcct,date:today(),icat:'sale',
+        from:who||undefined,note:'بيع — '+(sl.what||''),saleOf:sl.id});
+      got=Math.round((got-take)*100)/100;return;}
     const o=x.ref, rem=Number(o.amount)||0;
     const take=Math.round(Math.min(got,rem)*100)/100;
     if(take<=0.001)return;
@@ -1128,6 +1140,25 @@ function collectOwed(list,got,acct,who){
     }
   }
 }
+/* «ضيف بيعة»: بعت حاجة لحد بمبلغ متفق عليه، من غير ما فلوس تطلع من حساب */
+let saleOpen='', saleD={what:'',who:'',amount:''};
+const saleOk=()=>!!String(saleD.what||'').trim()&&!!String(saleD.who||'').trim()&&Number(onlyNum(saleD.amount))>0;
+function saleForm(at){
+  if(saleOpen!==at)return `<button class="chip sm" onclick="event.stopPropagation();app.saleGo('${at}')">ضيف بيعة</button>`;
+  const n=personNames();
+  return `<div class="inline" onclick="event.stopPropagation()">
+    <label class="f">بعت إيه؟ <b>*</b></label>
+    <input class="f" value="${esc(saleD.what)}" oninput="app.saleSet('what',this.value)">
+    <label class="f">لمين؟ <b>*</b></label>
+    <input class="f" id="salewho" value="${esc(saleD.who)}" oninput="app.saleSet('who',this.value)">
+    ${n.length?`<div class="chips" style="margin-top:10px">${n.map(x=>`<button class="chip sm${String(saleD.who||'').trim()===x?' on':''}" onclick="app.saleWho('${jsArg(x)}')">${esc(x)}</button>`).join('')}</div>`:''}
+    <label class="f">المبلغ اللي اتفقتوا عليه <b>*</b></label>
+    <input class="f" type="text" inputmode="decimal" value="${esc(saleD.amount)}" oninput="app.saleSet('amount',numFix(this,1))">
+    <div class="hint">مفيش فلوس هتطلع من أي حساب. كل ما يوصلك جزء دوس «استلمت» قدام اسمه، وهيتسجل دخل «بيع حاجات».</div>
+    <button class="btn" id="salesave" ${saleOk()?'':'disabled'} onclick="app.saleSave()">ضيف البيعة</button>
+    <button class="btn ghost" onclick="app.saleGo('')">إلغاء</button>
+  </div>`;
+}
 function debtOk(x){
   const P=Number(onlyNum(debtAmt))||0;
   return !!debtAcct&&P<=Math.round(-x.net*100)/100+0.005&&(P>0.005||x.recTot>0.005);
@@ -1138,6 +1169,7 @@ function peopleLedger(df){
   const G={},order=[];
   const g=w=>{const k=pk(w);if(!G[k]){G[k]={who:w,rec:[],debt:[]};order.push(k);}return G[k];};
   openOwed().forEach(o=>g(String(o.who||'').trim()).rec.push({src:'owed',ref:o,amount:Number(o.amount)||0,label:lb(o.note||'',df(o.date)),orig:o.orig}));
+  openSales().forEach(sl=>{const left=saleLeft(sl);g(String(sl.who||'').trim()).rec.push({src:'sale',ref:sl,amount:left,label:lb('بيعة: '+(sl.what||''),df(sl.date)),orig:left<(Number(sl.amount)||0)-0.005?Number(sl.amount):undefined});});
   (D.subs||[]).forEach(s=>openDues(s).forEach(d=>g(String(d.who||'').trim()).rec.push({src:'due',ref:d,sub:s,amount:Number(d.amount)||0,label:s.name+' · حصة دفعة '+df(d.date)})));
   debtNames().forEach(w=>{const ov=debtOver(w);if(ov>0.005)g(w).rec.push({src:'over',ref:{date:'',amount:ov},amount:ov,label:'دفعته زيادة عن السلفة'});});
   debtNames().forEach(w=>{const it=debtItems(w);if(it.length){const x=g(w);x.debt=x.debt.concat(it.map(x=>({amount:x.rem,label:lb(x.label,df(x.date)),orig:x.rem<x.orig-0.005?x.orig:undefined})));}});
@@ -3820,11 +3852,12 @@ function spendCalc(){
   });
   const L=peopleLedger();
   const owe=r2(L.reduce((x,g)=>x+(g.debtTot||0),0)), rec=r2(L.reduce((x,g)=>x+(g.recTot||0),0));
+  const R=L.filter(g=>(g.recTot||0)>0.004).map(g=>({label:g.who||'من غير اسم',amt:g.recTot}));
   if(owe>0.004)Y.push({label:'فلوس عليك لناس',amt:owe});
   const sx=r2(X.reduce((x,i)=>x+i.amt,0)), sy=r2(Y.reduce((x,i)=>x+i.amt,0)), sc=r2(C.reduce((x,i)=>x+i.amt,0));
   const x=r2(liquid-sx), c=r2(x-sc);
   const y=r2(c-sy);
-  return {target,late,liquid,X,C,Y,x,c,y,z:r2(y+rec),rec};
+  return {target,late,liquid,X,C,Y,R,x,c,y,z:r2(y+rec),rec};
 }
 /* اللي فاضل من كشف: لو كتبت مبلغه (أو اتقرا من الرسالة) بيتاخد هو، غير كده حسبة البرنامج */
 function stmtLeft(a,key){
@@ -3854,6 +3887,9 @@ const stmtEntry=(acc,key)=>(D.cardStmts||[]).find(e=>e.acct===acc&&e.key===key)|
 function spendHtml(){
   if(!salaryDatesAll().length&&!(D.accounts||[]).some(a=>!a.credit))return '';
   const S=spendCalc(), f=v=>`<span class="n">${fmt(v)}</span>`;
+  /* كل قسم بعنوانه ومجموعه؛ اللي ليه ميعاد بالترتيب، وبعده اللي من غير ميعاد */
+  const byDate=L=>L.slice().sort((a,b)=>(a.when?0:1)-(b.when?0:1)||String(a.when||'').localeCompare(String(b.when||'')));
+  const hd=(t,L,c)=>`<div class="sph" style="display:flex;justify-content:space-between;gap:10px${c?';color:'+c:''}"><span>${t}</span><span class="n">${fmt(Math.round(L.reduce((x,i)=>x+i.amt,0)*100)/100)}</span></div>`;
   const lst=(L)=>L.map(i=>`<div class="arow"><span class="nm">${esc(i.label)}${i.when?`<span style="display:block;font-size:11px;color:var(--muted);margin-top:3px">${dLabel(i.when)}</span>`:''}</span><span class="vl n">${fmt(i.amt)}</span></div>`).join('');
   return `<div class="sec" style="margin-top:24px">
     <div class="panel" style="padding:14px 16px;cursor:pointer" onclick="app.spendToggle()">
@@ -3868,9 +3904,11 @@ function spendHtml(){
     </div>
     ${spendOpen?`<div class="panel" style="margin-top:10px">
       <div class="arow"><span class="nm">فلوسك الجاهزة (كاش وبنك ومحافظ)</span><span class="vl n">${fmt(S.liquid)}</span></div>
-      ${S.X.length?`<div class="sph">بيتخصم لحد المرتب</div>${lst(S.X)}`:''}
-      ${(S.C.length||S.Y.length)?`<div class="sph">في «بعد كل اللي عليك»</div>${lst(S.C.concat(S.Y))}`:''}
-      ${S.rec>0.004?`<div class="arow"><span class="nm">ليك عند الناس</span><span class="vl n">${fmt(S.rec)}</span></div>`:''}
+      ${S.X.length?hd('بيتخصم لحد المرتب',S.X)+lst(byDate(S.X)):''}
+      ${(S.C.length||S.Y.length)?hd('باقي اللي عليك',S.C.concat(S.Y))+lst(byDate(S.C.concat(S.Y))):''}
+      ${hd('اللي ليك',S.R,'var(--mint)')}
+      ${S.R.map(i=>`<div class="arow"><span class="nm"><bdi>${esc(i.label)}</bdi></span><span class="vl n" style="color:var(--mint)">${fmt(i.amt)}</span></div>`).join('')}
+      <div style="padding:10px 16px 14px">${saleForm('spend')}</div>
     </div>`:''}
   </div>`;
 }
@@ -4293,6 +4331,7 @@ ${s.cycle==='trial'
         <button class="btn ghost" onclick="app.cancelOwedGet()">إلغاء</button>
       </div>`:''}`;
       });
+      if(owedOpen||one)body+=`<div style="padding:4px 16px 12px">${saleForm('owed')}</div>`;
       rows.push((one?'':`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
       ${RAIL(4,'')}
       <span class="g"><span class="t">فلوس ليك <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span></span>
@@ -4787,6 +4826,7 @@ function oPaidInfo(){
 function peopleNames(){
   const out=[],ks={},add=n=>{n=String(n||'').trim();if(n&&!ks[pk(n)]){ks[pk(n)]=1;out.push(n);}};
   (D.owed||[]).forEach(o=>add(o.who));
+  (D.sales||[]).forEach(sl=>add(sl.who));
   (D.subs||[]).forEach(s=>(s.people||[]).forEach(p=>add(p.name)));
   debtNames().forEach(add);
   return out.slice(0,8);
@@ -7553,7 +7593,7 @@ function undoRecord(k,pre,ui){
   const txChanged=!jeq(a.txns,b.txns);
   /* تغيير في اشتراك أو حساب أو شهادة... من غير رسالة: برضو بيتسجل، عشان زرار التراجع
      مايفضلش شايل عملية قديمة ويرجّعها بعد حاجة اتعملت بعدها */
-  const UNDO_COLS=['cardStmts','subs','certs','installments','owed','accounts','vouchers','vehicles','gams','closings','floatLoans','ofees','cats','icats','ocats','arrPend'];
+  const UNDO_COLS=['sales','cardStmts','subs','certs','installments','owed','accounts','vouchers','vehicles','gams','closings','floatLoans','ofees','cats','icats','ocats','arrPend'];
   const chCol=UNDO_COLS.find(c=>!jeq(a[c],b[c]));
   if(!txChanged&&!_lastToast&&!chCol)return;
   if(!txChanged&&!_lastToast&&!_undoLbl)_undoLbl=undoColLabel(chCol,a,b);
@@ -7562,7 +7602,7 @@ function undoRecord(k,pre,ui){
   showUndoToast();
   if(tab==='log')bgRender();
 }
-const UNDO_COL_NM={cardStmts:'كشف',subs:'اشتراك',certs:'شهادة',installments:'قسط',owed:'فلوس عند حد',accounts:'حساب',vouchers:'فاوتشر',
+const UNDO_COL_NM={sales:'بيعة',cardStmts:'كشف',subs:'اشتراك',certs:'شهادة',installments:'قسط',owed:'فلوس عند حد',accounts:'حساب',vouchers:'فاوتشر',
   vehicles:'عربية',gams:'جمعية',closings:'تقفيل',floatLoans:'سلفة عهدة',ofees:'رسوم',cats:'تصنيف',icats:'نوع دخل',ocats:'تصنيف مكتب',arrPend:'مصاريف تدبير'};
 function undoColLabel(c,a,b){
   const n=UNDO_COL_NM[c]||'';const la=(a[c]||[]).length,lb=(b[c]||[]).length;
@@ -7591,7 +7631,7 @@ function undoLabel(a,b){
    التعديل بيفتح نفس الشاشة بنفس الخانات، والحفظ بيشيل السطور القديمة ويعمل الجديدة،
    فالدفترين مايختلفوش أبدًا. المسح بيمسح العملية كلها. */
 /* الحركات القديمة (قبل العمليات): لو بسيطة من شاشة التسجيل بنبني خاناتها منها عشان تتعدل بنفس الشاشة */
-const OP_SPECIAL=['refWait','retOf','itemOf','refFx','refOn','refFee','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
+const OP_SPECIAL=['saleOf','refWait','retOf','itemOf','refFx','refOn','refFee','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
   'flIn','flOut','flBack','ocard','omine','debt','debtPay','paidBy','saveInt','link','items','usd','swap','toAmt','fxGain','repay','pending','hold','stampFee','fromOffice','fromSms','needs','egp','egpv','returned','closeSet'];
 function legacyOk(t){
   if(!t||t.op||(t.book||'me')!=='me')return false;
@@ -8674,16 +8714,22 @@ const app=new Proxy({
     const who=key==='__none__'?'':key;
     const items=[];
     openOwed().forEach(o=>{if(pk(o.who)===pk(who))items.push({src:'owed',ref:o});});
+    openSales().forEach(sl=>{if(pk(sl.who)===pk(who))items.push({src:'sale',ref:sl});});
     (D.subs||[]).forEach(s=>openDues(s).forEach(d=>{
       if(pk(d.who)===pk(who))items.push({src:'due',ref:d,sub:s});}));
     if(who){const ov=debtOver(who);if(ov>0.005)items.push({src:'over',ref:{date:'',amount:ov}});}
     return items;
   },
+  saleGo(at){saleOpen=(saleOpen===at?'':at);saleD={what:'',who:'',amount:''};render();},
+  saleSet(k,v){saleD[k]=v;setDisabled('salesave',saleOk());},
+  saleWho(n){saleD.who=n;render();},
+  saleSave(){if(!saleOk())return;
+    D.sales.push({id:uid(),what:String(saleD.what).trim(),who:String(saleD.who).trim(),amount:Math.round((Number(onlyNum(saleD.amount))||0)*100)/100,date:today()});
+    saleOpen='';saleD={what:'',who:'',amount:''};save();render();app.toast('اتضافت البيعة');},
   confirmOwedGet(gid){
     const list=app.owedGroup(gid);
     if(!list.length||!owedAcct)return;
     const r2=x=>Math.round(x*100)/100;
-    const total=r2(list.reduce((a,x)=>a+Number(x.ref.amount),0));
     const key=String(gid).replace(/^g_/,'');
     const who=key==='__none__'?'':key;
     /* لو عليك له حاجة: بتتخصم من اللي ليك من غير ما فلوس تتحرك */
@@ -8728,6 +8774,9 @@ const app=new Proxy({
     const list=app.owedGroup(gid);
     const owedIds=list.filter(x=>x.src==='owed').map(x=>x.ref.id);
     const dueIds=list.filter(x=>x.src==='due').map(x=>x.ref.id);
+    /* بيعة: لو استلمت منها حاجة بتتقفل على كده (دفعاتها بتفضل)، ولو لأ بتتشال */
+    const saleIds=list.filter(x=>x.src==='sale').map(x=>x.ref.id);
+    D.sales=(D.sales||[]).filter(sl=>saleIds.indexOf(sl.id)<0||(salePaid(sl)>0.005&&(sl.closed=true)));
     /* اللي اتحصّل منه جزء بيتقفل على اللي وصل (والباقي بيرجع على تصنيف المصروف) */
     const close=o=>{if((Number(o.gotAmount)||0)>0){o.got=true;o.gotOn=today();return true;}return false;};
     D.owed=(D.owed||[]).filter(o=>owedIds.indexOf(o.id)<0||close(o));

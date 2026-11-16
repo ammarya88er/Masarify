@@ -29,7 +29,7 @@ function oexp(run,acc,extra){run("app.setBook('office');app.go('add');app.oKind(
 }
 { // ٦٦ أنواع الدخل
   const {run,V}=boot(seed());
-  t('الأنواع الأساسية موجودة', run("D.icats.map(c=>c.label).join()")==='مرتب,دخل تاني,فرق فلوس,عائد الشهادات');
+  t('الأنواع الأساسية موجودة', run("D.icats.map(c=>c.label).join()")==='مرتب,دخل تاني,فرق فلوس,عائد الشهادات,بيع حاجات');
   run("app.go('settings');app.toggleSet('cats');app.toggleSetSub('icats');");
   let v=V();t('صف أنواع الدخل في الإعدادات', v.indexOf('newicat')>-1&&v.indexOf("icatDel('salary')")<0&&v.indexOf("askDel('icatsalary')")<0);
   run("document.getElementById('newicat').value='تيب';app.icatAdd();");

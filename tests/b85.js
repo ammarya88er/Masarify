@@ -13,8 +13,8 @@ const sub=o=>Object.assign({id:'a',name:'خدمة',amount:100,cur:'EGP',cycle:'m
   t('«ولو رجعلك» عليه', Math.abs(c.z-(c.y+50))<0.01);
   t('مفيش «بعد اشتراكات الكارت»', V().indexOf('بعد اشتراكات الكارت')<0&&V().indexOf('بعد كل اللي عليك')>-1);
   run("app.spendToggle();");
-  t('التفاصيل: عنوان واحد ومتظبط بمسافة', (V().match(/class="sph">في «بعد كل اللي عليك»/g)||[]).length===1&&V().indexOf('اللي عليك لكارت المشتريات')>-1);
-  t('ليك عند الناس سطر زي الباقي', /<span class="nm">ليك عند الناس<\/span>/.test(V()));
+  t('التفاصيل: عنوان واحد ومتظبط بمسافة', (V().match(/<span>باقي اللي عليك<\/span>/g)||[]).length===1&&V().indexOf('اللي عليك لكارت المشتريات')>-1);
+  t('اللي ليك: كل واحد باسمه بلون تاني', /<span>اللي ليك<\/span>/.test(V())&&/<bdi>علي<\/bdi><\/span><span class="vl n" style="color:var\(--mint\)">50</.test(V()));
 }
 { // ٢ الاشتراكات المتوقفة
   const S=seed({txns:[sal],subs:[sub({id:'z',name:'متوقف',next:'2026-10-20',cancelAtEnd:true}),sub({id:'y',name:'هيقف',next:'2026-11-01',cancelAtEnd:true}),sub({id:'a',name:'شغال',next:'2026-11-20'})]});
