@@ -629,6 +629,8 @@ let D=JSON.parse(JSON.stringify(DEFAULT));
 let tab='home', wtab='accounts', month=monthOf(today()), q='', msg='', autoMsg='';
 let openTxn=null, editAcct=null, payFor=null, payMode='front', editAmt=false, payDate=today(), fixFor=null, convFor=null;
 let insEdit=null, iDraft={};
+/* «قسّطها» من السجل */
+let qstFor=null, qDraft={};
 let showIns=false, showCert=false, showSub=false;
 let showGam=false, gamEdit=null, gamAct=null, gamDraft=null;
 const gamNew=()=>({name:'',role:'member',amount:'',months:'',start:monthOf(today()),turn:'',prePaid:'',payMode:'day',day:'5',account:'',members:[{name:'',turn:''}]});
@@ -738,6 +740,9 @@ function normalizeData(){
     if(!i.payments)i.payments=[];
   });
   if(!D.subs)D.subs=[];
+  /* دفعة اشتراك حركتها مش في السجل: بتتشال من الاشتراك بس (مصاريف التدبير بتاعتها لو موجودة بتفضل) */
+  {const ids=new Set((D.txns||[]).map(t=>t.id));
+    D.subs.forEach(s=>{if(s.payments)s.payments=s.payments.filter(p=>!p.t||ids.has(p.t));});}
   D.subs.forEach(s=>{
     if(!s.payments)s.payments=[];
     if(!s.dues)s.dues=[];
@@ -887,9 +892,8 @@ function normalizeData(){
   if(!D.ofees)D.ofees=[];
   if(!D.groups)D.groups=[];
   if(!D.ofeeLimit)D.ofeeLimit=200;
-  if(!D.stmtDay)D.stmtDay=20;
-  if(!D.graceDay)D.graceDay=15;
-  if(D.insureRate===undefined)D.insureRate=0.9;
+  /* إعدادات الكارت القديمة على مستوى البرنامج: كل كارت بقى شايل نسخته فوق، فبتتشال */
+  delete D.stmtDay;delete D.graceDay;delete D.insureRate;
   if(!D.stmts)D.stmts=[];
   if(!D._stmtFix){
     D._stmtFix=1;
@@ -1216,6 +1220,29 @@ function fxAvg(id,skip,upto){
   });
   return u>1e-6?b/u:fxRate(c);
 }
+/* تكلفة كل اللي طلع من حسابات العملة (وفرق العملة في التحويل للجنيه) بتتحسب من جديد
+   لما حركة قديمة على الحساب تتغير أو تتمسح أو تتضاف بتاريخ قديم. */
+function fxSig(d){
+  const fx={};(d.accounts||[]).forEach(a=>{if(a.cur&&a.cur!=='EGP')fx[a.id]=[a.opening,a.openRate,a.cur];});
+  if(!Object.keys(fx).length)return '';
+  return JSON.stringify([fx,(d.txns||[]).filter(t=>(t.book||'me')==='me'&&(fx[t.account]||fx[t.to])).map(t=>{
+    const inn=t.kind!=='transfer'&&(t.kind==='income'||t.debt);
+    return [t.id,t.kind,t.amount,t.date,t.account,t.to,t.toAmt,inn?t.egp:0];})]);
+}
+function fxRecalc(){
+  const r2=x=>Math.round(x*100)/100;let ch=false;
+  const set=(t,k,v)=>{if(v===undefined){if(t[k]!==undefined){delete t[k];ch=true;}}else if(t[k]!==v){t[k]=v;ch=true;}};
+  /* مرتين: تحويل من عملة لعملة بيشيل تكلفة جاية من حساب تاني */
+  for(let p=0;p<2;p++)D.txns.slice().reverse().forEach(t=>{
+    if((t.book||'me')!=='me'||!isFxAcc(t.account))return;
+    const avg=fxAvg(t.account,t.id,t.date), v=Number(t.amount)||0;
+    if(t.kind==='transfer'){
+      if(isFxAcc(t.to))set(t,'egpv',r2(v*avg));
+      else if(t.toAmt!==undefined){const g=r2((Number(t.toAmt)||0)-v*avg);set(t,'fxGain',Math.abs(g)>=0.01?g:undefined);}}
+    else if(t.kind==='expense'&&!t.debt&&t.egp!==undefined)set(t,'egp',r2(v*avg));
+  });
+  return ch;
+}
 /* أسعار العملات بتتجدد لوحدها مرة في اليوم، إلا اللي انت كاتبه بإيدك */
 let fxBusy=false;
 async function fxFetch(force){
@@ -1425,6 +1452,30 @@ function insBankLeft(i){
   const sc=insSchedule(i),p=Number(i.paid)||0;
   return Math.round(sc.slice(p).reduce((x,e)=>x+e.prin,0)*100)/100;
 }
+/* قسط كارت: فيه فايدة اتأكدت؟ المبلغ والتاريخ بيتقفلوا عشان رقم اتأكد مايتغيرش */
+const insPlanLocked=i=>D.txns.some(t=>t.insInt&&t.insId===i.id&&!t.pending);
+const insBuyTxn=i=>D.txns.find(t=>t.insBuy===i.id);
+/* قسط كارت اتغير أصله أو تاريخ شراءه: القسط الشهري بنفس النسبة، والجدول والفايدة اللي لسه مستنية من جديد */
+function insReplan(i,P0){
+  const a=D.accounts.find(x=>x.id===i.src);if(!a)return;
+  const P=Number(i.principal)||0;
+  if(P0>0&&Math.abs(P-P0)>0.005)i.monthly=Math.round((Number(i.monthly)||0)*P/P0*100)/100;
+  D.txns=D.txns.filter(t=>!(t.insInt&&t.insId===i.id&&t.pending));
+  const fk=mAdd(stmtKey(i.buyDate,a),1);i.firstKey=fk;i.firstMonth=fk;i.day=acctStmtDay(a);
+  i.intPosted=0;i.paid=0;cardInsAll();
+}
+/* تعديل قسط كارت من شاشة الأقساط: الاسم والمكان والتصنيف والمبلغ والتاريخ بيتغيروا في المصروف كمان */
+function insBankApply(i,v){
+  const t=insBuyTxn(i);
+  if(v.name){i.name=v.name;if(t)t.note=v.name;}
+  if(t&&v.place!==undefined)t.place=String(v.place).trim()||undefined;
+  if(t&&v.cat&&!(t.items&&t.items.length))t.cat=v.cat;
+  if(insPlanLocked(i))return;
+  const P0=Number(i.principal)||0, P=(v.amount>0&&!(t&&t.items&&t.items.length))?Math.round(v.amount*100)/100:P0, d=v.date||i.buyDate;
+  if(Math.abs(P-P0)<0.005&&d===i.buyDate)return;
+  i.principal=P;i.buyDate=d;if(t){t.amount=P;t.date=d;}
+  insReplan(i,P0);
+}
 function cardInsAll(){
   let changed=false;const td=today();
   (D.installments||[]).filter(i=>i.mode==='bank').forEach(i=>{
@@ -1437,6 +1488,58 @@ function cardInsAll(){
     });
   });
   if(changed){sortTxns();save();}
+}
+/* «عدّل» لقسط الكارت: الخانات اللي ليها معنى بس (المدة والنسبة ويوم الكشف جايين من البنك) */
+function insBankEditForm(i){
+  const t=insBuyTxn(i), lk=insPlanLocked(i), it=!!(t&&t.items&&t.items.length);
+  return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+    <label class="f" style="margin-top:0">الاسم</label>
+    <input class="f" value="${esc(iDraft.name)}" oninput="app.iDraftSet('name',this.value)">
+    <label class="f">المكان</label>
+    <input class="f" placeholder="اسم المحل أو المكان" value="${esc(iDraft.place||'')}" oninput="app.iDraftSet('place',this.value)">
+    ${it?'':`<label class="f">التصنيف</label>
+    ${pickRow('icat'+i.id,D.cats.map(c=>({id:c.id,label:esc(c.label)})),iDraft.cat,"((v)=>app.iDraftPick('cat',v))",1)}`}
+    ${lk?`<div class="hint">اتأكدت فايدة في القسط ده قبل كده، فالمبلغ وتاريخ الشراء مش بيتغيروا.</div>`:`
+    <label class="f">المبلغ الأصلي</label>
+    ${it?`<div class="hint" style="margin-top:0">المبلغ جاي من أصناف الفاتورة.</div>`
+      :`<input class="f" type="text" inputmode="decimal" value="${esc(iDraft.total)}" oninput="app.iDraftSet('total',numFix(this,1))">
+    <div class="hint" id="insbankhint">${insBankHint(i)}</div>`}
+    <label class="f">تاريخ الشراء</label>
+    ${dateField(iDraft.buyDate,'app.iDraftDate')}`}
+    <div class="hint">التعديل بيتعمل في مصروفه في السجل كمان.</div>
+    <button class="btn" onclick="app.saveInsEdit('${i.id}')">احفظ التعديل</button>
+    <button class="btn ghost" onclick="app.cancelInsEdit()">إلغاء</button>
+  </div>`;
+}
+function insBankHint(i){
+  const P0=Number(i.principal)||0, P=Number(onlyNum(iDraft.total))||0;
+  if(!(P>0)||Math.abs(P-P0)<0.005)return 'لو غيّرت المبلغ، القسط الشهري هيتحسب بنفس النسبة.';
+  return 'القسط الشهري هيبقى <span class="n">'+fmt(Math.round((Number(i.monthly)||0)*P/P0*100)/100)+'</span> جنيه.';
+}
+/* «قسّطها»: مصروف أو فاتورة على كارت مشتريات تتحول لقسط، والفاتورة بتفضل بأصنافها */
+const canQst=t=>(t.book||'me')==='me'&&t.kind==='expense'&&isCreditAcc(t.account)&&!t.insBuy&&Number(t.amount)>0
+  &&!t.pending&&!t.refWait&&!t.link&&!t.paidBy&&!t.lent&&!['insInt','insFee','stampFee','arrFee','accFee','fxDiff','refundOf','retOf','itemOf'].some(k=>t[k]);
+function qstHint(t){
+  const P=Math.abs(Number(t.amount)||0),n=Number(onlyNum(qDraft.months))||0,pmt=Number(onlyNum(qDraft.monthly))||0;
+  if(!(n>0)||!(pmt>0))return '';
+  const tot=Math.round((pmt*n-P)*100)/100;
+  return tot<=0.005?'من غير فايدة.':'الفايدة على المدة كلها حوالي <span class="n">'+fmt(tot)+'</span> جنيه.';
+}
+const qstOk=()=>Number(onlyNum(qDraft.months))>0&&Number(onlyNum(qDraft.monthly))>0;
+function qstForm(t){
+  return `<div onclick="event.stopPropagation()" style="border-top:1px solid var(--line);margin-top:10px;padding-top:4px">
+    <div class="hint">هتتقسط <span class="n">${fmt(Math.abs(Number(t.amount)||0))}</span> جنيه على ${esc(accName(t.account))} من يوم ${dLabel(t.date)}.</div>
+    <label class="f">عدد الشهور</label>
+    <input class="f" type="text" inputmode="numeric" value="${esc(qDraft.months||'')}" oninput="app.qSet('months',numFix(this,0))">
+    <label class="f">القسط الشهري</label>
+    <input class="f" id="qmonthly" type="text" inputmode="decimal" value="${esc(qDraft.monthly||'')}" oninput="app.qSet('monthly',numFix(this,1))">
+    <label class="f">النسبة الشهرية ٪</label>
+    <input class="f" id="qrate" type="text" inputmode="decimal" value="${esc(qDraft.rate||'')}" oninput="app.qSet('rate',numFix(this,1))">
+    <div class="hint">اكتب واحدة والتانية بتتحسب. ونسبة صفر يعني من غير فايدة.</div>
+    <div class="hint" id="qcalc">${qstHint(t)}</div>
+    <button class="btn" id="qsave" ${qstOk()?'':'disabled'} onclick="app.qSave('${t.id}')">قسّطها</button>
+    <button class="btn ghost" onclick="app.qClose()">إلغاء</button>
+  </div>`;
 }
 /* تلميح شاشة إضافة قسط على كارت */
 function insCalcHint(){
@@ -2443,10 +2546,10 @@ const subStep=(s,n)=>{const m=dAdd(String(s.next).slice(0,7)+'-01',n).slice(0,7)
 const subKeepDay=s=>{if(!Number(s.day)&&s.next)s.day=Number(String(s.next).slice(8,10))||undefined;};
 const subNextOf=s=>{subKeepDay(s);return subStep(s,s.cycle==='yearly'?12:1);};
 const subPrevOf=s=>{subKeepDay(s);return subStep(s,s.cycle==='yearly'?-12:-1);};
-/* حساب الاشتراكات الافتراضي: حساب اسمه card لو موجود، وإلا أول كارت، وإلا أول حساب */
+/* حساب الاشتراكات الافتراضي: أول كارت مشتريات، وإلا أول حساب */
 function subDefAcc(){
   const l=accountsFor('me').filter(a=>!a.closed&&!isSave(a));
-  const c=l.find(a=>a.id==='card')||l.find(a=>a.credit)||l[0];return c?c.id:'card';
+  const c=l.find(a=>a.credit)||l[0];return c?c.id:'';
 }
 const subAcc=s=>(s.account&&(D.accounts||[]).some(a=>a.id===s.account))?s.account:subDefAcc();
 const cycleLabel=s=>s.cycle==='trial'?'تجربة مجانية':s.cycle==='yearly'?'سنوي':'شهري';
@@ -4448,8 +4551,10 @@ function txnRow(t,noDate){
       const icq=(t.fromOffice&&t.kind==='income'&&(t.book||'me')==='me')?`<div style="margin-top:8px"><div class="hint" style="margin:0 0 6px">نوعه في دخلك:</div>${pickRow('ticat'+t.id,D.icats.filter(c=>c.id!=='salary').map(c=>({id:c.id,label:esc(c.label)})),icatOf(t).id,"((x)=>app.setTxnIcat('"+t.id+"',x))",1)}</div>`:'';
       const locked=txnLock(t);
       if(locked)return icq+`<div class="hint">${locked==='set'?'دي حركة من التقفيل.':'الحركة دي جوه فترة متقفلة.'} عشان تعدلها اتراجع عن التقفيل الأول.</div>`;
+      if(qstFor===t.id&&canQst(t))return qstForm(t);
       return eTxn&&eTxn.id===t.id?txnEditForm(t):icq+`<div class="chips" style="margin-top:10px">
         <button class="chip sm" onclick="app.startTxnEdit(event,'${t.id}')">عدّل</button>
+        ${canQst(t)?`<button class="chip sm" onclick="app.qOpen(event,'${t.id}')">قسّطها</button>`:''}
         ${(t.book!=='office'&&t.kind==='expense'&&!t.refundDone)?`<button class="chip sm${t.refundSince?' on':''}" onclick="app.toggleRefundWait(event,'${t.id}')">${t.refundSince?'مش مستني مرتجع':'مستني مرتجع'}</button>`:''}
         <span style="margin-inline-start:auto;display:flex;gap:8px">${delBtn('txn'+t.id,`app.delTxn(event,'${t.id}')`,(txnGroup(t).length>1||D.txns.some(x=>x.retOf===t.id||x.itemOf===t.id||x.refFx===t.id||x.refFee===t.id||(t.insBuy&&x.insId===t.insBuy)))?'امسح العملية كلها':'امسح')}</span>
       </div>`;})()}
@@ -4485,6 +4590,7 @@ function entryOk0(){const k=draft.kind;
   if(k==='transfer'&&draft.swap)return !!(Number(onlyNum(draft.amount))>0&&draft.sMy&&draft.sOff
     &&(draft.sShared||sharedAccs().length===1));
   const lent=k==='expense'&&draft.owed&&draft.owedKind==='lent';
+  if(fxOver())return false;
   if(xchOn()&&!(Number(onlyNum(draft.toAmt))>0&&(!xchAsk()||draft.fxOf)))return false;
   /* حساب بعملة تانية من غير سعر: القيمة بالجنيه هتطلع صفر */
   if(draft.account&&isFxAcc(draft.account)&&!fxRate(accCur(draft.account))&&!(k==='transfer'&&fxAvgHas(draft.account)))return false;
@@ -4888,9 +4994,11 @@ function txnEditForm(t){
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.liters)}" oninput="app.eTxnSet('liters',numFix(this,1))">
       <div class="hint">${t.litersEst?'الرقم ده تقريبي — اكتب اللي في الفاتورة والكلمة هتختفي.':'لو سبتها فاضية هتترجع لحساب تقريبي من السعر.'}</div>`:''}
 
-    ${(isTransfer||isFxAcc(t.account)||t.paidBy)?'':`<label class="f">الحساب</label>
+    ${(isTransfer||isFxAcc(t.account)||t.paidBy||t.insBuy)?'':`<label class="f">الحساب</label>
       ${payChips(eTxn.account,'app.eTxnAcct','',t.book||'me','',t.kind==='transfer',(t.kind==='transfer'||(t.kind==='settle'&&t.dir==='out'))?{src:1}:null)}`}
 
+    ${(function(){const ins=t.insBuy&&(D.installments||[]).find(x=>x.id===t.insBuy);if(!ins)return '';
+      return '<div class="hint">'+(insPlanLocked(ins)?'اتأكدت فايدة في القسط ده، فالمبلغ والتاريخ مش بيتغيروا.':'ده مصروف قسط: الاسم والمبلغ والتاريخ بيتغيروا في القسط كمان، والقسط الشهري بيتحسب بنفس النسبة.')+'</div>';})()}
     <label class="f">التاريخ</label>
     ${dateField(eTxn.date,'app.eTxnDate','','',(D.lastClose&&txnGroup(D.txns.find(x=>x.id===eTxn.id)||{}).some(x=>x.book==='office'))?dayShift(D.lastClose,1):'')}
 
@@ -4909,7 +5017,13 @@ function usdHint(){
 /* تحويل بين عملتين */
 const xchOn=()=>draft.kind==='transfer'&&!draft.swap&&!!draft.account&&!!draft.to&&accCur(draft.account)!==accCur(draft.to);
 const xchAsk=()=>xchOn()&&isFxAcc(draft.account)&&!isFxAcc(draft.to);
+/* تحويل من حساب بعملة تانية بأكتر من اللي فيه: ممنوع (تكلفته بالجنيه مش هتبقى معروفة) */
+function fxOver(){
+  if(draft.kind!=='transfer'||draft.swap||!draft.account||!isFxAcc(draft.account))return false;
+  return (Number(onlyNum(draft.amount))||0)>(balances('me')[draft.account]||0)+0.005;}
+const fxOverTxt=()=>fxOver()?'<b style="color:var(--clay)">ده أكتر من اللي في الحساب (<span class="n">'+fmt(Math.max(0,balances('me')[draft.account]||0))+'</span> '+esc(fxName(accCur(draft.account)))+') — قلّله.</b>':'';
 function xchHint(){
+  if(fxOver())return fxOverTxt();
   if(isFxAcc(draft.account)&&!fxRate(accCur(draft.account))&&!fxAvgHas(draft.account))return 'سعر '+esc(fxDef(accCur(draft.account)))+' لسه ماجاش — حطه من الإعدادات ← العملات التانية.';
   const a=Number(onlyNum(draft.amount))||0, r=Number(onlyNum(draft.toAmt))||0;
   if(!(a>0&&r>0))return '';
@@ -4965,7 +5079,7 @@ function vAdd0(){
 
 
 
-    ${draft.account==='card'&&k!=='transfer'?`<label class="f">العملة</label>
+    ${isCreditAcc(draft.account)&&k!=='transfer'?`<label class="f">العملة</label>
       ${pickRow('cur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],draft.cur,'app.setCur',1)}`:''}
 
 
@@ -5075,6 +5189,7 @@ function vAdd0(){
       <span>${esc(fxName(accCur(draft.to)))}</span>
     </div>
     <div class="hint" style="text-align:center" id="xchhint">${xchHint()}</div>`:''}
+    ${(k==='transfer'&&fxA&&!xchOn())?`<div class="hint" style="text-align:center" id="fxoverhint">${fxOverTxt()}</div>`:''}
 
     <div id="vchbox">${(k==='expense'&&!fxA&&draft.cur==='EGP'&&draft.account!=='__other__')?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
 
@@ -6348,6 +6463,8 @@ function wIns(){
       ${dateField(insDraft.buyDate||today(),'app.insBuyDate')}
       <label class="f">التصنيف</label>
       ${pickRow('inscat',D.cats.map(c=>({id:c.id,label:esc(c.label)})),insDraft.cat,'app.insCat')}
+      <label class="f">المكان</label>
+      <input class="f" placeholder="اسم المحل أو المكان" value="${esc(insDraft.place||'')}" oninput="app.insSet('place',this.value)">
       <label class="f">المبلغ الأصلي</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(insDraft.total)}" oninput="app.insSet('total',numFix(this,1))">
       <label class="f">عدد الشهور</label>
@@ -6409,7 +6526,8 @@ function wIns(){
           ${(i.payments||[]).length?`<button class="chip sm" onclick="app.undoIns('${i.id}')">${i.payments[i.payments.length-1].type==='skip'?'إلغاء التأجيل':'تراجع آخر دفعة'}</button>`:''}
           ${delBtn('ins'+i.id,`app.delIns('${i.id}')`)}
         </div>
-        ${insEdit===i.id?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        ${(insEdit===i.id&&i.mode==='bank')?insBankEditForm(i):''}
+        ${(insEdit===i.id&&i.mode!=='bank')?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
           <label class="f" style="margin-top:0">الاسم</label>
           <input class="f" value="${esc(iDraft.name)}" oninput="app.iDraftSet('name',this.value)">
           <label class="f">المبلغ الكامل</label>
@@ -6421,9 +6539,8 @@ function wIns(){
           <label class="f">يوم الاستحقاق</label>
           <input class="f" type="text" inputmode="numeric" value="${esc(iDraft.day)}" oninput="app.iDraftSet('day',numFix(this,0))">
           <label class="f">مقسط على إيه؟</label>
-          ${/* قسط كارت يفضل على كارت، والسلفة تفضل سلفة: التحويل بينهم بيغيّر طريقة السداد كلها */
-            i.src==='office'?'<div class="hint" style="margin-top:0">سلفة</div>'
-            :pickRow('isrc'+i.id,accountsFor('me').filter(a=>a.credit).map(a=>({id:a.id,label:esc(a.name)})),iDraft.src,"((v)=>app.iDraftPick('src',v))",1)}
+          ${/* قسط الكارت ليه شاشة لوحده، فهنا السلفة بتفضل سلفة */
+            '<div class="hint" style="margin-top:0">سلفة</div>'}
           ${iDraft.src==='office'?`<label class="f">من مين؟ (اختياري)</label>
           <input class="f" value="${esc(iDraft.from||'')}" oninput="app.iDraftSet('from',this.value)">`:''}
           <label class="f">بيتدفع من أنهي حساب؟</label>
@@ -7786,6 +7903,9 @@ function wrapAct(o,f,k){
     const pre=JSON.stringify(D), ui=uiSnap(), my=++actSeq;_lastToast='';
     let r;
     try{r=OPFORMS[k]?opWrap(o,f,k,arguments):f.apply(o,arguments);}finally{actDepth--;}
+    /* حركة على حساب بعملة تانية اتغيرت: التكلفة وفرق العملة يتحسبوا من جديد (التراجع بيرجّع زي ما كان بالظبط) */
+    if(fxOn()&&k!=='undoLast'&&!(r&&typeof r.then==='function')){const s0=fxSig(JSON.parse(pre));
+      if(s0!==fxSig(D)&&fxRecalc()){save();render();}}
     /* عملية بتستنى (رسالة بنك): بتتسجل للتراجع بس لو محصلش حاجة تانية وهي مستنية */
     if(r&&typeof r.then==='function')return r.then(v=>{if(actSeq===my)undoRecord('',pre,ui);return v;});
     undoRecord('',pre,ui);
@@ -8243,6 +8363,10 @@ const app=new Proxy({
       const room=recs.reduce((a,o)=>a+(o.got?0:(Number(o.amount)||0)),0);
       if(nv>ov+room+0.005){app.toast('ده أكتر من اللي كان عنده');return;}}}
     if(eTxn.date&&eTxn.date!==t.date&&closedDay(eTxn.date)&&txnGroup(t).some(x=>x.book==='office')){app.toast('التاريخ ده جوه فترة متقفلة');return;}
+    /* مصروف قسط كارت اتأكدت فيه فايدة: المبلغ والتاريخ مايتغيروش */
+    {const ins=t.insBuy&&(D.installments||[]).find(x=>x.id===t.insBuy);
+      if(ins&&insPlanLocked(ins)&&((eTxn.date&&eTxn.date!==t.date)||(eTxn.amount!==undefined&&!(t.items&&t.items.length)&&Math.abs((Number(onlyNum(eTxn.amount))||0)-Math.abs(Number(t.amount)||0))>0.005))){
+        app.toast('اتأكدت فايدة في القسط ده — المبلغ والتاريخ مايتغيروش');return;}}
     const old=JSON.parse(JSON.stringify(t));
     const hasItems=t.items&&t.items.length;
     const same=linkSame(t);
@@ -8324,6 +8448,10 @@ const app=new Proxy({
       if(left<=0.005){o.got=true;o.gotOn=o.gotOn||t.date;o.amount=full;delete o.orig;}
       else{o.got=false;delete o.gotOn;o.amount=left;o.orig=full;}});
     (D.installments||[]).forEach(i=>(i.payments||[]).forEach(p=>{if(p.t===t.id){if(amtCh)p.amount=Number(t.amount)||0;if(dCh)p.d=t.date;}}));
+    /* مصروف قسط كارت: الاسم والمبلغ والتاريخ بيمشوا في القسط */
+    {const ins=t.insBuy&&(D.installments||[]).find(x=>x.id===t.insBuy);
+      if(ins){const nm=String(t.note||'').trim();if(nm)ins.name=nm;
+        if(amtCh||dCh){const P0=Number(ins.principal)||0;ins.principal=Math.abs(Number(t.amount)||0);ins.buyDate=t.date;insReplan(ins,P0);}}}
     (D.subs||[]).forEach(x=>(x.payments||[]).forEach(p=>{if(p.t===t.id){if(amtCh)p.paid=Number(t.amount)||0;if(dCh)p.d=t.date;}}));
     (D.certs||[]).forEach(c=>(c.payments||[]).forEach(p=>{if(p.t===t.id&&dCh)p.d=t.date;}));
     if(t.link)linkSync(t,old,same);
@@ -8453,6 +8581,7 @@ const app=new Proxy({
     if(uh)uh.innerHTML=usdHint();
     const xh=document.getElementById('xchhint');if(xh)xh.innerHTML=xchHint();
     const fh=document.getElementById('fxamthint');if(fh)fh.innerHTML=fxAmtHint();
+    const oh=document.getElementById('fxoverhint');if(oh)oh.innerHTML=fxOverTxt();
     if(k!=='amount')return;
     const total=Number(onlyNum(draft.amount))||0;
     setText('arrprev',fmt(arrEst(total)));
@@ -8494,7 +8623,7 @@ const app=new Proxy({
   donGo(){editInline=null;if(editOp)app.cancelEditOp();draft=newDraft();draft.kind='expense';draft.cat='donation';draft.catPicked=true;book='me';tab='add';render();window.scrollTo(0,0);},
   donSkip(){const L=salaryDatesAll().slice(-1)[0];if(!L)return;D.donSkip=L;save();render();},
   setKind(k){draft.kind=k;if(k==='transfer')draft.cur='EGP';if(k!=='expense'&&draft.account==='__other__')draft.account='';render();},
-  setAccount(id){draft.account=id;draft.svFee=undefined;draft.svFeeAmt='';if(draft.to===id)draft.to='';draft.toAmt='';draft.fxOf='';if(id!=='card')draft.cur='EGP';
+  setAccount(id){draft.account=id;draft.svFee=undefined;draft.svFeeAmt='';if(draft.to===id)draft.to='';draft.toAmt='';draft.fxOf='';if(!isCreditAcc(id))draft.cur='EGP';
     /* الوجهة اللي ماينفعش يتحوّل لها من الحساب ده بتتشال، ولو فاضل وجهة واحدة بس بتتختار */
     if(draft.kind==='transfer'){const L=xferToIds(id);if(draft.to&&L.indexOf(draft.to)<0)draft.to='';if(!draft.to&&L.length===1)draft.to=L[0];}
     render();},
@@ -8608,6 +8737,7 @@ const app=new Proxy({
   saveEntry(){
     /* لسه فيه سؤال ماتجاوبش أو نوع دخل مااتختارش */
     if(ynLast||(draft.kind==='income'&&!draft.loan&&!draftIcat()))return;
+    if(fxOver()){app.toast('ده أكتر من اللي في الحساب');return;}
     const amt=Number(onlyNum(draft.amount))||0;
     if(draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();draft.salary=g==='salary';draft.icat=g==='salary'?'':g;}
     if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
@@ -10170,6 +10300,26 @@ const app=new Proxy({
     }
     setDisabled('inssave',insOk());},
   insBuyDate(v){insDraft.buyDate=v;render();},
+  qOpen(e,id){if(e&&e.stopPropagation)e.stopPropagation();qstFor=id;qDraft={months:'',monthly:'',rate:''};eTxn=null;render();},
+  qClose(){qstFor=null;qDraft={};render();},
+  qSet(k,v){qDraft[k]=v;const t=D.txns.find(x=>x.id===qstFor);if(!t)return;
+    const P=Math.abs(Number(t.amount)||0),n=Number(onlyNum(qDraft.months))||0;
+    if(k==='monthly'||k==='rate')qDraft._last=k;
+    if((qDraft._last||'monthly')==='monthly'){const r=insRateFrom(P,n,Number(onlyNum(qDraft.monthly))||0);qDraft._r=r;
+      qDraft.rate=r===null?'':String(Math.round(r*1e6)/1e4);const el=document.getElementById('qrate');if(el&&k!=='rate')el.value=qDraft.rate;}
+    else{const r=(Number(onlyNum(qDraft.rate))||0)/100;qDraft._r=r;const m=insPmt(P,n,r);qDraft.monthly=m?String(m):'';
+      const el=document.getElementById('qmonthly');if(el&&k!=='monthly')el.value=qDraft.monthly;}
+    const h=document.getElementById('qcalc');if(h)h.innerHTML=qstHint(t);setDisabled('qsave',qstOk());},
+  qSave(id){
+    const t=D.txns.find(x=>x.id===id);if(!t||!canQst(t)||!qstOk())return;
+    const a=D.accounts.find(x=>x.id===t.account), P=Math.abs(Number(t.amount)||0);
+    const n=Number(onlyNum(qDraft.months))||0, pmt=Number(onlyNum(qDraft.monthly))||0;
+    let r=(qDraft._r!==undefined&&qDraft._r!==null)?qDraft._r:insRateFrom(P,n,pmt);if(r===null)r=0;
+    const fk=mAdd(stmtKey(t.date,a),1), iid=uid();
+    const nm=String(t.note||t.merchant||t.place||catOf(t.items&&t.items.length?t.items[0].cat:t.cat).label||'قسط').trim();
+    D.installments.push({id:iid,name:nm,mode:'bank',src:a.id,account:a.id,principal:P,rate:r,monthly:pmt,
+      months:n,paid:0,intPosted:0,buyDate:t.date,firstKey:fk,firstMonth:fk,day:acctStmtDay(a),total:0,tail:0,payments:[]});
+    t.insBuy=iid;qstFor=null;qDraft={};cardInsAll();sortTxns();save();render();app.toast('اتقسطت');},
   insCat(v){insDraft.cat=v;render();},
   insAccount(id){insDraft.account=id;render();},
   insSrc(v){insDraft.src=v;render();},
@@ -10185,7 +10335,7 @@ const app=new Proxy({
       D.installments.push({id:id,name:nm,mode:'bank',src:a.id,account:a.id,principal:P,rate:r,monthly:pmt,
         months:n,paid:0,intPosted:0,buyDate:bd,firstKey:fk,firstMonth:fk,day:acctStmtDay(a),total:0,tail:0,payments:[]});
       D.txns.unshift({id:uid(),book:'me',kind:'expense',amount:P,cat:insDraft.cat||'other',account:a.id,
-        date:bd,note:nm,insBuy:id});
+        date:bd,note:nm,place:String(insDraft.place||'').trim()||undefined,insBuy:id});
       insDraft={name:'',total:'',monthly:'',months:'',paid:'0',day:'1',account:'',src:''};showIns=false;
       _svDay='';sortTxns();save();render();app.toast('اتحفظ القسط');
       return;
@@ -10207,16 +10357,21 @@ const app=new Proxy({
     const i=D.installments.find(x=>x.id===id);if(!i)return;
     iDraft={name:i.name||'',total:String(i.total||''),monthly:String(i.monthly||''),
       months:String(i.months||''),day:String(i.day||'1'),src:i.src||'office',from:i.from||'',account:i.account||''};
+    if(i.mode==='bank'){const t=insBuyTxn(i);
+      iDraft={name:i.name||'',total:String(i.principal||''),buyDate:i.buyDate||'',place:(t&&t.place)||'',cat:(t&&t.cat)||''};}
     insEdit=id;payFor=null;render();
   },
   cancelInsEdit(){insEdit=null;render();},
-  iDraftSet(k,v){iDraft[k]=v;},
+  iDraftSet(k,v){iDraft[k]=v;
+    if(k==='total'&&insEdit){const i=(D.installments||[]).find(x=>x.id===insEdit), h=document.getElementById('insbankhint');if(i&&h)h.innerHTML=insBankHint(i);}},
+  iDraftDate(v){iDraft.buyDate=v;render();},
   iDraftPick(k,v){iDraft[k]=v;render();},
   iDraftAcct(id){iDraft.account=id;render();},
   saveInsEdit(id){
     const i=D.installments.find(x=>x.id===id);if(!i)return;
     const nm=String(iDraft.name||'').trim();if(nm)i.name=nm;
-    if(i.mode==='bank'){insEdit=null;save();render();app.toast('اتعدل');return;}
+    if(i.mode==='bank'){insBankApply(i,{name:nm,place:iDraft.place,cat:iDraft.cat,amount:Number(onlyNum(iDraft.total))||0,date:iDraft.buyDate});
+      insEdit=null;sortTxns();save();render();app.toast('اتعدل');return;}
     i.total=Number(onlyNum(iDraft.total))||0;
     const mo=Number(onlyNum(iDraft.monthly))||0;if(mo>0)i.monthly=mo;
     const ms=Number(onlyNum(iDraft.months))||0;if(ms>0)i.months=ms;
@@ -10260,6 +10415,9 @@ const app=new Proxy({
     save();render();
   },
   delIns(id){
+    /* المصروف بيفضل مصروف عادي، والفايدة اللي لسه ماتأكدتش بتتشال (اللي اتأكدت بتفضل زي ما هي) */
+    D.txns.forEach(t=>{if(t.insBuy===id)delete t.insBuy;});
+    D.txns=D.txns.filter(t=>!(t.insInt&&t.insId===id&&t.pending));
     D.installments=D.installments.filter(x=>x.id!==id);payFor=null;confirmKey='';save();render();
   },
 

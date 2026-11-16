@@ -14,7 +14,7 @@ const {boot,seed,t,done,r2}=require('./harness');
     sub({id:'e',name:'عرض',amount:100,promo:{amount:50,left:3}}),             // شهر: 50+1.5 ، سنة: 3*51.5+9*103
     sub({id:'f',name:'تجربة هتجدد',amount:60,cycle:'trial',willRenew:true,afterCycle:'monthly'}), // 60+1.8
     sub({id:'g',name:'تجربة هتتلغي',amount:0,cycle:'trial',willRenew:false}),  // 0
-    sub({id:'h',name:'مفيش تدبير',amount:100,payments:[{d:'2026-09-05',t:'x',paid:100,fee:0,feePending:false}]}), // 100
+    sub({id:'h',name:'مفيش تدبير',amount:100,payments:[{d:'2026-09-05',paid:100,fee:0,feePending:false}]}), // 100
   ]});
   const {run,V}=boot(S);
   const mo=run("Math.round((D.subs.reduce((a,s)=>a+subMonthly(s),0))*100)/100");

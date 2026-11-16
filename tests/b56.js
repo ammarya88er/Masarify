@@ -28,7 +28,7 @@ const pay=(run)=>{run("app.paySub('s1');app.confirmPaySub('s1');");return JSON.p
   t('كتبت مبلغ: بقت أيوه', x.run("D.subs[0].arr")===true);
 }
 { // الاشتراكات القديمة بتتحدد من آخر دفعة متأكدة
-  const {run}=boot(seed({subs:[sub({id:'a',payments:[{d:'2026-08-25',t:'x',paid:110,fee:0}]}),sub({id:'b',payments:[{d:'2026-08-25',t:'y',paid:110,fee:3.3}]}),sub({id:'c',payments:[{d:'2026-08-25',t:'z',paid:110,fee:3.3,feePending:true}]}),sub({id:'d',cur:'USD'})]}),SEP);
+  const {run}=boot(seed({subs:[sub({id:'a',payments:[{d:'2026-08-25',paid:110,fee:0}]}),sub({id:'b',payments:[{d:'2026-08-25',paid:110,fee:3.3}]}),sub({id:'c',payments:[{d:'2026-08-25',paid:110,fee:3.3,feePending:true}]}),sub({id:'d',cur:'USD'})]}),SEP);
   t('من الدفعات: لأ / أيوه / فاضي / دولار فاضي', run("JSON.stringify(D.subs.map(s=>s.arr===undefined?'u':s.arr))")===JSON.stringify([false,true,'u','u']));
 }
 { // الفورم والكارت
