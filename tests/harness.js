@@ -20,6 +20,8 @@ function boot(seed,nowUtc){
     if(typeof YN_ENTRY!=='undefined'){YN_ENTRY.forEach(k=>{if(draft[k]===undefined)draft[k]=false;});if(draft.salary===undefined&&!draft.icat&&!draft.icatPicked)draft.salary=true;}
     if(typeof YN_OFFICE!=='undefined')YN_OFFICE.forEach(k=>{if(draftO[k]===undefined)draftO[k]=false;});
     if(typeof scan!=='undefined'&&scan&&scan.split===undefined)scan.split=false;
+    if(typeof scan!=='undefined'&&scan&&scan.hasFee===undefined)scan.hasFee=false;
+    if(typeof scan!=='undefined'&&scan&&scan.fromFloat===undefined)scan.fromFloat=false;
     if(typeof scan!=='undefined'&&scan&&scan.matchYes===undefined&&scan.match)scan.matchYes=false;
     if(typeof render==='function')render();}`,ctx);
   const run=c=>vm.runInContext(String(c).replace(/app\.(saveEntry|oSave|saveReceipt)\(\)/g,'(__yn(),app.$1())'),ctx);
