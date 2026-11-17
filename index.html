@@ -1180,7 +1180,7 @@ function peopleLedger(df){
 const fullDay=d=>{const p=String(d||'').split('-');if(p.length<3)return '';return Number(p[2])+' '+MONTHS[Number(p[1])-1]+(p[0]!==today().slice(0,4)?' '+p[0]:'');};
 /* الحساب اللي بيتسجل عليه مصروف «حد دفعهالي» (فلوسه مابتتحركش) */
 function otherAcc(){
-  const ok=accountsFor('me').filter(a=>!a.closed&&!a.credit&&!isSave(a)&&!isFxAcc(a.id));
+  const ok=accountsFor('me').filter(a=>!a.closed&&!a.credit&&!isStash(a)&&!isFxAcc(a.id));
   const c=ok.find(a=>a.atype==='cash')||ok[0];return c?c.id:'';
 }
 const ofeeBalance=()=>Math.round((D.ofees||[]).reduce((a,f)=>a+(f.type==='take'?-Number(f.amount):Number(f.amount)),0)*100)/100;
@@ -1299,7 +1299,7 @@ const accountsFor=bk=>D.accounts.filter(a=>!a.closed&&(a.scope==='both'||a.scope
 /* في الرئيسية: حسابات الدفتر + أي حساب من الدفتر التاني شايل فلوس للدفتر ده (زي فلوس المكتب في كاشك) */
 function accountsShow(bk){
   const own=accountsFor(bk), b=balances(bk);
-  return own.concat(D.accounts.filter(a=>!a.closed&&!a.credit&&own.indexOf(a)<0&&Math.abs(b[a.id]||0)>=0.005));
+  return own.filter(a=>!isInv(a)).concat(D.accounts.filter(a=>!a.closed&&!a.credit&&!a.inv&&!isInv(a)&&own.indexOf(a)<0&&Math.abs(b[a.id]||0)>=0.005));
 }
 /* «لـ» + اسم الدفتر: «للمكتب» مش «لـالمكتب» */
 /* «لـ» + اسم: «للمكتب»، «لكريم»، ولو الاسم مش عربي «لـJohn» */
@@ -1347,6 +1347,34 @@ const arrEst=v=>Math.floor((Number(v)||0)*ARRRATE+1e-9)/100;
    - العمولة بتتكتب وقت التحويل، وبتتخصم من الوعاء.
    ========================================================================== */
 const isSave=a=>!!a&&a.atype==='save';
+/* ==========================================================================
+   حساب الاستثمار (atype:'invest') — زي منصة تحوّل لها فلوس، ومنها تحط في صناديق أو تشتري أسهم.
+   - رصيد الحساب نفسه = الفلوس اللي في المنصة ولسه ماتحطتش في حاجة.
+   - الصندوق: حساب ادخار عادي (atype:'save'، يومي) عليه inv = الحساب و scope:'inv'.
+     البرنامج بيحسب عايده كل يوم بالنسبة، والمراجعة بتظبطه على الرقم الحقيقي.
+   - السهم: حساب (atype:'stock'، inv، scope:'inv') رصيده = تكلفة الأسهم اللي فيه.
+     عدد الأسهم من حركات الشرا والبيع (invQ)، وسعره دلوقتي a.price.
+   - البيع: مكسبه أو خسارته «عايد» على السهم، والفلوس بترجع لرصيد الحساب.
+   - كله برّه «تقدر تصرف» و«إجمالي اللي معاك»، ومش ظاهر في الرئيسية.
+   ========================================================================== */
+const isInv=a=>!!a&&a.atype==='invest';
+/* حساب بتحوّش فيه (ادخار أو استثمار أو حاجة جواه): مش حساب تصرف منه */
+const isStash=a=>!!a&&(a.atype==='save'||a.atype==='invest'||a.atype==='stock'||!!a.inv);
+const invKids=(id,t)=>(D.accounts||[]).filter(a=>a.inv===id&&!a.closed&&(!t||a.atype===t));
+const r2i=x=>Math.round(x*100)/100;
+const stockQty=id=>Math.round(D.txns.reduce((q,t)=>!t.invQ?q:t.to===id?q+Number(t.invQ):t.account===id?q-Number(t.invQ):q,0)*1e6)/1e6;
+const stockVal=a=>r2i(stockQty(a.id)*(Number(a.price)||0));
+function invParts(a){
+  const b=balances('me'), cash=r2i(b[a.id]||0);
+  const funds=invKids(a.id,'save').map(f=>({a:f,v:r2i((b[f.id]||0)+saveAccrued(f))}));
+  const stocks=invKids(a.id,'stock').map(k=>({a:k,q:stockQty(k.id),cost:r2i(b[k.id]||0),v:stockVal(k)}));
+  const ids=[a.id].concat(invKids(a.id).map(x=>x.id));
+  const booked=D.txns.filter(t=>t.kind==='yield'&&ids.indexOf(t.account)>-1).reduce((x,t)=>x+(Number(t.amount)||0),0);
+  const gain=r2i(booked+funds.reduce((x,f)=>x+saveAccrued(f.a),0)+stocks.reduce((x,k)=>x+k.v-k.cost,0));
+  const total=r2i(cash+funds.reduce((x,f)=>x+f.v,0)+stocks.reduce((x,k)=>x+k.v,0));
+  return {cash,funds,stocks,gain,total};
+}
+const invRevDue=a=>-daysTo(a.revLast||a.invStart||today())>=(Number(a.revEvery)||30);
 const saveAcc=id=>{const a=(D.accounts||[]).find(x=>x.id===id);return isSave(a)?a:null;};
 const pad2=n=>String(n).padStart(2,'0');
 const isoAdd=(d,n)=>{const p=String(d).split('-').map(Number);const x=new Date(p[0],p[1]-1,p[2]+n);
@@ -1655,10 +1683,10 @@ function insFeeFor(a,m){
     account:a.id,date:m+'-01',insFee:true,pending:true,note:'تأمين '+a.name+' — '+mLabel(m)});
 }
 /* حسابات العهدة: الخاصة بيها بس، والمشتركة (زي البنك) */
-const officeOnly=()=>D.accounts.filter(a=>a.scope==='office'&&!a.credit&&!isSave(a));
-const officeAccs=()=>accountsFor('office').filter(a=>!a.credit&&!isSave(a));
-const sharedAccs=()=>D.accounts.filter(a=>a.scope==='both'&&!a.closed&&!a.credit&&!isSave(a)&&!isFxAcc(a.id));
-const myOnly=()=>D.accounts.filter(a=>a.scope!=='office'&&!a.credit&&!isSave(a)&&!isFxAcc(a.id));
+const officeOnly=()=>D.accounts.filter(a=>a.scope==='office'&&!a.credit&&!isStash(a));
+const officeAccs=()=>accountsFor('office').filter(a=>!a.credit&&!isStash(a));
+const sharedAccs=()=>D.accounts.filter(a=>a.scope==='both'&&!a.closed&&!a.credit&&!isStash(a)&&!isFxAcc(a.id));
+const myOnly=()=>D.accounts.filter(a=>a.scope!=='office'&&!a.credit&&!isStash(a)&&!isFxAcc(a.id));
 /* حساب الدفتر: لو مشترك بيتكتب «نصيب الدفتر في …» */
 const offAccLabel=a=>a.scope==='both'?'نصيب '+bookName()+' في '+a.name:a.name;
 function officeCashId(){
@@ -1853,9 +1881,10 @@ function walletOut(from,to){
 function xferOk(from,to){
   const a=D.accounts.find(x=>x.id===from), b=D.accounts.find(x=>x.id===to);
   if(!a||!b||a.id===b.id||a.credit||a.scope==='office'||b.scope==='office')return false;
-  if(a.atype==='wallet')return b.atype==='cash';
+  if(a.inv||b.inv)return false;
+  if(a.atype==='wallet')return b.atype==='cash'||isInv(b);
   if(b.credit)return b.payFrom?b.payFrom===a.id:a.atype==='bank';
-  if(b.atype==='wallet')return a.atype==='bank'||a.atype==='cash';
+  if(b.atype==='wallet')return a.atype==='bank'||a.atype==='cash'||isInv(a);
   return true;
 }
 /* وقت تعديل تحويل قديم: اللي كان متسجل بيفضل مسموح (التعديل من غير تغيير مايغيرش حاجة) */
@@ -2580,7 +2609,7 @@ const subNextOf=s=>{subKeepDay(s);return subStep(s,s.cycle==='yearly'?12:1);};
 const subPrevOf=s=>{subKeepDay(s);return subStep(s,s.cycle==='yearly'?-12:-1);};
 /* حساب الاشتراكات الافتراضي: أول كارت مشتريات، وإلا أول حساب */
 function subDefAcc(){
-  const l=accountsFor('me').filter(a=>!a.closed&&!isSave(a));
+  const l=accountsFor('me').filter(a=>!a.closed&&!isStash(a));
   const c=l.find(a=>a.credit)||l[0];return c?c.id:'';
 }
 const subAcc=s=>(s.account&&(D.accounts||[]).some(a=>a.id===s.account))?s.account:subDefAcc();
@@ -3101,7 +3130,7 @@ function smsUsdHold(t,bal){
 }
 async function readSms(text){
   /* حسابات العملات التانية مش بتتقري من الرسايل — بتتسجل بإيدك */
-  const accs=D.accounts.filter(a=>a.scope!=='office'&&!isFxAcc(a.id)).map(a=>
+  const accs=D.accounts.filter(a=>a.scope!=='office'&&!a.inv&&!isFxAcc(a.id)).map(a=>
     a.id+' = '+a.name+(a.last4?' (كارت ينتهي بـ'+a.last4+')':'')+(a.accNo?' (حساب '+a.accNo+')':'')+(a.credit?' [ائتماني]':''));
   const p='دي رسالة أو أكتر من بنك أو محفظة موبايل عن عمليات على الحساب. اقراها وطلّع منها العمليات.\n'+
     'رجّع JSON بالشكل ده بالظبط من غير أي كلام تاني:\n'+
@@ -3161,7 +3190,7 @@ function payChips(sel,fn,exclude,bk,key,allowSave,opt){
   opt=opt||{};
   const b=opt.bal?balances(bk||'me'):null;
   return pickRow(key,accountsFor(bk||'me')
-    .filter(a=>a.id!==exclude&&(allowSave||!isSave(a))&&!(opt.src&&a.credit)&&(opt.fx||!isFxAcc(a.id))&&(!opt.only||opt.only.indexOf(a.id)>-1))
+    .filter(a=>a.id!==exclude&&(allowSave||!isStash(a))&&!(opt.src&&a.credit)&&(opt.fx||!isFxAcc(a.id))&&(!opt.only||opt.only.indexOf(a.id)>-1))
     .map(a=>({id:a.id,label:esc(a.name)+(b?` · <span class="n">${fmt(b[a.id]||0)}</span>${curTag(a.id)}`:'')}))
     .concat(opt.other?[{id:'__other__',label:'حد دفعهالي'}]:[]),sel,fn);
 }
@@ -3172,7 +3201,7 @@ const KIND_NM={cash:'كاش',bank:'بنك',wallet:'محفظة'};
    طول ما الحساب اللي جاية منه ماتغيرش */
 function kindList(srcId,sel,field,srcField){
   const src=D.accounts.find(a=>a.id===srcId), k=moneyKind(src);
-  const l=accountsFor('me').filter(a=>!a.credit&&!isSave(a)&&!isFxAcc(a.id)&&(!k||moneyKind(a)===k));
+  const l=accountsFor('me').filter(a=>!a.credit&&!isStash(a)&&!isFxAcc(a.id)&&(!k||moneyKind(a)===k));
   const od=editOp&&field&&D.ops&&D.ops[editOp]&&D.ops[editOp].d;
   if(od&&od[field]&&(!srcField||od[srcField]===srcId)&&!l.some(a=>a.id===od[field])){const c=D.accounts.find(a=>a.id===od[field]);if(c)l.push(c);}
   return l;
@@ -3808,7 +3837,7 @@ function spendCalc(){
   const late=target<td;if(late)target=td;
   const isCard=id=>{const a=D.accounts.find(x=>x.id===id);return !!(a&&a.credit);};
   const b=balances('me');
-  const liquidAccs=D.accounts.filter(a=>!a.closed&&!a.credit&&!isSave(a)&&!isFxAcc(a.id)&&a.scope!=='office');
+  const liquidAccs=D.accounts.filter(a=>!a.closed&&!a.credit&&!isStash(a)&&!isFxAcc(a.id)&&a.scope!=='office');
   const liquid=r2(liquidAccs.reduce((x,a)=>x+(b[a.id]||0),0));
   const X=[],Y=[],C=[];
   const add=(L,label,amt,when)=>{amt=r2(amt);if(amt>0.004)L.push({label,amt,when});};
@@ -4147,6 +4176,14 @@ function alertsPanel(){
       <button class="btn" onclick="app.refArrived('${t.id}')">سجّل</button>
     </div>`:''}`);});
 
+  if(book==='me')accountsFor('me').filter(a=>isInv(a)&&invRevDue(a)).forEach(a=>{
+    rows.push(`
+    <div class="alert">
+      ${RAIL(4,'')}
+      <span class="g"><span class="t">راجع أرقام ${esc(a.name)}</span>
+        <span class="s" style="display:block">${a.revLast?'آخر مراجعة '+dLabel(a.revLast):'لسه ماراجعتهاش'}</span></span>
+      <div class="side"><button class="chip sm" onclick="app.invRevGo('${a.id}')">راجع</button></div>
+    </div>`);});
   if(book==='me'){const bs=balances('me');(D.accounts||[]).filter(a=>isSave(a)&&a.saveWithdraw&&daysTo(a.saveWithdraw)<=7).forEach(a=>{
     const d=daysTo(a.saveWithdraw);
     rows.push(`
@@ -4273,7 +4310,7 @@ ${s.cycle==='trial'
       ${refundFor===a.id?`<div class="inline">
         <label class="f">تاخدها من أنهي حساب عهدة؟ <b>*</b></label>
         ${(function(){const ob=balances('office');
-          const opts=D.accounts.filter(x=>x.id!==a.id&&!x.credit&&!isSave(x)&&!isFxAcc(x.id)&&(ob[x.id]||0)>0.01);
+          const opts=D.accounts.filter(x=>x.id!==a.id&&!x.credit&&!isStash(x)&&!isFxAcc(x.id)&&(ob[x.id]||0)>0.01);
           if(!opts.length)return '<div class="hint">مفيش رصيد عهدة في أي حساب دلوقتي — استناها لحد ما توصل عهدة جديدة.</div>';
           return '<div class="chips">'+opts.map(x=>`<button class="chip sm${refundParts[x.id]!==undefined?' on':''}" onclick="app.toggleRefundPart('${x.id}',${Math.abs(v)})">${esc(x.name)} · <span class="n">${fmt(ob[x.id])}</span></button>`).join('')+'</div>'
             +opts.filter(x=>refundParts[x.id]!==undefined).map(x=>`
@@ -4693,7 +4730,7 @@ function vAddOffice0(){
       <label class="f">من أنهي حساب؟ <b>*</b></label>
       ${(function(){const ob=balances('office');
         /* حسابات الدفتر بس، ومعاها أي حساب تاني لسه شايل فلوس للدفتر (عشان ترجّعها) */
-        const opts=D.accounts.filter(x=>!x.credit&&!isSave(x)&&!isFxAcc(x.id)&&(officeAccs().indexOf(x)>-1||Math.abs(ob[x.id]||0)>=0.005||x.id===draftO.account));
+        const opts=D.accounts.filter(x=>!x.credit&&!isStash(x)&&!isFxAcc(x.id)&&(officeAccs().indexOf(x)>-1||Math.abs(ob[x.id]||0)>=0.005||x.id===draftO.account));
         return pickRow('oxfrom',opts.map(x=>({id:x.id,label:esc(x.name)+` · <span class="n">${fmt(ob[x.id]||0)}</span>`})),draftO.account,'app.oAccount');})()}
       <label class="f">لأنهي حساب؟ <b>*</b></label>
       ${(function(){const opts=officeAccs().filter(x=>!isFxAcc(x.id)&&x.id!==draftO.account);
@@ -5005,7 +5042,8 @@ function txnEditForm(t){
       <div class="hint">تقدر تغيّر اسم الصنف، تحوّله ${esc(toBook())}، أو تسجّل إنك رجّعته. المبلغ والتصنيف زي ما هما.</div>
     `:`
       <label class="f">${t.toAmt!==undefined?'حوّلت كام؟':'المبلغ'}</label>
-      ${linkSame(t)?`<input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`
+      ${t.invQ?`<div class="hint">المبلغ جاي من عدد الأسهم والسعر. لو غلط، امسح العملية وسجلها من جديد.</div>`
+        :linkSame(t)?`<input class="f" type="text" inputmode="decimal" value="${esc(eTxn.amount)}" oninput="app.eTxnSet('amount',numFix(this,1))">`
         :`<div class="hint">المبلغ مربوط بحركات تانية بمبالغ مختلفة، فمش بيتعدل من هنا. لو غلط، امسح الحركة وسجلها من جديد.</div>`}
       ${t.toAmt!==undefined?`<label class="f">استلمت كام؟</label>
       <input class="f" type="text" inputmode="decimal" value="${esc(eTxn.toAmt)}" oninput="app.eTxnSet('toAmt',numFix(this,1))">`:''}`}
@@ -5589,14 +5627,112 @@ function vWallet(){
       ${w==='close'?wClose():wOAccounts()}
     </div>`;
   }
-  const tabs=[['accounts','الحسابات'],['vouchers','الفاوتشرات'],['subs','الاشتراكات'],['ins','الأقساط'],['gam','الجمعيات'],['certs','الشهادات'],['veh','مركباتي']];
-  const body=({accounts:wAccounts,vouchers:wVouchers,subs:wSubs,ins:wIns,gam:wGam,certs:wCerts,veh:wVeh}[wtab])||wAccounts;
+  const tabs=[['accounts','الحسابات'],['vouchers','الفاوتشرات'],['subs','الاشتراكات'],['ins','الأقساط'],['gam','الجمعيات'],['certs','الشهادات'],['inv','الاستثمار'],['veh','مركباتي']];
+  const body=({accounts:wAccounts,vouchers:wVouchers,subs:wSubs,ins:wIns,gam:wGam,certs:wCerts,inv:wInv,veh:wVeh}[wtab])||wAccounts;
   return `<div style="padding-top:20px">
     <div class="mpills">${tabs.map(t=>`<button class="mpill${wtab===t[0]?' on':''}" onclick="app.setWtab('${t[0]}')">${t[1]}</button>`).join('')}</div>
     ${body()}
   </div>`;
 }
 
+/* ---------- شاشة «الاستثمار» ---------- */
+let invF=null;  /* الفورم المفتوح: {id,k,...} — k: new, in, out, fund, tofund, fromfund, buy, sell, rev, cfg */
+const invNum=k=>Number(onlyNum((invF||{})[k]))||0;
+const invSrcAccs=()=>accountsFor('me').filter(a=>!a.closed&&!a.credit&&!isStash(a)&&!isFxAcc(a.id));
+function invOk(){const f=invF;if(!f)return false;const a=D.accounts.find(x=>x.id===f.id), P=a?invParts(a):null;
+  if(f.k==='new')return !!String(f.name||'').trim();
+  if(f.k==='in')return !!f.acc&&invNum('amt')>0;
+  if(f.k==='out')return !!f.acc&&invNum('amt')>0&&invNum('amt')<=P.cash+0.005;
+  if(f.k==='fund')return !!String(f.name||'').trim()&&String(onlyNum(f.rate||'')).trim()!=='';
+  if(f.k==='tofund')return !!f.fund&&invNum('amt')>0&&invNum('amt')<=P.cash+0.005;
+  if(f.k==='fromfund'){const b=balances('me');return !!f.fund&&invNum('amt')>0&&invNum('amt')<=(b[f.fund]||0)+0.005;}
+  if(f.k==='buy'||f.k==='sell'){
+    if(!String(f.name||'').trim()||!(invNum('qty')>0)||!(invNum('price')>0)||f.fee===undefined||(f.fee&&!(invNum('feeAmt')>0)))return false;
+    const tot=invNum('qty')*invNum('price')+(f.fee?invNum('feeAmt'):0);
+    if(f.k==='buy')return tot<=P.cash+0.005;
+    const k=invStockBy(a.id,f.name);return !!k&&invNum('qty')<=stockQty(k.id)+1e-9;}
+  if(f.k==='rev'||f.k==='cfg')return true;
+  return false;}
+const invStockBy=(id,nm)=>(D.accounts||[]).find(x=>x.inv===id&&x.atype==='stock'&&pk(x.name)===pk(String(nm||'').trim()))||null;
+function invHint(a,P){const f=invF;
+  if(f.k==='buy'){const tot=r2i(invNum('qty')*invNum('price')+(f.fee?invNum('feeAmt'):0));if(!(tot>0))return '';
+    return 'هيتخصم <span class="n">'+fmt(tot)+'</span> جنيه من رصيد '+esc(a.name)+' (فيه <span class="n">'+fmt(P.cash)+'</span>)'+(tot>P.cash+0.005?' — حوّل الباقي الأول.':'.');}
+  if(f.k==='sell'){const k=invStockBy(a.id,f.name);if(!k)return '';const q=stockQty(k.id), n=invNum('qty');if(!(n>0))return 'عندك <span class="n">'+fmt(q)+'</span> سهم.';
+    if(n>q+1e-9)return '<b style="color:var(--clay)">عندك <span class="n">'+fmt(q)+'</span> سهم بس.</b>';
+    const cost=n>=q-1e-9?(balances('me')[k.id]||0):r2i((balances('me')[k.id]||0)/q*n), pr=r2i(n*invNum('price')), g=r2i(pr-cost-(f.fee?invNum('feeAmt'):0));
+    if(!(invNum('price')>0))return '';
+    return 'هيرجع <span class="n">'+fmt(pr)+'</span> جنيه لرصيد '+esc(a.name)+' · '+(g>=0?'مكسب':'خسارة')+' <span class="n" style="color:var(--'+(g>=0?'mint':'clay')+')">'+fmt(Math.abs(g))+'</span>.';}
+  if((f.k==='out'||f.k==='tofund')&&invNum('amt')>P.cash+0.005)return '<b style="color:var(--clay)">ده أكتر من الرصيد (<span class="n">'+fmt(P.cash)+'</span>).</b>';
+  if(f.k==='fromfund'&&f.fund){const b=balances('me'), fa=D.accounts.find(x=>x.id===f.fund), acc=fa?saveAccrued(fa):0;
+    return 'تقدر تسحب لحد <span class="n">'+fmt(b[f.fund]||0)+'</span>'+(acc>=0.01?' — ومكسب الشهر ده (<span class="n">'+fmt(acc)+'</span>) بيتضاف آخر الشهر.':'.');}
+  return '';}
+function invForm(a,P){const f=invF, x=k=>esc(f[k]||''), inp=(k,ph,dec)=>`<input class="f" type="text" inputmode="${dec?'decimal':'text'}" ${ph?'placeholder="'+ph+'"':''} value="${x(k)}" oninput="app.invSet('${k}',${dec?'numFix(this,1)':'this.value'})">`;
+  const date=`<label class="f">التاريخ</label>${dateField(f.date||today(),'app.invDate')}`;
+  const btn=(lbl)=>`<div class="hint" id="invhint">${invHint(a,P)}</div><button class="btn" id="invsave" ${invOk()?'':'disabled'} onclick="app.invSave()">${lbl}</button><button class="btn ghost" onclick="app.invGo('')">إلغاء</button>`;
+  const fundPick=(lst)=>lst.length?pickRow('invfund',lst.map(z=>({id:z.a.id,label:esc(z.a.name)})),f.fund,"((v)=>app.invPick('fund',v))",1):'<div class="hint" style="margin-top:0">ضيف صندوق الأول.</div>';
+  let h='';
+  if(f.k==='in')h=`<label class="f">من أنهي حساب؟ <b>*</b></label>${pickRow('invacc',invSrcAccs().filter(z=>xferOk(z.id,a.id)).map(z=>({id:z.id,label:esc(z.name)})),f.acc,"((v)=>app.invPick('acc',v))",1)}${date}<label class="f">المبلغ <b>*</b></label>${inp('amt','',1)}${btn('سجّل التحويل')}`;
+  if(f.k==='out')h=`<label class="f">لأنهي حساب؟ <b>*</b></label>${pickRow('invacc',invSrcAccs().filter(z=>xferOk(a.id,z.id)).map(z=>({id:z.id,label:esc(z.name)})),f.acc,"((v)=>app.invPick('acc',v))",1)}${date}<label class="f">المبلغ <b>*</b></label>${inp('amt','',1)}${btn('سجّل السحب')}`;
+  if(f.k==='fund')h=`<label class="f">اسم الصندوق <b>*</b></label>${inp('name','زي كلاودز')}<label class="f">العائد في السنة ٪ <b>*</b></label>${inp('rate','',1)}<div class="hint">النسبة اللي المنصة بتقولها دلوقتي. البرنامج بيحسب العائد كل يوم، ولما تراجع الأرقام بيتظبط على الرقم الحقيقي.</div>${btn('ضيف الصندوق')}`;
+  if(f.k==='tofund')h=`<label class="f">في أنهي صندوق؟ <b>*</b></label>${fundPick(P.funds)}${date}<label class="f">المبلغ <b>*</b></label>${inp('amt','',1)}${btn('سجّل')}`;
+  if(f.k==='fromfund')h=`<label class="f">من أنهي صندوق؟ <b>*</b></label>${fundPick(P.funds)}${date}<label class="f">المبلغ <b>*</b></label>${inp('amt','',1)}${btn('سجّل')}`;
+  if(f.k==='buy'||f.k==='sell'){const own=P.stocks.filter(z=>f.k==='buy'||z.q>1e-9);
+    h=`<label class="f">${f.k==='buy'?'اشتريت':'بعت'} سهم إيه؟ <b>*</b></label>${f.k==='buy'?inp('name','اسم الشركة'):''}
+      ${own.length?`<div class="chips" style="margin-top:10px">${own.map(z=>`<button class="chip sm${pk(f.name||'')===pk(z.a.name)?' on':''}" onclick="app.invPick('name','${jsArg(z.a.name)}')">${esc(z.a.name)}</button>`).join('')}</div>`:(f.k==='sell'?'<div class="hint" style="margin-top:0">مفيش أسهم عندك.</div>':'')}
+      ${date}<label class="f">فيها عمولات ورسوم؟</label>${yesNo('invfee',f.fee,"((v)=>app.invPick('fee',v))")}
+      ${f.fee?`<label class="f">قيمة الرسوم</label>${inp('feeAmt','',1)}`:''}
+      <label class="f">عدد الأسهم <b>*</b></label>${inp('qty','',1)}<label class="f">سعر السهم <b>*</b></label>${inp('price','',1)}${btn(f.k==='buy'?'سجّل الشرا':'سجّل البيع')}`;}
+  if(f.k==='rev'){
+    h=P.funds.map(z=>`<label class="f">${esc(z.a.name)}: الرقم اللي في ${esc(a.name)} دلوقتي</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(f['v_'+z.a.id]!==undefined?f['v_'+z.a.id]:n2(z.v))}" oninput="app.invSet('v_${z.a.id}',numFix(this,1))">
+        <div class="hint">البرنامج حاسبه <span class="n">${fmt(z.v)}</span>، والفرق هيتسجل مكسب أو خسارة.</div>
+        <label class="f">نسبة ${esc(z.a.name)} دلوقتي ٪</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(f['r_'+z.a.id]!==undefined?f['r_'+z.a.id]:String(saveRateOn(z.a,today())))}" oninput="app.invSet('r_${z.a.id}',numFix(this,1))">`).join('')
+      +P.stocks.filter(z=>z.q>1e-9).map(z=>`<label class="f">سعر ${esc(z.a.name)} دلوقتي</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(f['p_'+z.a.id]!==undefined?f['p_'+z.a.id]:String(z.a.price||''))}" oninput="app.invSet('p_${z.a.id}',numFix(this,1))">`).join('')
+      +`<label class="f">رصيد ${esc(a.name)}</label>
+        <input class="f" type="text" inputmode="decimal" value="${esc(f.cash!==undefined?f.cash:n2(P.cash))}" oninput="app.invSet('cash',numFix(this,1))">
+        <div class="hint">لو فيه توزيعات أو فوايد نزلت، الفرق هيتسجل مكسب.</div>
+        <button class="btn" onclick="app.invSave()">احفظ المراجعة</button><button class="btn ghost" onclick="app.invGo('')">بعدين</button>`;}
+  if(f.k==='cfg')h=`<label class="f">الاسم</label>${inp('name','')}
+      <label class="f">تفكرني أراجع الأرقام كل كام يوم؟</label>${inp('every','',1)}
+      <button class="btn" onclick="app.invSave()">احفظ</button>
+      ${P.total<0.01&&P.stocks.every(z=>z.q<1e-9)?delBtn('inv'+a.id,`app.invDel('${a.id}')`,'امسح الحساب','btn ghost'):'<div class="hint">عشان تمسح الحساب، اسحب كل الفلوس اللي فيه الأول.</div>'}
+      <button class="btn ghost" onclick="app.invGo('')">إلغاء</button>`;
+  return `<div class="inline" style="padding:4px 16px 16px">${h}</div>`;}
+function wInv(){
+  const L=accountsFor('me').filter(isInv);
+  const fN=n=>`<span class="n">${fmt(n)}</span>`, sub=t=>`<span style="display:block;font-size:11.5px;color:var(--muted);margin-top:4px">${t}</span>`;
+  const gc=g=>`<span class="n" style="color:var(--${g>=0?'mint':'clay'})">${g>=0?'+':'−'}${fmt(Math.abs(g))}</span>`;
+  return `<div style="margin-top:18px">
+    ${L.map(a=>{const P=invParts(a), op=invF&&invF.id===a.id?invF.k:'';
+      const live=P.stocks.filter(z=>z.q>1e-9), gone=P.stocks.filter(z=>z.q<=1e-9);
+      const ch=(k,l)=>`<button class="chip sm${op===k?' on':''}" onclick="app.invGo('${a.id}','${k}')">${l}</button>`;
+      return `<div class="panel" id="inv-${a.id}" style="margin-bottom:14px">
+        <div style="padding:15px 16px;border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span style="font-family:var(--f-disp);font-size:15px;font-weight:600">${esc(a.name)}</span><span class="n" style="font-size:18px;font-weight:700">${fmt(P.total)}</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px">${Math.abs(P.gain)>=0.01?(P.gain>=0?'مكسب':'خسارة')+' لحد دلوقتي '+gc(P.gain)+' · ':''}${a.revLast?'آخر مراجعة '+dLabel(a.revLast):'لسه ماراجعتش الأرقام'}</div>
+        </div>
+        <div class="arow"><span class="nm">رصيد ${esc(a.name)}${sub('فلوس لسه ماتحطتش في حاجة')}</span><span class="vl">${fN(P.cash)}</span></div>
+        ${P.funds.map(z=>{const g=r2i(D.txns.filter(t=>t.kind==='yield'&&t.account===z.a.id).reduce((x,t)=>x+(Number(t.amount)||0),0)+saveAccrued(z.a));
+          return `<div class="arow"><span class="nm">${esc(z.a.name)}${sub('<span class="n" dir="ltr">'+fmt(saveRateOn(z.a,today()))+'%</span> في السنة · بيتحسب كل يوم')}</span><span class="vl" style="text-align:end">${fN(z.v)}${Math.abs(g)>=0.01?sub(gc(g)):''}</span></div>`;}).join('')}
+        ${P.stocks.length?`<div class="sph" style="display:flex;justify-content:space-between;gap:10px"><span>الأسهم</span>${fN(r2i(live.reduce((x,z)=>x+z.v,0)))}</div>`:''}
+        ${live.concat(gone).map(z=>{const g=r2i(z.v-z.cost), avg=z.q>1e-9?r2i(z.cost/z.q):0;
+          return `<div class="arow"${z.q<=1e-9?' style="opacity:.5"':''}><span class="nm">${esc(z.a.name)}${sub(z.q>1e-9?'<span class="n">'+fmt(z.q)+'</span> سهم · اشتريت بـ<span class="n">'+fmt(avg)+'</span> · دلوقتي <span class="n">'+fmt(z.a.price||0)+'</span>':'بعته كله')}</span><span class="vl" style="text-align:end">${z.q>1e-9?fN(z.v)+(Math.abs(g)>=0.01?sub(gc(g)):''):''}</span></div>`;}).join('')}
+        <div class="chips" style="padding:12px 16px 14px">${ch('in','حوّل '+toName(a.name))}${ch('out','اسحب')}${ch('fund','ضيف صندوق')}
+          ${P.funds.length?ch('tofund','حط في صندوق')+ch('fromfund','اسحب من صندوق'):''}${ch('buy','اشتري سهم')}${live.length?ch('sell','بيع سهم'):''}${ch('rev','راجع الأرقام')}${ch('cfg','الإعدادات')}</div>
+        ${op?invForm(a,P):''}
+      </div>`;}).join('')}
+    ${invF&&invF.k==='new'?`<div class="panel" style="padding:4px 16px 16px">
+        <label class="f">اسم الحساب <b>*</b></label>
+        <input class="f" placeholder="زي ثاندر" value="${esc(invF.name||'')}" oninput="app.invSet('name',this.value)">
+        <div class="hint">منصة بتحوّل لها فلوس، ومنها تحط في صناديق بعائد أو تشتري أسهم. بعد ما تضيفه حوّل له من أي حساب.</div>
+        <button class="btn" id="invsave" ${invOk()?'':'disabled'} onclick="app.invSave()">ضيف الحساب</button>
+        <button class="btn ghost" onclick="app.invGo('')">إلغاء</button></div>`
+      :`<button class="btn ghost" style="margin:0" onclick="app.invGo('','new')">ضيف حساب استثمار</button>`}
+    ${L.length?'<div class="hint">مش داخل في «تقدر تصرف» ولا في «إجمالي اللي معاك».</div>':''}
+  </div>`;
+}
 function gamOk(){const d=gamDraft;if(!d)return false;
   return !!(String(d.name).trim()&&Number(onlyNum(d.amount))>0&&Number(onlyNum(d.months))>1&&Number(onlyNum(d.turn))>0
     &&Number(onlyNum(d.turn))<=Number(onlyNum(d.months))&&(d.payMode==='salary'||Number(onlyNum(d.day))>0));}
@@ -5823,7 +5959,7 @@ function wClose(){
    وبتطلع من نصيبك في الحساب المشترك. العمولة عليك. */
 const closeShAcc=()=>{const sh=sharedAccs();return sh.find(a=>a.id===closeShared)||(sh.length===1?sh[0]:null);};
 /* كاش المكتب بيدخل كاشك، ولو مالكش حساب كاش يبقى أي حساب ليك */
-const myCashAccs=()=>{const ok=a=>!a.closed&&a.scope==='me'&&!a.credit&&!isSave(a)&&!isFxAcc(a.id);
+const myCashAccs=()=>{const ok=a=>!a.closed&&a.scope==='me'&&!a.credit&&!isStash(a)&&!isFxAcc(a.id);
   const c=D.accounts.filter(a=>ok(a)&&a.atype==='cash');return c.length?c:D.accounts.filter(ok);};
 const closeCashAcc=()=>{const c=myCashAccs();return c.find(a=>a.id===closeCash)||(c.length===1?c[0]:null);};
 /* الحركات اللي هتتعمل: لكل حساب عليه فلوس للمكتب يوم التقفيل */
@@ -5899,7 +6035,7 @@ function printHTML(r){
 function wAccounts(){
   const b=balances();
   return `<div style="margin-top:18px">
-    <div class="panel">${accountsFor('me').map(a=>{
+    <div class="panel">${accountsFor('me').filter(a=>!isInv(a)).map(a=>{
       const lim=Number(a.limit)||0, due=Math.round(Math.max(0,lim-(b[a.id]||0))*100)/100;
       return `
       ${acctRow(a,b,`<span style="color:var(--muted);font-size:12px">${editAcct===a.id?'▲':'▼'}</span>`,
@@ -6299,7 +6435,7 @@ function wSubs(){
       <input class="f" type="text" inputmode="decimal" value="${esc(subDraft.amount)}" oninput="app.subSet('amount',numFix(this,1))">
       <div style="margin-top:8px">${pickRow('subcur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],subDraft.cur,"((v)=>app.subPick('cur',v))",1)}</div>
       <label class="f">بيتخصم من</label>
-      ${pickRow('subacc',accountsFor('me').filter(a=>!a.closed&&!isSave(a)).map(a=>({id:a.id,label:esc(a.name)})),subDraft.account||subDefAcc(),"((v)=>app.subPick('account',v))",1)}
+      ${pickRow('subacc',accountsFor('me').filter(a=>!a.closed&&!isStash(a)).map(a=>({id:a.id,label:esc(a.name)})),subDraft.account||subDefAcc(),"((v)=>app.subPick('account',v))",1)}
       ${subArrAskD(subDraft)?`<label class="f">ليه مصاريف تدبير؟ (اختياري)</label>
       ${pickRow('subarr',[{id:false,label:'لأ'},{id:true,label:'أيوه'}],subDraft.arr,"((v)=>app.subPick('arr',v))",1,1)}
       ${subDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
@@ -6413,7 +6549,7 @@ function wSubs(){
           <input class="f" type="text" inputmode="decimal" value="${esc(sDraft.amount)}" oninput="app.sdSet('amount',numFix(this,1))">
           <div style="margin-top:8px">${pickRow('sdcur'+s.id,[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],sDraft.cur,"((v)=>app.sdPick('cur',v))",1)}</div>
           <label class="f">بيتخصم من</label>
-          ${pickRow('sdacc'+s.id,accountsFor('me').filter(a=>!a.closed&&!isSave(a)).map(a=>({id:a.id,label:esc(a.name)})),sDraft.account||subAcc(s),"((v)=>app.sdPick('account',v))",1)}
+          ${pickRow('sdacc'+s.id,accountsFor('me').filter(a=>!a.closed&&!isStash(a)).map(a=>({id:a.id,label:esc(a.name)})),sDraft.account||subAcc(s),"((v)=>app.sdPick('account',v))",1)}
           ${subArrAskD(sDraft)?`<label class="f">ليه مصاريف تدبير؟ (اختياري)</label>
       ${pickRow('sdarr'+s.id,[{id:false,label:'لأ'},{id:true,label:'أيوه'}],sDraft.arr,"((v)=>app.sdPick('arr',v))",1,1)}
       ${sDraft.arr===undefined?'<div class="hint">لو مش عارف سيبها، وهتتحدد من أول دفعة لما تظبّط التنبيه.</div>':''}`:''}
@@ -7060,7 +7196,7 @@ function subRow(key,title,badge,body){
 }
 /* كارت: اسم المجموعة بيظهر بس لو فيه أكتر من جزء */
 const setCard=(label,rows)=>`${(label&&rows.length>1)?`<div class="sgrp">${label}</div>`:''}<div class="scard">${rows.join('')}</div>`;
-const atypeLabel=a=>a.credit?'كارت ائتماني':({cash:'كاش',bank:'حساب بنكي',wallet:'محفظة موبايل',prepaid:'كارت مسبق الدفع',save:'ادخار'}[a.atype]||'كاش');
+const atypeLabel=a=>a.credit?'كارت ائتماني':({cash:'كاش',bank:'حساب بنكي',wallet:'محفظة موبايل',prepaid:'كارت مسبق الدفع',save:'ادخار',invest:'استثمار',stock:'سهم'}[a.atype]||'كاش');
 /* تعديل التصنيف: الاسم، والمسح جوه هنا بس (عشان مايتداسش بالغلط) */
 function catEditHtml(){
   const k=catEdit.kind, id=catEdit.id;
@@ -7082,7 +7218,7 @@ function vSettings(){
 
 
       <p class="hint" style="margin-top:-4px">دوس على الحساب عشان تعدّل فيه.</p>
-      ${D.accounts.map(a=>{const c=(accCfg&&accCfg[a.id])||{name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''};
+      ${D.accounts.filter(a=>!a.inv&&!isInv(a)).map(a=>{const c=(accCfg&&accCfg[a.id])||{name:a.name,credit:!!a.credit,limit:a.limit?String(a.limit):''};
       if(accOpen!==a.id)return `<div class="arow" style="border:1px solid var(--line);border-radius:14px;margin-top:10px;cursor:pointer" onclick="app.openAccCfg('${a.id}')">
           <span class="rail" style="background:${aColor(a.id)}"></span>
           <span class="nm">${esc(a.name)}<span style="display:block;font-size:11px;color:var(--muted);margin-top:6px">${esc(atypeLabel(a))}${a.closed?' · موقوف':''}${(a.fees||[]).length?' · '+plural((a.fees||[]).length,'مصروف واحد','مصروفين','مصاريف','مصروف'):''}</span></span>
@@ -7535,7 +7671,7 @@ function render(){
   if(!autoHold&&_svDay!==today()&&ghToken&&ghGist&&Date.now()-ghLastPull>60000)ghMaybePull();
   if(!autoHold&&_svDay!==today()){_svDay=today();try{saveAccrueAll();}catch(e){}try{insuranceAll();}catch(e){}try{stampAll();}catch(e){}try{cardInsAll();}catch(e){}}
   const b=balances(book);
-  const own=accountsFor(book).filter(a=>!a.credit&&!isSave(a));
+  const own=accountsFor(book).filter(a=>!a.credit&&!isStash(a));
   const vals=own.map(a=>Math.max(0,(b[a.id]||0)*fxRate(accCur(a.id))));
   const sum=vals.reduce((x,y)=>x+y,0);
   document.getElementById('total').textContent=fmt(Math.round(own.reduce((x,a)=>x+(b[a.id]||0)*fxRate(accCur(a.id)),0)*100)/100);
@@ -7631,7 +7767,7 @@ function undoLabel(a,b){
    التعديل بيفتح نفس الشاشة بنفس الخانات، والحفظ بيشيل السطور القديمة ويعمل الجديدة،
    فالدفترين مايختلفوش أبدًا. المسح بيمسح العملية كلها. */
 /* الحركات القديمة (قبل العمليات): لو بسيطة من شاشة التسجيل بنبني خاناتها منها عشان تتعدل بنفس الشاشة */
-const OP_SPECIAL=['saleOf','refWait','retOf','itemOf','refFx','refOn','refFee','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
+const OP_SPECIAL=['invQ','saleOf','refWait','retOf','itemOf','refFx','refOn','refFee','insFee','stampFee','arrFee','accFee','insInt','insId','insBuy','certBuy','certBack','certFee','fxDiff','refundOf','gam','gamGot',
   'flIn','flOut','flBack','ocard','omine','debt','debtPay','paidBy','saveInt','link','items','usd','swap','toAmt','fxGain','repay','pending','hold','stampFee','fromOffice','fromSms','needs','egp','egpv','returned','closeSet'];
 function legacyOk(t){
   if(!t||t.op||(t.book||'me')!=='me')return false;
@@ -8506,6 +8642,8 @@ const app=new Proxy({
   delTxn(e,id){e.stopPropagation();
     const t=D.txns.find(x=>x.id===id);if(!t)return;
     if(txnLock(t)){app.toast('اتراجع عن التقفيل الأول');return;}
+    /* شرا أسهم اتباع منها بعد كده: مسحه هيخلي عدد الأسهم بالسالب */
+    if(txnGroup(t).some(x=>x.invQ&&x.to&&stockQty(x.to)-Number(x.invQ)<-1e-9)){app.toast('بعت من السهم ده بعد الشرا ده — امسح البيع الأول');return;}
     /* اسم العملية في زرار التراجع: السطر الأساسي (أكبر مبلغ) مش سطر الرسوم */
     {const g=txnGroup(t);if(g.length>1){const m=g.slice().sort((a,b)=>Math.abs(Number(b.amount)||0)-Math.abs(Number(a.amount)||0))[0];
       _undoLbl='مسحت '+String((m.items&&m.items.length===1?m.items[0].name:m.items&&m.items.length?'فاتورة':'')||m.item||m.note||m.merchant||'العملية').slice(0,40);}}
@@ -8720,6 +8858,55 @@ const app=new Proxy({
     if(who){const ov=debtOver(who);if(ov>0.005)items.push({src:'over',ref:{date:'',amount:ov}});}
     return items;
   },
+  invGo(id,k){if(!k||(invF&&invF.id===id&&invF.k===k)){invF=null;render();return;}
+    invF={id:id,k:k,date:today()};
+    const a=D.accounts.find(x=>x.id===id);if(k==='cfg'&&a){invF.name=a.name;invF.every=String(a.revEvery||30);}
+    render();},
+  invSet(k,v){if(!invF)return;invF[k]=v;const a=D.accounts.find(x=>x.id===invF.id);
+    if(a){const h=document.getElementById('invhint');if(h)h.innerHTML=invHint(a,invParts(a));}
+    setDisabled('invsave',invOk());},
+  invPick(k,v){if(!invF)return;invF[k]=v;render();},
+  invDate(v){if(invF){invF.date=v;render();}},
+  invRevGo(id){tab='wallet';wtab='inv';invF={id:id,k:'rev',date:today()};render();
+    setTimeout(()=>{const el=document.getElementById('inv-'+id);if(el&&el.scrollIntoView)el.scrollIntoView({block:'start'});},60);},
+  invSave(){const f=invF;if(!f||!invOk())return;
+    const d=f.date||today(), n=v=>r2i(Number(onlyNum(v))||0);
+    if(f.k==='new'){const id=uid();
+      D.accounts.push({id:id,name:String(f.name).trim(),atype:'invest',scope:'me',opening:0,openingOffice:0,color:freeColor(),invStart:today(),revEvery:30,credit:false,limit:0,secured:[]});
+      invF=null;save();render();app.toast('اتضاف');return;}
+    const a=D.accounts.find(x=>x.id===f.id);if(!a)return;
+    const T=o=>D.txns.unshift(Object.assign({id:uid(),book:'me',date:d},o));
+    if(f.k==='in')T({kind:'transfer',amount:n(f.amt),account:f.acc,to:a.id,note:''});
+    if(f.k==='out')T({kind:'transfer',amount:n(f.amt),account:a.id,to:f.acc,note:''});
+    if(f.k==='fund'){const r=Number(onlyNum(f.rate))||0;
+      D.accounts.push({id:uid(),name:String(f.name).trim(),atype:'save',scope:'inv',inv:a.id,opening:0,openingOffice:0,color:a.color,
+        saveFreq:'day',saveStart:today(),saveRates:[{from:today(),rate:r}],saveRate:r,credit:false,limit:0,secured:[]});}
+    if(f.k==='tofund')T({kind:'transfer',amount:n(f.amt),account:a.id,to:f.fund,note:''});
+    if(f.k==='fromfund')T({kind:'transfer',amount:n(f.amt),account:f.fund,to:a.id,note:''});
+    if(f.k==='buy'||f.k==='sell'){
+      const nm=String(f.name).trim(), q=Number(onlyNum(f.qty))||0, pr=Number(onlyNum(f.price))||0, L=uid();
+      let k=invStockBy(a.id,nm);
+      if(!k){k={id:uid(),name:nm,atype:'stock',scope:'inv',inv:a.id,opening:0,openingOffice:0,color:a.color,credit:false,limit:0,secured:[]};D.accounts.push(k);}
+      if(k.closed)delete k.closed;
+      if(!k.priceAt||d>=k.priceAt){k.price=pr;k.priceAt=d;}
+      if(f.k==='buy')T({kind:'transfer',amount:r2i(q*pr),account:a.id,to:k.id,invQ:q,invP:pr,link:L,note:'شرا '+fmt(q)+' سهم '+nm});
+      else{const held=stockQty(k.id), bal=balances('me')[k.id]||0, cost=q>=held-1e-9?bal:r2i(bal/held*q), pro=r2i(q*pr), g=r2i(pro-cost);
+        if(Math.abs(g)>=0.01)T({kind:'yield',amount:g,account:k.id,link:L,note:(g>=0?'مكسب':'خسارة')+' بيع '+nm});
+        T({kind:'transfer',amount:pro,account:k.id,to:a.id,invQ:q,invP:pr,link:L,note:'بيع '+fmt(q)+' سهم '+nm});}
+      if(f.fee&&n(f.feeAmt)>0)T({kind:'expense',amount:n(f.feeAmt),cat:'fees',account:a.id,link:L,note:'عمولة '+(f.k==='buy'?'شرا':'بيع')+' — '+nm});}
+    if(f.k==='rev'){const P=invParts(a);
+      P.funds.forEach(z=>{const id=z.a.id;
+        if(f['v_'+id]!==undefined){const g=r2i(n(f['v_'+id])-z.v);if(Math.abs(g)>=0.01)T({kind:'yield',amount:g,account:id,date:today(),note:'فرق المراجعة — '+z.a.name});}
+        if(f['r_'+id]!==undefined){const r=Number(onlyNum(f['r_'+id]))||0;if(r!==saveRateOn(z.a,today())){
+          z.a.saveRates=(z.a.saveRates||[]).filter(x=>x.from!==today()).concat([{from:today(),rate:r}]);z.a.saveRate=r;}}});
+      P.stocks.forEach(z=>{const v=f['p_'+z.a.id];if(v!==undefined&&Number(onlyNum(v))>0){z.a.price=Number(onlyNum(v));z.a.priceAt=today();}});
+      if(f.cash!==undefined){const g=r2i(n(f.cash)-P.cash);if(Math.abs(g)>=0.01)T({kind:'yield',amount:g,account:a.id,date:today(),note:'فرق المراجعة — توزيعات أو فوايد'});}
+      a.revLast=today();}
+    if(f.k==='cfg'){const nm=String(f.name||'').trim();if(nm)a.name=nm;const e=Math.round(Number(onlyNum(f.every))||0);if(e>0)a.revEvery=e;}
+    invF=null;sortTxns();save();render();app.toast('اتسجل');},
+  invDel(id){const a=D.accounts.find(x=>x.id===id);if(!a)return;
+    /* الحساب واللي جواه بيتقفلوا، وحركاتهم بتفضل في السجل */
+    [a].concat(invKids(id)).forEach(x=>{x.closed=true;});invF=null;confirmKey='';save();render();},
   saleGo(at){saleOpen=(saleOpen===at?'':at);saleD={what:'',who:'',amount:''};render();},
   saleSet(k,v){saleD[k]=v;setDisabled('salesave',saleOk());},
   saleWho(n){saleD.who=n;render();},
@@ -8793,7 +8980,7 @@ const app=new Proxy({
     if(fxOver()){app.toast('ده أكتر من اللي في الحساب');return;}
     const amt=Number(onlyNum(draft.amount))||0;
     if(draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();draft.salary=g==='salary';draft.icat=g==='salary'?'':g;}
-    if(draft.kind!=='transfer'&&saveAcc(draft.account)){app.toast('ده وعاء ادخار — حوّل منه الأول');return;}
+    if(draft.kind!=='transfer'&&isStash((D.accounts||[]).find(a=>a.id===draft.account))){app.toast('ده حساب بتحوّش فيه — حوّل منه الأول');return;}
     if(draft.kind==='transfer'&&!draft.swap&&isCreditAcc(draft.account)){app.toast('الكارت مش بيتحوّل منه');return;}
     if(draft.kind==='transfer'&&!draft.swap&&draft.to&&!xferOk(draft.account,draft.to)&&!xferWas(draft.account,draft.to)){app.toast('التحويل ده ماينفعش بين الحسابين دول');return;}
     if(draft.kind==='transfer'&&draft.swap){
