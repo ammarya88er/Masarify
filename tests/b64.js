@@ -10,8 +10,8 @@ const ex=(id,date,amount,o)=>Object.assign({id,book:'me',kind:'expense',amount,c
   run("app.go('log');app.setF('cat','snk');");
   const h=run("logList()").replace(/<[^>]+>/g,' ').replace(/\s+/g,' ');
   t('كل صنف سطر لوحده باسمه ومكانه', h.indexOf('شيبسي')>-1&&h.indexOf('طلبات')>-1&&h.indexOf('شوكولاتة')>-1&&h.indexOf('رز')<0&&h.indexOf('مياه')<0, h);
-  t('المجموع بالأصناف بس (20 + 25 + 30)', h.indexOf('3 سطور · مصروف 75')>-1, h.slice(0,80));
-  t('إجمالي اليوم بالأصناف', h.indexOf('مصروف 55')>-1);
+  t('المجموع بالأصناف باللي اتدفع بس (20 + 22.5 بعد الفاوتشر + 30)', h.indexOf('3 سطور · مصروف 72.50')>-1, h.slice(0,80));
+  t('إجمالي اليوم بالأصناف', h.indexOf('مصروف 52.50')>-1);
   run("app.toggleItem('r1',0);");
   t('فتح الصنف بيفتح فاتورته', run("openTxn")==='r1'&&run("logList()").indexOf('رز')>-1);
   run("app.setF('cat','');");

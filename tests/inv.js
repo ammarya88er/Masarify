@@ -41,7 +41,7 @@ const pick=a=>a[Math.floor(rnd()*a.length)];
 { // ٢ و٣) عمليات عشوائية وبعدين مسحها
   const {run}=boot(data(),NOW);run('render();');
   const b0=bal(run), o0=orphans(run), n0=run('D.txns.length');
-  const accs=JSON.parse(run("JSON.stringify(accountsFor('me').filter(a=>!a.closed&&!isFxAcc(a.id)&&!isSave(a)).map(a=>a.id))"));
+  const accs=JSON.parse(run("JSON.stringify(accountsFor('me').filter(a=>!a.closed&&!isFxAcc(a.id)&&!isStash(a)).map(a=>a.id))"));
   const cats=JSON.parse(run("JSON.stringify(D.cats.map(c=>c.id))"));
   const made=[];
   for(let i=0;i<200;i++){

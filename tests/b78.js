@@ -34,7 +34,7 @@ const E='({stopPropagation(){}})';
   run("month='2026-10';");
   const home=run("monthStats().spent");
   run("app.go('log');app.setF('month','2026-10');app.setF('dir','out');");
-  t('مصروف السجل = الرئيسية (بالفاوتشر)', V().indexOf('مصروف <span class="n">'+home+'</span>')>-1&&V().indexOf('بفاوتشر')>-1, home);
+  t('مصروف السجل = الرئيسية (من غير الفاوتشر، وهو جنبه)', home===300&&V().indexOf('مصروف <span class="n">'+home+'</span>')>-1&&V().indexOf('وفاوتشرات')>-1, home);
   run("app.setF('dir','in');");
   t('دخل السجل = الرئيسية', V().indexOf('دخل <span class="n">1,000</span>')>-1&&run("monthStats().earned")===1000);
   t('واللي مش دخل مكتوب لوحده', V().indexOf('مش دخل')>-1);

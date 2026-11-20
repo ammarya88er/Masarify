@@ -85,7 +85,7 @@ header{padding:calc(34px + env(safe-area-inset-top)) 18px 0;
 .stats{display:flex;background:var(--surf);border:1px solid var(--line);border-radius:20px;}
 .stat{flex:1;padding:16px 10px;text-align:center;border-inline-end:1px solid var(--line);}
 .stat:last-child{border-inline-end:0;}
-.stat b{display:block;font-family:var(--f-num);font-size:19px;font-weight:600;direction:ltr;margin-bottom:4px;}
+.stat b{display:block;font-family:var(--f-num);font-size:19px;font-weight:600;direction:ltr;margin-bottom:4px;white-space:nowrap;}
 .stat span{font-size:11.5px;color:var(--muted);}
 
 .mpills{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;}
@@ -2321,7 +2321,17 @@ const vchOpen=v=>!v.used&&(!v.expiry||v.expiry>=today());
 const txVchs=t=>t.vouchers||(t.voucher?[t.voucher]:[]);
 const vchUsed=t=>Math.round(txVchs(t).reduce((a,v)=>a+(Number(v.amount)||0),0)*100)/100;
 const grossOf=t=>egpOf(t)+vchUsed(t);
-const mySpend=t=>Math.round((grossOf(t)+Number.EPSILON)*100)/100;
+/* الصرف = اللي طلع من حساباتك بس: الفاوتشرات (من نقط البنك أو هدية) مش فلوس طلعت منك */
+/* فاوتشر غطى أكتر من نصيبك (وكمل على جزء المكتب): صرفك صفر مش بالسالب */
+const mySpend=t=>{const e=egpOf(t);return Math.round(((vchUsed(t)>0?Math.max(0,e):e)+Number.EPSILON)*100)/100;};
+/* الفاوتشر بيغطي حاجتك الأول وبعدين حاجة الناس (زي الفاتورة)، فكل صنف بيتحسب باللي دفعته فيه */
+function vchCover(parts,V){
+  if(!(V>0.005))return parts;
+  const own=parts.filter(p=>!p.who), oth=parts.filter(p=>p.who);
+  [own,oth].forEach(L=>{const tot=L.reduce((a,p)=>a+p.amount,0);if(!(tot>0)||!(V>0.005))return;
+    const c=Math.min(V,tot);L.forEach(p=>{p.amount-=p.amount/tot*c;});V-=c;});
+  return parts;
+}
 /* نصيب الناس في مصروف (مقسوم معاهم أو اشتراك مشترك): بيتحسب «فلوس عند الناس» من وقت الدفع */
 const shareOut=t=>{let x=0;
   (D.owed||[]).forEach(o=>{if(o.srcTxn===t.id&&!o.lent)x+=owedFull(o);});
@@ -2334,8 +2344,9 @@ const breakdown=t=>{
   if(!(t.items&&t.items.length))parts=[{cat:t.cat||'other',amount:g}];
   else{const raw=t.items.reduce((a,i)=>a+(Number(i.amount)||0),0);
     const r=raw>0?(g/raw):1;
-    parts=t.items.map(i=>({cat:i.who?'lentcat':i.cat,amount:(Number(i.amount)||0)*r}));}
-  if(t.kind!=='expense'||!(g>0))return parts;
+    parts=t.items.map(i=>({cat:i.who?'lentcat':i.cat,amount:(Number(i.amount)||0)*r,who:!!i.who}));}
+  if(t.kind!=='expense'||!(g>0))return parts.map(p=>({cat:p.cat,amount:p.amount}));
+  parts=vchCover(parts,vchUsed(t)).map(p=>({cat:p.cat,amount:p.amount}));
   const mine=parts.reduce((a,p)=>a+(p.cat==='lentcat'?0:p.amount),0);
   const sh=Math.min(shareOut(t),mine);
   if(sh>0.005&&mine>0){const k=1-sh/mine;
@@ -3678,7 +3689,9 @@ function itemParts(t){
   const g=grossOf(t);let parts;
   if(!(t.items&&t.items.length))parts=[{cat:t.cat||'other',name:String(t.note||t.merchant||t.place||'').trim(),n:1,amount:g}];
   else{const raw=t.items.reduce((a,i)=>a+(Number(i.amount)||0),0), r=raw>0?g/raw:1;
-    parts=t.items.filter(i=>!i.who).map(i=>({cat:i.cat||'other',name:String(i.name||'').trim(),n:Math.max(1,Number(i.qty)||1),amount:(Number(i.amount)||0)*r}));}
+    parts=t.items.map(i=>({cat:i.cat||'other',name:String(i.name||'').trim(),n:Math.max(1,Number(i.qty)||1),amount:(Number(i.amount)||0)*r,who:!!i.who}));}
+  if(g>0)vchCover(parts,vchUsed(t));
+  parts=parts.filter(p=>!p.who);parts.forEach(p=>{delete p.who;});
   const mine=parts.reduce((a,p)=>a+p.amount,0), sh=Math.min(shareOut(t),mine);
   if(sh>0.005&&mine>0){const k=1-sh/mine;parts.forEach(p=>{p.amount*=k;});}
   return parts;
@@ -3780,15 +3793,19 @@ function periodSummary(from,to){
     return i.amount>=50&&i.n>=2&&ct>0&&((i.n>=3&&i.amount>=ct*0.1)||(kinds[i.cat]>=2&&i.amount>ct*0.25));})
     .map(i=>({name:i.name,cat:i.cat,n:i.n,amount:r2(i.amount),pct:Math.round(i.amount/(cm[i.cat]||1)*100)}))
     .sort((a,b)=>b.amount-a.amount).slice(0,8);
-  return {spent,earned,left:r2(earned-spent),byCat,high,gross:byCat.reduce((a,x)=>a+x[1],0)||1,max:byCat.length?byCat[0][1]:1};
+  return {mt,spent,earned,left:r2(earned-spent),byCat,high,gross:byCat.reduce((a,x)=>a+x[1],0)||1,max:byCat.length?byCat[0][1]:1};
 }
-function sumBody(P){
+/* «اتغطى بفاوتشرات»: مش داخل في الصرف، بس بيظهر لوحده */
+function vchLine(mt){const u=Math.round((mt||[]).filter(t=>t.kind==='expense').reduce((a,t)=>a+vchUsed(t),0)*100)/100;
+  return u>0.005?`<div class="hint" style="margin:10px 0 0;text-align:center">واتغطى بفاوتشرات <span class="n">${fmt(u)}</span> جنيه — مش داخل في المصروف.</div>`:'';}
+/* noTop: الملخص مفتوح تحت كروت نفس الشهر، فأرقامه اللي فوق مش بتتكرر */
+function sumBody(P,noTop){
   const S=periodSummary(P.from,P.to);
-  return `<div class="stats" style="margin-top:6px">
+  return `${noTop?'':`<div class="stats" style="margin-top:6px">
       <div class="stat"><b style="color:var(--clay)">${fmt(Math.round(S.spent))}</b><span>صرفت</span></div>
       <div class="stat"><b style="color:var(--mint)">${fmt(Math.round(S.earned))}</b><span>دخلك</span></div>
       <div class="stat"><b style="color:${S.left<0?'var(--clay)':'var(--mint)'}">${fmt(Math.round(Math.abs(S.left)))}</b><span>${S.left<0?'صرفت زيادة':'فاضل'}</span></div>
-    </div>
+    </div>${vchLine(S.mt)}`}
     <h4 style="font-size:13px;margin:18px 0 10px">صرفت على إيه</h4>
     ${S.byCat.length?S.byCat.map(([id,v])=>{const c=catOf(id);return `
       <div class="cat">
@@ -3797,6 +3814,8 @@ function sumBody(P){
           <span class="am" style="color:${c.color}">${fmt(Math.round(v*100)/100)}</span></span></div>
         <div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,(v/S.max)*100))}%;background:${c.color}"></div></div>
       </div>`;}).join(''):'<div class="empty">مفيش مصاريف في الفترة دي.</div>'}
+    ${(function(){const u=Math.round(S.mt.filter(t=>t.kind==='expense').reduce((a,t)=>a+vchUsed(t),0)*100)/100;
+      return u>0.005?`<div class="cat" style="opacity:.5"><div class="cat-t"><span>اتغطى بفاوتشرات</span><span class="r"><span class="am">${fmt(u)}</span></span></div></div>`:'';})()}
     <h4 style="font-size:13px;margin:18px 0 6px">ممكن تقلل من</h4>
     ${S.high.length?`<div class="hint" style="margin:0 0 8px">حاجات اتجابت كتير أو واخدة جزء كبير من تصنيفها.</div>
       <div class="panel">${S.high.map(i=>`<div class="arow">
@@ -3992,8 +4011,9 @@ function vHome(){
       <div class="stat"><b style="color:var(--mint)">${fmt(earned)}</b><span>الدخل</span></div>
       <div class="stat"><b style="color:${earned-spent<0?'var(--clay)':'var(--mint)'}">${fmt(earned-spent)}</b><span>الفرق</span></div>
     </div>
+    ${vchLine(mt)}
     <button class="btn ghost" onclick="app.sumToggle()">${sumOpen?'اقفل ملخص الشهر':'ملخص الشهر'}</button>
-    ${sumOpen?sumBody(monthRange()):''}
+    ${sumOpen?sumBody(monthRange(),1):''}
   </div>
 
   ${editInline?'':lvHomeHtml()}
@@ -4004,8 +4024,6 @@ function vHome(){
       <span>${byCat.length?plural(byCat.length,'تصنيف واحد','تصنيفين','تصنيفات','تصنيف')+' · '+fmt(gross):''} ${byCat.length?(catsOpen?'▲':'▼'):''}</span>
     </div>
     ${!catsOpen?'':`
-    ${(function(){const u=mt.reduce((a,t)=>a+vchUsed(t),0);
-      return u?`<div class="hint" style="margin:-4px 0 14px">منهم <span class="n">${fmt(u)}</span> جنيه اتغطوا بفاوتشرات، يعني اللي خرج من جيبك فعلًا أقل.</div>`:'';})()}
     ${byCat.length?byCat.map(([id,v])=>{const c=catOf(id);return `
       <div class="cat">
         <div class="cat-t"><span>${c.label}</span>
@@ -7168,7 +7186,7 @@ function logList(){
   const sum=sum0+fxg;
   const vch=(meTot&&!fAcct&&fDir!=='in'&&fDir!=='tr')?list.reduce((a,t)=>a+(t.kind==='expense'?vchUsed(t):0),0):0;
   return list.length
-    ?`<div class="hint" style="margin:-6px 0 12px">${nTx(list.length)} · ${sumLabel} <span class="n">${fmt(Math.round(sum*100)/100)}</span>${fxL?' '+esc(fxName(accCur(fAcct))):''}${vch>0.005?' · منه <span class="n">'+fmt(Math.round(vch*100)/100)+'</span> بفاوتشر':''}${notInc>0.005?' · وفيه <span class="n">'+fmt(Math.round(notInc*100)/100)+'</span> مش دخل (سلف أو حد دفع عنك)':''}${fxg?' · منه <span class="n">'+fmt(Math.round(fxg*100)/100)+'</span> فرق عملة':''}${otherM>0.005?' · ووصلك <span class="n">'+fmt(Math.round(otherM*100)/100)+'</span> تحصيل لصرفة في شهر تاني':''}</div>`+logDays(list)
+    ?`<div class="hint" style="margin:-6px 0 12px">${nTx(list.length)} · ${sumLabel} <span class="n">${fmt(Math.round(sum*100)/100)}</span>${fxL?' '+esc(fxName(accCur(fAcct))):''}${vch>0.005?' · وفاوتشرات <span class="n">'+fmt(Math.round(vch*100)/100)+'</span>':''}${notInc>0.005?' · وفيه <span class="n">'+fmt(Math.round(notInc*100)/100)+'</span> مش دخل (سلف أو حد دفع عنك)':''}${fxg?' · منه <span class="n">'+fmt(Math.round(fxg*100)/100)+'</span> فرق عملة':''}${otherM>0.005?' · ووصلك <span class="n">'+fmt(Math.round(otherM*100)/100)+'</span> تحصيل لصرفة في شهر تاني':''}</div>`+logDays(list)
     :'<div class="empty">مفيش نتايج.</div>';
 }
 
@@ -7779,6 +7797,8 @@ function render(){
   /* رجوع من تعديل عملية (حفظ أو إلغاء): نفس المكان اللي كنت فيه، مش أول الصفحة */
   if(_backY!==null&&!editOp){window.scrollTo(0,_backY||0);_backY=null;}
   if(tab==='scan'||editInline)document.querySelectorAll('.rl .nm').forEach(fitNm);
+  /* أرقام الكروت: لو الرقم أطول من الكارت الخط بيصغر لحد ما يدخل */
+  document.querySelectorAll('.stat b').forEach(el=>{el.style.fontSize='';let f=19;while(el.scrollWidth>el.clientWidth+1&&f>11){f--;el.style.fontSize=f+'px';}});
   keepPills();
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
 }

@@ -13,7 +13,7 @@ const scanSet=(run,items,extra)=>run("app.go('scan');app.manualBill();scan.items
   scanSet(run,[{name:'شاي',amount:40,cat:'other'},{name:'ورق',amount:100,cat:'other',off:true}],{voucherId:'v1'});
   const me=JSON.parse(run("JSON.stringify(D.txns.find(x=>x.book==='me'))"));
   t('الفاوتشر كله اتحسب (100)', me.voucher&&me.voucher.amount===100);
-  t('مصروفك في التصنيف 40 بس', r2(run("mySpend(D.txns.find(x=>x.book==='me'))"))===40);
+  t('الفاوتشر غطى نصيبك كله: صرفك صفر مش بالسالب', r2(run("mySpend(D.txns.find(x=>x.book==='me'))"))===0);
   t('الكاش خرج منه 40 بس في الفاتورة كلها', r2(B('me','cash')+B('office','cash')-c0)===-40, B('me','cash')+B('office','cash')-c0);
 }
 { // ٣ صنف لحد تاني: «فلوس عند الناس» من الأول
