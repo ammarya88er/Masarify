@@ -15,7 +15,7 @@ t('الميكروويف اتغطى كله: مش في «أجهزة»', !m.cats.de
 t('«فلوس عند الناس» صفر (رجّعلك اللي عليه)', !m.cats.lentcat||Math.abs(m.cats.lentcat)<0.01, JSON.stringify(m.cats));
 run("app.go('home');sumOpen=true;render();");
 t('سطر «اتغطى بفاوتشرات» تحت الكروت', V().indexOf('واتغطى بفاوتشرات <span class="n">14,500</span>')>-1);
-t('سطر باهت في آخر «صرفت على إيه»', V().indexOf('<span>اتغطى بفاوتشرات</span>')>-1);
+t('سطور باهتة في آخر «صرفت على إيه» (ليك وإسماعيل)', V().indexOf('<span>اتغطى بفاوتشرات — <bdi>ليك</bdi></span>')>-1&&V().indexOf('<span>اتغطى بفاوتشرات — <bdi>إسماعيل</bdi></span>')>-1);
 t('الملخص المفتوح تحت الكروت مايكررش الأرقام', V().indexOf('<span>صرفت زيادة</span>')<0&&V().indexOf('<span>صرفت</span>')<0);
 t('أرقام الكروت بتصغر لو طويلة', require('fs').readFileSync(process.env.MASAREEF_HTML||__dirname+'/../index.html','utf8').indexOf("querySelectorAll('.stat b').forEach")>-1);
 // مصروف بفاوتشر واحد من «إضافة»: الصنف باللي اتدفع

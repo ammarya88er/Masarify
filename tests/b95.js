@@ -1,4 +1,4 @@
-// «ضيف بيعة» في «فلوس ليك»، وتفاصيل «تقدر تصرف» في ٣ أقسام
+// «بيعة» (من «إضافة» ← «دخل» من الدفعة ١٠١) في «فلوس ليك»، وتفاصيل «تقدر تصرف» في ٣ أقسام
 const {boot,seed,t,done}=require('./harness');
 const E='{stopPropagation(){}}';
 const NOW=Date.UTC(2026,10,16,9);
@@ -6,15 +6,13 @@ const sal={id:'sal',book:'me',kind:'income',amount:8000,account:'cib',date:'2026
 { // البيعة
   const {run,V,B}=boot(seed({txns:[sal]}),NOW);
   const b0=JSON.stringify(run("JSON.stringify(balances('me'))"));
-  run("app.go('home');app.spendToggle();");
-  t('«ضيف بيعة» موجود حتى لو مفيش حد عليه فلوس', V().indexOf("app.saleGo('spend')")>-1);
-  run("app.saleGo('spend');");t('بيسأل بعت إيه، لمين، والمبلغ', V().indexOf("app.saleSet('what'")>-1&&V().indexOf("app.saleSet('who'")>-1&&V().indexOf("app.saleSet('amount'")>-1&&V().indexOf('salesave" disabled')>-1);
-  run("app.saleSet('what','لابتوب');app.saleSet('who','كريم');app.saleSet('amount','15000');app.saleSave();");
+  const mk=(w,who,a)=>run("app.go('add');app.setKind('income');app.setLoan('sale');app.dset('saleWhat','"+w+"');app.setFrom('"+who+"');app.dset('amount','"+a+"');app.setSaleGot(false);app.saleEntrySave();");
+  mk('لابتوب','كريم','15000');
   t('البيعة اتسجلت من غير ما فلوس تطلع', run("D.sales.length")===1&&JSON.stringify(run("JSON.stringify(balances('me'))"))===b0&&run("D.txns.length")===1);
   const L=JSON.parse(run("JSON.stringify(peopleLedger())"));
   t('الباقي في «اللي ليك» باسم كريم', L.length===1&&L[0].who==='كريم'&&L[0].recTot===15000);
   t('داخل في «ولو رجعلك اللي ليك»', run("spendCalc().rec")===15000);
-  run("app.go('home');");t('ظاهرة في «فلوس ليك» من غير ميعاد', V().indexOf('بيعة: لابتوب')>-1&&V().indexOf("app.saleGo('owed')")>-1);
+  run("app.go('home');");t('ظاهرة في «فلوس ليك» من غير ميعاد', V().indexOf('بيعة: لابتوب')>-1);
   // استلمت جزء
   run("app.startOwedGet('g_كريم');app.setOwedAcct('cash');app.setOwedGot('5000',0);app.confirmOwedGet('g_كريم');");
   const p=JSON.parse(run("JSON.stringify(D.txns.find(x=>x.saleOf))"));
@@ -31,7 +29,7 @@ const sal={id:'sal',book:'me',kind:'income',amount:8000,account:'cib',date:'2026
   run("app.startOwedGet('g_كريم');app.setOwedAcct('cib');app.setOwedGot('9000',0);app.confirmOwedGet('g_كريم');");
   t('خلصت: اتشالت من «فلوس ليك»، والدفعات في السجل', run("peopleLedger().length")===0&&run("D.txns.filter(x=>x.saleOf).length")===2&&run("spendCalc().rec")===0);
   // أكتر من الباقي: الزيادة «فرق فلوس»
-  run("app.saleGo('owed');saleOpen='spend';app.saleSet('what','كرسي');app.saleSet('who','سامي');app.saleSet('amount','100');app.saleSave();");
+  mk('كرسي','سامي','100');
   run("app.startOwedGet('g_سامي');app.setOwedAcct('cash');app.setOwedGot('120',0);app.confirmOwedGet('g_سامي');");
   t('وصل أكتر: 100 بيع و20 فرق فلوس', run("D.txns.find(x=>x.note==='بيع — كرسي').amount")===100&&run("D.txns.some(x=>x.icat==='diff'&&x.amount===20)"));
 }

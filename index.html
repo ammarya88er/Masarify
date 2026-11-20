@@ -1141,24 +1141,30 @@ function collectOwed(list,got,acct,who){
     }
   }
 }
-/* «ضيف بيعة»: بعت حاجة لحد بمبلغ متفق عليه، من غير ما فلوس تطلع من حساب */
-let saleOpen='', saleD={what:'',who:'',amount:''};
-const saleOk=()=>!!String(saleD.what||'').trim()&&!!String(saleD.who||'').trim()&&Number(onlyNum(saleD.amount))>0;
-function saleForm(at){
-  if(saleOpen!==at)return `<button class="chip sm" onclick="event.stopPropagation();app.saleGo('${at}')">ضيف بيعة</button>`;
-  const n=personNames();
-  return `<div class="inline" onclick="event.stopPropagation()">
-    <label class="f">بعت إيه؟ <b>*</b></label>
-    <input class="f" value="${esc(saleD.what)}" oninput="app.saleSet('what',this.value)">
-    <label class="f">لمين؟ <b>*</b></label>
-    <input class="f" id="salewho" value="${esc(saleD.who)}" oninput="app.saleSet('who',this.value)">
-    ${n.length?`<div class="chips" style="margin-top:10px">${n.map(x=>`<button class="chip sm${String(saleD.who||'').trim()===x?' on':''}" onclick="app.saleWho('${jsArg(x)}')">${esc(x)}</button>`).join('')}</div>`:''}
-    <label class="f">المبلغ اللي اتفقتوا عليه <b>*</b></label>
-    <input class="f" type="text" inputmode="decimal" value="${esc(saleD.amount)}" oninput="app.saleSet('amount',numFix(this,1))">
-    <div class="hint">مفيش فلوس هتطلع من أي حساب. كل ما يوصلك جزء دوس «استلمت» قدام اسمه، وهيتسجل دخل «بيع حاجات».</div>
-    <button class="btn" id="salesave" ${saleOk()?'':'disabled'} onclick="app.saleSave()">ضيف البيعة</button>
-    <button class="btn ghost" onclick="app.saleGo('')">إلغاء</button>
-  </div>`;
+/* «بيعة» من «إضافة» ← «دخل»: بعت حاجة لحد بمبلغ متفق عليه، ولو استلمت جزء بيتسجل دخل «بيع حاجات» */
+const saleK=()=>draft.kind==='income'&&!!draft.sale&&!editOp;
+function saleEntryOk(){
+  const amt=Number(onlyNum(draft.amount))||0, got=Number(onlyNum(draft.saleGotAmt))||0;
+  if(!String(draft.saleWhat||'').trim()||!String(draft.from||'').trim()||!(amt>0)||draft.saleGot===undefined)return false;
+  if(!draft.saleGot)return true;
+  return got>0&&got<=amt+0.005&&!!draft.account&&!isFxAcc(draft.account)&&!isCreditAcc(draft.account);
+}
+function saleHintTxt(){
+  const amt=Number(onlyNum(draft.amount))||0, got=Number(onlyNum(draft.saleGotAmt))||0;
+  return (draft.saleGot&&amt>0&&got>amt+0.005)?'<b style="color:var(--clay)">اللي استلمته أكتر من المتفق عليه — قلّله.</b>'
+    :'مفيش فلوس هتطلع من أي حساب. الباقي هيفضل في «فلوس ليك»، وكل ما يوصلك جزء دوس «استلمت» قدام اسمه.';
+}
+function saleEntryHtml(){
+  return `<label class="f">بعت إيه؟ <b>*</b></label>
+    <input class="f" value="${esc(draft.saleWhat||'')}" oninput="app.dset('saleWhat',this.value)">
+    ${fromField('لمين؟',1)}
+    <label class="f">استلمت حاجة دلوقتي؟</label>
+    ${yesNo('saleGot',draft.saleGot,'app.setSaleGot')}
+    ${draft.saleGot?`<label class="f">استلمت كام؟ <b>*</b></label>
+      <input class="f" type="text" inputmode="decimal" value="${esc(draft.saleGotAmt||'')}" oninput="app.dset('saleGotAmt',numFix(this,1))">
+      <label class="f">على أنهي حساب؟ <b>*</b></label>
+      ${payChips(draft.account,'app.setAccount','','me','acct',0,{src:1})}`:''}
+    <div class="hint" id="salehint">${saleHintTxt()}</div>`;
 }
 /* «عدّل» البيعة: بعت إيه، لمين، والمبلغ (مايقلّش عن اللي استلمته) */
 let saleEd=null;
@@ -1521,7 +1527,9 @@ function insSchedule(i){
     const key=mAdd(i.firstKey,k-1);
     const it=Math.floor(rem*r*100+1e-6)/100;
     const prin=k===n?rem:Math.round((pmt-it)*100)/100;
-    out.push({k:k,key:key,date:dayShift(stmtDate(key,a),-1),int:it,prin:prin});
+    /* القسط بينزل يوم الكشف نفسه (date)، بس بيتحسب في الكشف ده: آخر يوم في فترته (bill) قبله بيوم */
+    const sd=stmtDate(key,a);
+    out.push({k:k,key:key,date:sd,bill:dayShift(sd,-1),int:it,prin:prin});
     rem=Math.round((rem-prin)*100)/100;
   }
   return out;
@@ -1557,7 +1565,17 @@ function insBankApply(i,v){
 function cardInsAll(){
   let changed=false;const td=today();
   (D.installments||[]).filter(i=>i.mode==='bank').forEach(i=>{
-    insSchedule(i).forEach(e=>{
+    const sc=insSchedule(i);
+    /* قسط اتحسب نازل قبل يوم كشفه (النسخ القديمة كانت بتنزله قبل الكشف بيوم): يرجع لحد ما الكشف ينزل.
+       الفايدة اللي اتأكدت مابترجعش */
+    const kOf=t=>{const m=String(t.note||'').match(/\((\d+)\//);return m?Number(m[1]):0;};
+    const due=sc.filter(e=>e.date<=td).length,
+      back=Math.max(due,0,...D.txns.filter(t=>t.insInt&&t.insId===i.id&&!t.pending).map(kOf));
+    if((Number(i.intPosted)||0)>back){
+      D.txns=D.txns.filter(t=>!(t.insInt&&t.insId===i.id&&t.pending&&kOf(t)>back));
+      i.intPosted=back;i.paid=back;changed=true;
+    }
+    sc.forEach(e=>{
       if(e.k<=(Number(i.intPosted)||0)||e.date>td)return;
       if(e.int>=0.01)D.txns.unshift({id:autoId('ii',i.id,e.date),book:'me',kind:'expense',amount:e.int,cat:'fees',
         account:i.src,date:e.date,insInt:true,insId:i.id,pending:true,
@@ -2140,7 +2158,9 @@ function cardStmtLeft(a,key){
     if(t.kind==='expense'||t.kind==='transfer')e=-v;
     else if(t.kind==='income'||t.kind==='float'||t.kind==='yield')e=v;
     else if(t.kind==='settle')e=t.dir==='in'?v:-v;
-    if(t.date<sd)bal+=e;else if(e>0)paidAfter+=e;
+    /* فايدة القسط بتنزل يوم الكشف وبتتحسب فيه */
+    const dd=(t.insInt&&t.date===sd)?dayShift(sd,-1):t.date;
+    if(dd<sd)bal+=e;else if(e>0)paidAfter+=e;
   });
   const owed=Math.max(0,(Number(a.limit)||0)-bal-insRemainOn(a.id,sd));
   return Math.round((owed-paidAfter)*100)/100;
@@ -2410,7 +2430,7 @@ function insBankUnbilled(i,at){
   if(!i.buyDate||!(i.buyDate<at))return 0;
   /* حركة الشراء اتمسحت: مفيش حاجة تتشال من الكشف */
   if(!D.txns.some(t=>t.insBuy===i.id))return 0;
-  return Math.round(insSchedule(i).filter(e=>e.date>=at).reduce((x,e)=>x+e.prin,0)*100)/100;
+  return Math.round(insSchedule(i).filter(e=>e.bill>=at).reduce((x,e)=>x+e.prin,0)*100)/100;
 }
 const insBankUnbilledOn=(accId,at)=>(D.installments||[]).filter(i=>i.src===accId&&i.mode==='bank').reduce((a,i)=>a+insBankUnbilled(i,at),0);
 const isCardIns=i=>!!(D.accounts.find(a=>a.id===i.src&&a.credit));
@@ -3795,9 +3815,32 @@ function periodSummary(from,to){
     .sort((a,b)=>b.amount-a.amount).slice(0,8);
   return {mt,spent,earned,left:r2(earned-spent),byCat,high,gross:byCat.reduce((a,x)=>a+x[1],0)||1,max:byCat.length?byCat[0][1]:1};
 }
-/* «اتغطى بفاوتشرات»: مش داخل في الصرف، بس بيظهر لوحده */
-function vchLine(mt){const u=Math.round((mt||[]).filter(t=>t.kind==='expense').reduce((a,t)=>a+vchUsed(t),0)*100)/100;
-  return u>0.005?`<div class="hint" style="margin:10px 0 0;text-align:center">واتغطى بفاوتشرات <span class="n">${fmt(u)}</span> جنيه — مش داخل في المصروف.</div>`:'';}
+/* «اتغطى بفاوتشرات»: مش داخل في الصرف، بس بيظهر لوحده — متقسم: ليك كام، ولكل واحد كام من أصنافه
+   (نفس ترتيب vchCover: حاجتك الأول وبعدين حاجة الناس، والزيادة راحت على جزء الدفتر التاني) */
+function vchSplit(mt){
+  const out={tot:0,mine:0,by:{},off:0};
+  (mt||[]).filter(t=>t.kind==='expense').forEach(t=>{
+    let V=vchUsed(t);if(!(V>0.005))return;out.tot+=V;
+    const g=grossOf(t), its=(t.items||[]).filter(i=>Number(i.amount)>0);
+    const raw=its.reduce((a,i)=>a+(Number(i.amount)||0),0), r=raw>0?g/raw:1;
+    const own=its.length?its.filter(i=>!i.who).reduce((a,i)=>a+(Number(i.amount)||0)*r,0):Math.max(0,g);
+    const c=Math.min(V,own);out.mine+=c;V-=c;
+    const oth=its.filter(i=>i.who), ot=oth.reduce((a,i)=>a+(Number(i.amount)||0)*r,0);
+    if(V>0.005&&ot>0){const k=Math.min(V,ot);
+      oth.forEach(i=>{const n=String(i.who).trim();out.by[n]=(out.by[n]||0)+(Number(i.amount)||0)*r/ot*k;});V-=k;}
+    if(V>0.005)out.off+=V;
+  });
+  const R=x=>Math.round(x*100)/100;
+  out.tot=R(out.tot);out.mine=R(out.mine);out.off=R(out.off);
+  out.rows=[{label:'ليك',amt:out.mine}].concat(Object.keys(out.by).map(n=>({label:n,amt:R(out.by[n])})))
+    .concat(out.off>0.005?[{label:officeOn()?bookName():'ليك',amt:out.off}]:[])
+    .reduce((L,x)=>{const o=L.find(y=>y.label===x.label);if(o)o.amt=R(o.amt+x.amt);else L.push(x);return L;},[])
+    .filter(x=>x.amt>0.005);
+  return out;
+}
+function vchLine(mt){const V=vchSplit(mt);if(!(V.tot>0.005))return '';
+  const sp=V.rows.length>1||(V.rows[0]&&V.rows[0].label!=='ليك');
+  return `<div class="hint" style="margin:10px 0 0;text-align:center">واتغطى بفاوتشرات <span class="n">${fmt(V.tot)}</span> جنيه — مش داخل في المصروف.${sp?`<span style="display:block;margin-top:3px">${V.rows.map(x=>`<bdi>${esc(x.label)}</bdi> <span class="n">${fmt(x.amt)}</span>`).join(' · ')}</span>`:''}</div>`;}
 /* noTop: الملخص مفتوح تحت كروت نفس الشهر، فأرقامه اللي فوق مش بتتكرر */
 function sumBody(P,noTop){
   const S=periodSummary(P.from,P.to);
@@ -3814,8 +3857,10 @@ function sumBody(P,noTop){
           <span class="am" style="color:${c.color}">${fmt(Math.round(v*100)/100)}</span></span></div>
         <div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,(v/S.max)*100))}%;background:${c.color}"></div></div>
       </div>`;}).join(''):'<div class="empty">مفيش مصاريف في الفترة دي.</div>'}
-    ${(function(){const u=Math.round(S.mt.filter(t=>t.kind==='expense').reduce((a,t)=>a+vchUsed(t),0)*100)/100;
-      return u>0.005?`<div class="cat" style="opacity:.5"><div class="cat-t"><span>اتغطى بفاوتشرات</span><span class="r"><span class="am">${fmt(u)}</span></span></div></div>`:'';})()}
+    ${(function(){const V=vchSplit(S.mt);if(!(V.tot>0.005))return '';
+      const sp=V.rows.length>1||(V.rows[0]&&V.rows[0].label!=='ليك');
+      const row=(l,a)=>`<div class="cat" style="opacity:.5"><div class="cat-t"><span>${l}</span><span class="r"><span class="am">${fmt(a)}</span></span></div></div>`;
+      return sp?V.rows.map(x=>row('اتغطى بفاوتشرات — <bdi>'+esc(x.label)+'</bdi>',x.amt)).join(''):row('اتغطى بفاوتشرات',V.tot);})()}
     <h4 style="font-size:13px;margin:18px 0 6px">ممكن تقلل من</h4>
     ${S.high.length?`<div class="hint" style="margin:0 0 8px">حاجات اتجابت كتير أو واخدة جزء كبير من تصنيفها.</div>
       <div class="panel">${S.high.map(i=>`<div class="arow">
@@ -3903,7 +3948,7 @@ function spendCalc(){
     const L0=where(a.id);if(!L0)return;
     let d=f.next,g=0;while(d&&d<=target&&g++<24){add(L0,f.name+' — '+a.name,Number(f.amount)||0,d);d=feeNext({cycle:f.cycle,day:f.day,next:d});}}));
   /* باقات الرصيد: الشحن اللي محتاجه للتجديدات لحد المرتب (بيتحسب على الرقم الأولاني لأن الحساب مش ثابت) */
-  (D.lines||[]).forEach(l=>{const n=lineNeed(l,target);if(n.pay>0)add(X,'شحن رصيد '+l.name+' (تقريبًا)',n.pay,l.next<td?td:l.next);});
+  (D.lines||[]).forEach(l=>{const n=lineNeed(l,target);if(n.pay>0)add(X,'شحن رصيد '+lineTitle(l)+' (تقريبًا)',n.pay,l.next<td?td:l.next);});
   /* مصاريف تدبير مستنية تأكيدك: البنك هيخصمها قريب */
   (D.arrPend||[]).forEach(e=>{const L0=where(e.acct)||(isCard(e.acct)?C:null);if(L0)add(L0,'تدبير مستني — '+(e.note||accName(e.acct)),Number(e.amount)||0,'');});
   (D.subs||[]).forEach(su=>(su.payments||[]).forEach(p=>{if(!p.feePending||!(Number(p.fee)>0))return;
@@ -3977,7 +4022,6 @@ function spendHtml(){
       ${(S.C.length||S.Y.length)?hd('باقي اللي عليك',S.C.concat(S.Y))+lst(byDate(S.C.concat(S.Y))):''}
       ${hd('اللي ليك',S.R,'var(--mint)')}
       ${S.R.map(i=>`<div class="arow"><span class="nm"><bdi>${esc(i.label)}</bdi></span><span class="vl n" style="color:var(--mint)">${fmt(i.amt)}</span></div>`).join('')}
-      <div style="padding:10px 16px 14px">${saleForm('spend')}</div>
     </div>`:''}
   </div>`;
 }
@@ -4408,7 +4452,6 @@ ${s.cycle==='trial'
         <button class="btn ghost" onclick="app.cancelOwedGet()">إلغاء</button>
       </div>`:''}`;
       });
-      if(owedOpen||one)body+=`<div style="padding:4px 16px 12px">${saleForm('owed')}</div>`;
       rows.push((one?'':`<div class="alert" onclick="app.toggleOwedPanel()" style="cursor:pointer">
       ${RAIL(4,'')}
       <span class="g"><span class="t">فلوس ليك <span style="color:var(--muted);font-size:12px">${owedOpen?'▲':'▼'}</span></span>
@@ -4678,7 +4721,7 @@ function txnRow(t,noDate){
 }
 
 /* الحفظ مقفول لحد ما كل سؤال «أيوه ولا لأ» يتجاوب، ونوع الدخل يتختار */
-function entryOk(){return !ynLast&&entryOk0()&&!(draft.kind==='income'&&!draft.loan&&!draftIcat());}
+function entryOk(){return !ynLast&&entryOk0()&&!(draft.kind==='income'&&!draft.loan&&!saleK()&&!draftIcat());}
 function oOk(){return !ynLast&&oOk0();}
 function scanSaveOk(){return !ynLast&&scanSaveOk0();}
 /* بيرسم الشاشة، ويعدّ الأسئلة اللي لسه ماتجاوبتش، ويظبط زرار الحفظ على كده */
@@ -4699,6 +4742,7 @@ function owedHintTxt(){
   if(owedOver())return '<b style="color:var(--clay)">اللي على الناس أكتر من المبلغ'+(draft.hasDisc?' بعد الخصم':'')+' — قلّله.</b>';
   return 'نصيبك المتوقع <span class="n">'+fmt(Math.max(0,entryNet()-owedPeopleSum()))+'</span> جنيه.';}
 function entryOk0(){const k=draft.kind;
+  if(saleK())return saleEntryOk();
   if(owedOver())return false;
   const nm=String(draft.from||'').trim();
   if(k==='income'&&draft.loan&&!nm)return false;
@@ -5196,7 +5240,7 @@ function vAdd0(){
         ${pickRow('psmy',swapMyList(draft.sOff).map(x=>({id:x.id,label:esc(x.name)})),draft.sMy,'app.setPSmy')}
         ${sharedAccs().length>1?`<label class="f">والتعويض من أنهي حساب مشترك؟ <b>*</b></label>
           ${pickRow('psshared',sharedAccs().map(x=>({id:x.id,label:esc(x.name)})),draft.sShared,'app.setPSshared')}`:''}
-        <div class="hint">${swapHint(draft.sdir||'take',sh)}</div>`;})():`
+        <div class="hint">${swapHint(draft.sdir||'take',sh)}</div>`;})():saleK()?'':`
     <label class="f">${k==='income'?'يتضاف على أنهي حساب؟':k==='transfer'?'من أنهي حساب؟':'دافع من إيه؟'} <b>*</b></label>
     ${payChips(draft.account,'app.setAccount','','me','acct',k==='transfer',k==='transfer'?{src:1,bal:1,fx:1}:{fx:1,other:k==='expense'&&!!otherAcc()})}
     ${(k==='expense'&&draft.account==='__other__')?`${fromField('مين دفع؟',1)}
@@ -5204,7 +5248,7 @@ function vAdd0(){
 
 
 
-    ${isCreditAcc(draft.account)&&k!=='transfer'?`<label class="f">العملة</label>
+    ${isCreditAcc(draft.account)&&k!=='transfer'&&!saleK()?`<label class="f">العملة</label>
       ${pickRow('cur',[{id:'EGP',label:'بالجنيه'},{id:'USD',label:'بالدولار'}],draft.cur,'app.setCur',1)}`:''}
 
 
@@ -5223,8 +5267,8 @@ function vAdd0(){
           <div class="hint">هتتخصم من ${esc(R.a.name)}.</div>`:''}`;})():''}`:''}
 
     ${k==='income'?`<label class="f">ده إيه؟</label>
-      ${pickRow('inkind',[{id:'in',label:'دخل'},{id:'loan',label:'سلفة'}],draft.loan?'loan':'in','app.setLoan',1)}
-      ${draft.loan?`${fromField('من مين؟',1)}
+      ${pickRow('inkind',[{id:'in',label:'دخل'},{id:'loan',label:'سلفة'}].concat(editOp?[]:[{id:'sale',label:'بيعة'}]),saleK()?'sale':draft.loan?'loan':'in','app.setLoan',1)}
+      ${saleK()?saleEntryHtml():draft.loan?`${fromField('من مين؟',1)}
       <div class="hint">الفلوس هتدخل حسابك، بس مش هتتحسب دخل، وهتتسجل عليك في «فلوس عليك».</div>`
       :`<label class="f">نوع الدخل</label>
       <div id="icatrow">${icatRow()}</div>
@@ -5260,8 +5304,8 @@ function vAdd0(){
         ${draft.owedKind==='lent'?'<div class="hint">لو حد بعتلك أكتر من اللي عليه، الزيادة هتتسجل دخل.</div>':`<div class="hint">لو حد بعت أكتر أو أقل، الفرق بيتظبط على نصيبك أنت. <span id="owedhint">${owedHintTxt()}</span></div>`}`:''}
     `:''}
 
-    <label class="f">المكان (اختياري)</label>
-    <input class="f" placeholder="اسم المحل أو المكان" value="${esc(draft.place)}" oninput="app.dset('place',this.value)">
+    ${saleK()?'':`<label class="f">المكان (اختياري)</label>
+    <input class="f" placeholder="اسم المحل أو المكان" value="${esc(draft.place)}" oninput="app.dset('place',this.value)">`}
 
     ${(k==='expense'&&!fxA&&vehOn()&&(draft.cat==='fuel'||draft.cat==='repair'))?`
       ${(D.vehicles||[]).length>1?`<label class="f">أنهي مركبة؟</label>
@@ -5292,8 +5336,8 @@ function vAdd0(){
         <div class="hint">هتتسجل حركة منفصلة بتصنيف عمولات ورسوم.</div>`:''}`}
     `:''}
 
-    <label class="f">ملاحظة (اختياري)</label>
-    <input class="f" value="${esc(draft.note)}" oninput="app.dset('note',this.value)">
+    ${saleK()?'':`<label class="f">ملاحظة (اختياري)</label>
+    <input class="f" value="${esc(draft.note)}" oninput="app.dset('note',this.value)">`}
 
     <label class="f">التاريخ</label>
     ${dateField(draft.date,'app.setDate')}
@@ -5301,10 +5345,10 @@ function vAdd0(){
     ${(draft.cur==='USD'&&k==='expense'&&isCreditAcc(draft.account))
       ?holdField('balafter',draft.balAfter,"app.dset('balAfter',app.holdLive('balafter','"+draft.account+"',0))",draft.account,0,-1):''}
 
-    ${xchOn()?'<label class="f">حوّلت كام؟</label>':''}
-    <div class="money" style="margin-top:${xchOn()?'6':'24'}px">
+    ${xchOn()?'<label class="f">حوّلت كام؟</label>':saleK()?'<label class="f">المبلغ اللي اتفقتوا عليه <b>*</b></label>':''}
+    <div class="money" style="margin-top:${(xchOn()||saleK())?'6':'24'}px">
       <input type="text" inputmode="decimal" placeholder="0" value="${esc(draft.amount)}" oninput="app.dset('amount',numFix(this,1))">
-      <span>${draft.cur==='USD'?'دولار':esc(fxName(accCur(draft.account)))}</span>
+      <span>${saleK()?'جنيه':draft.cur==='USD'?'دولار':esc(fxName(accCur(draft.account)))}</span>
     </div>
     ${draft.cur==='USD'?`<div class="hint" style="text-align:center" id="usdhint">${usdHint()}</div>`:''}
     ${(fxA&&k!=='transfer')?`<div class="hint" style="text-align:center" id="fxamthint">${fxAmtHint()}</div>`:''}
@@ -5318,7 +5362,7 @@ function vAdd0(){
 
     <div id="vchbox">${(k==='expense'&&!fxA&&draft.cur==='EGP'&&draft.account!=='__other__')?vchPicker(draft.voucherId,Number(onlyNum(draft.amount))||0,'app.setVch'):''}</div>
 
-    <button class="btn" id="entrysave" ${ok?'':'disabled'} onclick="app.saveEntry()">احفظ</button>
+    <button class="btn" id="entrysave" ${ok?'':'disabled'} onclick="${saleK()?'app.saleEntrySave()':'app.saveEntry()'}">احفظ</button>
     <button class="btn ghost" onclick="${editOp?'app.cancelEditOp()':'app.clearEntry()'}">إلغاء</button>
   </div>`;
 }
@@ -6359,6 +6403,8 @@ function vchPicker(selId,total,fnPick){
    نسبة الشحن (D.lineRate: بتدفع كام عشان ياخد 100) والتقريب (D.lineStep) من الإعدادات.
    ========================================================================== */
 const lineRate=()=>(Number(D.lineRate)||143)/100;
+/* اسم الباقة للعرض: لو فيه «باقة» بيتكتب زي ما هو، غير كده بيتزود قبله «باقة» */
+const lineTitle=l=>{const n=String(l&&l.name||'').trim();return /باقة/.test(n)?n:'باقة '+n;};
 const lineStep=()=>Number(D.lineStep)||10;
 const lineAhead=()=>Number(D.lineAhead)||3;
 /* سجل الرصيد: آخر رقم مكتوب (شحنة اتمسحت حركتها مالهاش لازمة) */
@@ -6383,7 +6429,7 @@ function lineCard(l){
   const f=(fld,lbl,v,inp)=>`<label class="f">${lbl}</label><input class="f" type="text" inputmode="${inp||'decimal'}" value="${esc(v)}" oninput="app.lineSet('${fld}',numFix(this,${inp==='numeric'?0:1}))">`;
   return `<div class="panel" id="line-${l.id}" style="padding:15px 16px;margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
-      <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(l.name)}</span>
+      <span style="font-family:var(--f-disp);font-size:14.5px;font-weight:600">${esc(lineTitle(l))}</span>
       <span style="font-size:14px;white-space:nowrap">باقة <span class="n">${fmt(l.price)}</span> رصيد</span>
     </div>
     <div style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.8">
@@ -6468,18 +6514,18 @@ function lineAlerts(rows){
   /* نفس اليوم = تنبيه واحد */
   const byDay=a=>{const g={};a.forEach(l=>{(g[l.next]=g[l.next]||[]).push(l);});return Object.values(g);};
   byDay(due).forEach(G=>rows.push(`<div class="alert">${RAIL(2,G[0].next)}
-    <span class="g"><span class="t">${G.length>1?'الباقات':'باقة '+esc(G[0].name)} اتجددت؟</span>
-      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(l.name)+': ':'')+'الرصيد <span class="n">'+fmt(lineBal(l))+'</span> · الباقة <span class="n">'+fmt(l.price)+'</span>').join('<br>')}</span></span>
-    <div class="side">${G.map(l=>btn(l,'renew',G.length>1?'اتجددت '+esc(l.name):'اتجددت',1)).join('')}
+    <span class="g"><span class="t">${G.length>1?'الباقات':esc(lineTitle(G[0]))} اتجددت؟</span>
+      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(lineTitle(l))+': ':'')+'الرصيد <span class="n">'+fmt(lineBal(l))+'</span> · الباقة <span class="n">'+fmt(l.price)+'</span>').join('<br>')}</span></span>
+    <div class="side">${G.map(l=>btn(l,'renew',G.length>1?'اتجددت '+esc(lineTitle(l)):'اتجددت',1)).join('')}
       <button class="chip sm" onclick="app.lineWait('${G.map(l=>l.id).join(',')}')">لسه</button></div></div>`));
   byDay(soon).forEach(G=>rows.push(`<div class="alert">${RAIL(3,G[0].next)}
-    <span class="g"><span class="t">${G.map(l=>esc(l.name)).join(' و')} ${G.length>1?'بيتجددوا':'بيتجدد'} ${whenLabel(G[0].next)}</span>
-      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(l.name)+': ':'')+'محتاج تشحن تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span>').join('<br>')}</span></span>
-    <div class="side">${G.map(l=>btn(l,'charge',G.length>1?'شحنت '+esc(l.name):'شحنت',1)).join('')}${G.map(l=>btn(l,'renew',G.length>1?'خلصت بدري — '+esc(l.name):'خلصت بدري')).join('')}</div></div>`));
+    <span class="g"><span class="t">${G.map(l=>esc(lineTitle(l))).join(' و')} ${G.length>1?'بيتجددوا':'بيتجدد'} ${whenLabel(G[0].next)}</span>
+      <span class="s" style="display:block">${G.map(l=>(G.length>1?esc(lineTitle(l))+': ':'')+'محتاج تشحن تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span>').join('<br>')}</span></span>
+    <div class="side">${G.map(l=>btn(l,'charge',G.length>1?'شحنت '+esc(lineTitle(l)):'شحنت',1)).join('')}${G.map(l=>btn(l,'renew',G.length>1?'خلصت بدري — '+esc(lineTitle(l)):'خلصت بدري')).join('')}</div></div>`));
   if(afterSal.length)rows.push(`<div class="alert">${RAIL(3,sal)}
     <span class="g"><span class="t">اشحن رصيد</span>
-      <span class="s" style="display:block">${afterSal.map(l=>esc(l.name)+' تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span> · بيتجدد '+dayLabel(l.next)).join('<br>')}</span></span>
-    <div class="side">${afterSal.map(l=>btn(l,'charge',afterSal.length>1?'شحنت '+esc(l.name):'شحنت',1)).join('')}
+      <span class="s" style="display:block">${afterSal.map(l=>esc(lineTitle(l))+' تقريبًا <span class="n">'+fmt(lineNextPay(l))+'</span> · بيتجدد '+dayLabel(l.next)).join('<br>')}</span></span>
+    <div class="side">${afterSal.map(l=>btn(l,'charge',afterSal.length>1?'شحنت '+esc(lineTitle(l)):'شحنت',1)).join('')}
       <button class="chip sm" onclick="app.lineSnooze('${afterSal.map(l=>l.id).join(',')}')">فكّرني قبلها</button></div></div>`);
 }
 /* اشتراك وقفت تجديده (حتى لو مدته لسه ماخلصتش): بينزل تحت وباهت زي الفاوتشر المستخدم */
@@ -6522,10 +6568,18 @@ function wSubs(){
     return ta<tb?-1:ta>tb?1:0;
   });
   const active=list.filter(s=>s.cycle!=='trial'&&!subStopped(s));
-  const mo=Math.round(list.reduce((a,s)=>a+subMonthly(s),0)*100)/100;
-  const yr=Math.round(list.reduce((a,s)=>a+yearly(s),0)*100)/100;
+  /* الباقات بالرصيد بتمنها التقريبي: سعرها بالرصيد × نسبة الشحن، وبتتجدد كل مدتها */
+  const LN=D.lines||[], lnYr=LN.reduce((a,l)=>a+(Number(l.price)||0)*lineRate()*365/(Number(l.period)||30),0);
+  const mo=Math.round((list.reduce((a,s)=>a+subMonthly(s),0)+lnYr/12)*100)/100;
+  const yr=Math.round((list.reduce((a,s)=>a+yearly(s),0)+lnYr)*100)/100;
+  const nTr=list.filter(s=>s.cycle==='trial').length;
   const ok=subOk();
   return `<div style="margin-top:18px">
+    ${(list.length||LN.length)?`<div class="stats" style="margin-bottom:16px">
+      <div class="stat"><b>${fmt(mo)}</b><span>في الشهر</span></div>
+      <div class="stat"><b>${fmt(yr)}</b><span>في السنة</span></div>
+      <div class="stat"><b>${active.length+LN.length}</b><span>${LN.length&&active.length?'اشتراك وباقة':LN.length?'باقة':'اشتراك'}${nTr?' + '+nTr+' تجربة':''}</span></div>
+    </div>${LN.length?'<div class="hint" style="margin:-8px 0 16px;text-align:center">الباقات محسوبة بتمنها التقريبي.</div>':''}`:''}
     <button class="btn ghost" style="margin:0 0 20px" onclick="app.toggleSub()">${showSub?'إلغاء':'ضيف اشتراك'}</button>
 
     ${showSub?`
@@ -6580,11 +6634,6 @@ function wSubs(){
       <button class="btn" id="subsave" ${ok?'':'disabled'} onclick="app.addSub()">احفظ</button>`}
     `:''}
     ${(D.lines||[]).length?`<div class="sec-h"><h3 style="font-size:14px">باقات بالرصيد</h3></div>${D.lines.map(lineCard).join('')}<div style="height:10px"></div>`:''}
-    ${list.length?`<div class="stats" style="margin-bottom:16px">
-      <div class="stat"><b>${fmt(mo)}</b><span>في الشهر</span></div>
-      <div class="stat"><b>${fmt(yr)}</b><span>في السنة</span></div>
-      <div class="stat"><b>${active.length}</b><span>اشتراك${list.filter(s=>s.cycle==='trial').length?' + '+list.filter(s=>s.cycle==='trial').length+' تجربة':''}</span></div>
-    </div>`:''}
 
     ${list.length?list.map(s=>{
       if(subStopped(s))return subStoppedCard(s);
@@ -6798,7 +6847,7 @@ function wIns(){
         </div>
         <div class="track" style="margin:13px 0 9px"><div class="fill" style="width:${allM?Math.min(1,paid/allM)*100:0}%;background:#5C86C4"></div></div>
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--muted)">
-          <span>دفعت <span class="n">${paid}</span> من <span class="n">${allM}</span> · فاضل <span class="n">${fmt(insLeft(i))}</span>${(!done&&i.mode!=='bank')?` · آخر قسط ${mLabel(mAdd(insNextMonth(i),Math.max(0,allM-paid-1)))}${insRest(i)>0?` بـ<span class="n">${fmt(insRest(i))}</span> جنيه`:''}`:''}</span>
+          <span>${isCardIns(i)?'نزل في الكشف':'دفعت'} <span class="n">${paid}</span> من <span class="n">${allM}</span> · فاضل <span class="n">${fmt(insLeft(i))}</span>${(!done&&i.mode!=='bank')?` · آخر قسط ${mLabel(mAdd(insNextMonth(i),Math.max(0,allM-paid-1)))}${insRest(i)>0?` بـ<span class="n">${fmt(insRest(i))}</span> جنيه`:''}`:''}</span>
           <span>${insWhen(i)}</span>
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:6px">${insSrcLabel(i)}${insAhead(i)>0?` · مدفوع مقدم <span class="n">${insAhead(i)}</span> شهر`:''}</div>
@@ -6891,14 +6940,14 @@ function maintHtml(v){
       <button class="chip sm${mCfgOpen?' on':''}" onclick="app.mCfgToggle()">كل كام كيلو</button></div>
     ${mCfgOpen?`<div class="mlog">
       <label class="f">زيت الموتور كل كام كيلو؟</label>
-      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.oil||''))}" onchange="app.mCfgSet('${v.id}','oil',numFix(this,0))">
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.oil||''))}" oninput="numFix(this,0)" onchange="app.mCfgSet('${v.id}','oil',numFix(this,0))">
       <label class="f">زيت الفتيس كل كام كيلو؟</label>
-      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.gear||''))}" onchange="app.mCfgSet('${v.id}','gear',numFix(this,0))">
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.gear||''))}" oninput="numFix(this,0)" onchange="app.mCfgSet('${v.id}','gear',numFix(this,0))">
       <label class="f">فلتر الهوا</label>
       ${pickRow('mfil',[{id:'oil',label:'مع الزيت: مرة تغيير ومرة تنضيف'},{id:'km',label:'كل كام كيلو'}],c.filter,"((x)=>app.mCfgSet('"+v.id+"','filter',x))",1)}
-      ${c.filter==='km'?`<input class="f" style="margin-top:8px" type="text" inputmode="numeric" placeholder="كل كام كيلو" value="${esc(String(c.filterKm||''))}" onchange="app.mCfgSet('${v.id}','filterKm',numFix(this,0))">`:''}
+      ${c.filter==='km'?`<input class="f" style="margin-top:8px" type="text" inputmode="numeric" placeholder="كل كام كيلو" value="${esc(String(c.filterKm||''))}" oninput="numFix(this,0)" onchange="app.mCfgSet('${v.id}','filterKm',numFix(this,0))">`:''}
       <label class="f">فكّرني قبلها بكام كيلو؟</label>
-      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.warn||''))}" onchange="app.mCfgSet('${v.id}','warn',numFix(this,0))">
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(c.warn||''))}" oninput="numFix(this,0)" onchange="app.mCfgSet('${v.id}','warn',numFix(this,0))">
       <div class="hint">الجاي بيتحسب من آخر مرة مقرّبة لأقرب 100 كيلو.</div>
     </div>`:''}
     ${M.rows.map(row).join('')}
@@ -7442,11 +7491,11 @@ function vSettings(){
         `)])}
     ${(D.lines||[]).length?setCard('',[setSec('lines','باقات بالرصيد',plural(D.lines.length,'خط واحد','خطين','خطوط','خط'),()=>`
       <label class="f" style="margin-top:0">نسبة الشحن: بتدفع كام عشان ياخد 100 رصيد؟</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(String(Number(D.lineRate)||143))}" onchange="app.lineCfg('lineRate',numFix(this,1))">
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(Number(D.lineRate)||143))}" oninput="numFix(this,1)" onchange="app.lineCfg('lineRate',numFix(this,1))">
       <label class="f">قرّب الشحن لأقرب كام لفوق؟</label>
-      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineStep()))}" onchange="app.lineCfg('lineStep',numFix(this,0))">
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineStep()))}" oninput="numFix(this,0)" onchange="app.lineCfg('lineStep',numFix(this,0))">
       <label class="f">فكّرني قبل التجديد بكام يوم؟</label>
-      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineAhead()))}" onchange="app.lineCfg('lineAhead',numFix(this,0))">
+      <input class="f" type="text" inputmode="numeric" value="${esc(String(lineAhead()))}" oninput="numFix(this,0)" onchange="app.lineCfg('lineAhead',numFix(this,0))">
       <div class="hint">النسبة بتستخدم بس في التقدير — الرصيد الحقيقي بتكتبه وقت الشحن والتجديد.</div>`)]):''}
     ${setCard('',[setSec('cutlv','الحاجات اللي عايز أقللها',lvOn()?plural(Object.keys(D.cutCat||{}).filter(k=>lvById(D.cutCat[k])).length+Object.keys(D.cutItem||{}).filter(k=>lvById(D.cutItem[k])).length,'حاجة واحدة','حاجتين','حاجات','حاجة'):'',()=>`
       <p class="hint" style="margin-top:0">حط درجة على تصنيف كامل أو على صنف لوحده (درجة الصنف تكسب). في الرئيسية هتشوف صرفت كام وكام مرة الشهر ده، وبقالك قد إيه من غيرها، وفي ملخص الشهر قصاد متوسط آخر 3 شهور. تقدر كمان تحددها من السجل بدوسة على الصنف.</p>
@@ -7563,11 +7612,11 @@ function vSettings(){
             `),setSec('xfee','رسوم التحويل البنكي',fmt(xfeeCfg().rate)+'% · من '+fmt(xfeeCfg().min)+' لـ'+fmt(xfeeCfg().max),()=>`
       <p class="hint" style="margin-top:0">بتتملى لوحدها في خانة الرسوم لما تسلّف حد بتحويل من حساب بنك، وتقدر تغيّرها وقتها.</p>
       <label class="f">النسبة ٪</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().rate))}" onchange="app.xfeeSet('rate',numFix(this,1))">
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().rate))}" oninput="numFix(this,1)" onchange="app.xfeeSet('rate',numFix(this,1))">
       <label class="f">الحد الأدنى</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().min))}" onchange="app.xfeeSet('min',numFix(this,1))">
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().min))}" oninput="numFix(this,1)" onchange="app.xfeeSet('min',numFix(this,1))">
       <label class="f">الحد الأقصى</label>
-      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().max))}" onchange="app.xfeeSet('max',numFix(this,1))">
+      <input class="f" type="text" inputmode="decimal" value="${esc(String(xfeeCfg().max))}" oninput="numFix(this,1)" onchange="app.xfeeSet('max',numFix(this,1))">
             `),setSec('prices','الأسعار','دولار الكارت '+fmt(D.rate)+' · بنزين '+fmt(D.p92||0)+' و'+fmt(D.p95||0),()=>`
 
 <label class="f" style="margin-top:0">سعر دولار الكارت</label>
@@ -8845,10 +8894,11 @@ const app=new Proxy({
 
   /* --- إضافة --- */
   setFrom(v){draft.from=String(draft.from||'').trim()===v?'':v;render();},
-  setLoan(v){draft.loan=v==='loan';render();},
+  setLoan(v){draft.loan=v==='loan';draft.sale=v==='sale';render();},
   dset(k,v){
     draft[k]=v;
     setDisabled('entrysave',entryOk());
+    if(saleK()&&(k==='amount'||k==='saleGotAmt')){const h=document.getElementById('salehint');if(h)h.innerHTML=saleHintTxt();}
     /* المصروف: التصنيف من آخر مرة بنفس الملاحظة أو المكان (لو لسه مااخترتوش بنفسك) */
     if(draft.kind==='expense'&&!draft.catPicked&&(k==='note'||k==='place')){
       const g=catSuggest(draft.note,draft.place);
@@ -9036,12 +9086,16 @@ const app=new Proxy({
     if(nw!==sl.who)D.txns.forEach(t=>{if(t.saleOf===sl.id)t.from=nw;});
     sl.who=nw;sl.amount=Math.round((Number(onlyNum(saleEd.amount))||0)*100)/100;
     saleEd=null;save();render();app.toast('اتعدلت');},
-  saleGo(at){saleOpen=(saleOpen===at?'':at);saleD={what:'',who:'',amount:''};render();},
-  saleSet(k,v){saleD[k]=v;setDisabled('salesave',saleOk());},
-  saleWho(n){saleD.who=n;render();},
-  saleSave(){if(!saleOk())return;
-    D.sales.push({id:uid(),what:String(saleD.what).trim(),who:String(saleD.who).trim(),amount:Math.round((Number(onlyNum(saleD.amount))||0)*100)/100,date:today()});
-    saleOpen='';saleD={what:'',who:'',amount:''};save();render();app.toast('اتضافت البيعة');},
+  setSaleGot(v){draft.saleGot=v;render();},
+  /* البيعة مش عملية «إضافة» عادية: بتتسجل في البيعات، واللي استلمته دخل «بيع حاجات» مربوط بيها */
+  saleEntrySave(){if(!saleK()||ynLast||!saleEntryOk())return;
+    const r2=x=>Math.round(x*100)/100, what=String(draft.saleWhat).trim(), who=String(draft.from).trim();
+    const sl={id:uid(),what:what,who:who,amount:r2(Number(onlyNum(draft.amount))||0),date:draft.date||today()};
+    if(!D.sales)D.sales=[];D.sales.push(sl);
+    const got=draft.saleGot?r2(Number(onlyNum(draft.saleGotAmt))||0):0;
+    if(got>0.005)D.txns.unshift({id:uid(),book:'me',kind:'income',amount:got,account:draft.account,date:sl.date,icat:'sale',
+      from:who,note:'بيع — '+what,saleOf:sl.id});
+    sortTxns();save();draft=newDraft();render();window.scrollTo(0,0);app.toast('اتضافت البيعة');},
   confirmOwedGet(gid){
     const list=app.owedGroup(gid);
     if(!list.length||!owedAcct)return;
@@ -9105,7 +9159,7 @@ const app=new Proxy({
   },
   saveEntry(){
     /* لسه فيه سؤال ماتجاوبش أو نوع دخل مااتختارش */
-    if(ynLast||(draft.kind==='income'&&!draft.loan&&!draftIcat()))return;
+    if(saleK()||ynLast||(draft.kind==='income'&&!draft.loan&&!draftIcat()))return;
     if(fxOver()){app.toast('ده أكتر من اللي في الحساب');return;}
     const amt=Number(onlyNum(draft.amount))||0;
     if(draft.kind==='income'&&!draft.loan&&!draft.icatPicked){const g=draftIcat();draft.salary=g==='salary';draft.icat=g==='salary'?'':g;}
@@ -11248,6 +11302,12 @@ if(document.addEventListener)document.addEventListener('paste',e=>{
     }
   }
 });
+/* أي خانة أرقام في البرنامج: الأرقام العربي بتتحول إنجليزي وانت بتكتب (قبل ما الخانة نفسها تقرا القيمة) */
+const numInputFix=el=>{if(!el||el.tagName!=='INPUT'||!el.getAttribute)return;
+  const im=el.getAttribute('inputmode');if(im!=='decimal'&&im!=='numeric'&&im!=='tel')return;
+  const v=toEn(el.value).replace(/\u066B/g,'.');
+  if(v!==el.value){const p=el.selectionStart;el.value=v;try{if(p!=null)el.setSelectionRange(p,p);}catch(_){}}};
+if(document.addEventListener)document.addEventListener('input',e=>numInputFix(e.target),true);
 if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!document.hidden){ghMaybePull();runAuto();bgRender();fxFetch();}});
 runAuto();
 render();
