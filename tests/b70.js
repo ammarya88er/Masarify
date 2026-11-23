@@ -135,7 +135,7 @@ const ex=(id,amt,date,item,note,o)=>Object.assign({id:id,book:'office',kind:'exp
 }
 { // مراجعة: «كلها» + رسوم: الرسوم من حسابك
   const {run}=boot(seed());
-  run("app.setBook('office');app.go('add');app.oKind('expense');app.oMine(true);app.oMineAll('all');app.oMineFrom('cash');app.oSet('item','ورق');app.oCat('c1');app.oSet('amount','300');app.oHasFee(true);app.oSet('feeAmt','10');app.oToMe(false);app['oSave']();");
-  t('الرسوم اتخصمت من كاشك مش من كاش المكتب', run("D.txns.find(x=>x.cat==='fees').account")==='cash');
+  run("app.setBook('office');app.go('add');app.oKind('expense');app.oMine(true);app.oMineAll('all');app.oMineFrom('cib');app.oSet('item','ورق');app.oCat('c1');app.oSet('amount','300');app.oHasFee(true);app.oSet('feeAmt','10');app.oToMe(false);app['oSave']();");
+  t('الرسوم اتخصمت من حسابك اللي الفلوس طلعت منه (بنك)', run("D.txns.find(x=>x.cat==='fees').account")==='cib');
 }
 done();

@@ -27,25 +27,31 @@ t('الهيدر الصغير بيبدأ من نفس مكان الرئيسية', 
   const {run,V,B}=boot(S,NOW);
   const rec=(acc)=>run("app.go('scan');scan={stage:'review',items:[{name:'زيت',amount:300,cat:'grocery'}],merchant:'محل',date:today(),account:'"+acc+"',err:'',voucherId:'',voucherAmt:'',oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]};render();");
   rec('cash');
-  t('السؤالين ظاهرين ولازم يتجاوبوا', V().indexOf('فيه جزء من كاش العهدة؟')>-1&&V().indexOf('فيها عمولات ورسوم؟')>-1&&run("scanSaveOk()")===false);
-  run("app.scanSplit(false);app.scanYn('fromFloat',true);app.scanVal('floatAmt','100');app.scanYn('hasFee',true);");
-  t('الرسوم من غير رقم: الحفظ مقفول', run("scanSaveOk()")===false);
-  run("app.scanVal('feeAmt','5');");t('بعد الرقم: مفتوح', run("scanSaveOk()")===true);
+  t('من الكاش: سؤال العهدة ظاهر، والرسوم لأ (مش حساب بنك)', V().indexOf('فيه جزء من كاش العهدة؟')>-1&&V().indexOf('فيها عمولات ورسوم؟')<0&&run("scanSaveOk()")===false);
+  run("app.scanSplit(false);app.scanYn('fromFloat',true);app.scanVal('floatAmt','100');");
   const c0=B('me','cash');run("app['saveReceipt']();");
   const m=JSON.parse(run("JSON.stringify(D.txns.find(x=>x.items&&x.book==='me'))"));
-  t('العهدة: اتسجل عليك 100 والباقي من حسابك', run("D.floatLoans.some(l=>l.srcTxn==='"+m.id+"'&&l.amount===100)")&&B('me','cash')===c0-300+100-5);
-  t('الرسوم: مصروف «عمولات ورسوم»', run("D.txns.some(x=>x.cat==='fees'&&x.amount===5&&x.account==='cash')"));
+  t('العهدة: اتسجل عليك 100 والباقي من حسابك', run("D.floatLoans.some(l=>l.srcTxn==='"+m.id+"'&&l.amount===100)")&&B('me','cash')===c0-300+100);
+  { // من البنك: سؤال الرسوم
+    const X=boot(S,NOW);
+    X.run("app.go('scan');scan={stage:'review',items:[{name:'زيت',amount:300,cat:'grocery'}],merchant:'محل',date:today(),account:'cib',err:'',voucherId:'',voucherAmt:'',oitem:'',ocat:'',disc:'',split:false,people:[{name:'',amount:''}]};render();");
+    t('من البنك: سؤال الرسوم ظاهر', X.V().indexOf('فيها عمولات ورسوم؟')>-1);
+    X.run("app.scanSplit(false);app.scanYn('hasFee',true);");
+    t('الرسوم من غير رقم: الحفظ مقفول', X.run("scanSaveOk()")===false);
+    X.run("app.scanVal('feeAmt','5');app['saveReceipt']();");
+    t('الرسوم: مصروف «عمولات ورسوم» من البنك', X.run("D.txns.some(x=>x.cat==='fees'&&x.amount===5&&x.account==='cib')"));
+  }
   // تعديل من غير تغيير
   const pre=run("JSON.stringify(dCmp(JSON.stringify(D)))");
   run("app.go('log');app.toggleTxn('"+m.id+"');app.startTxnEdit({stopPropagation(){}},'"+m.id+"');app['saveReceipt']();");
-  t('تعديل الفاتورة من غير تغيير: الأرقام زي ما هي', B('me','cash')===c0-300+100-5&&run("D.floatLoans.length")===1);
+  t('تعديل الفاتورة من غير تغيير: الأرقام زي ما هي', B('me','cash')===c0-300+100&&run("D.floatLoans.length")===1);
   // فاتورة قديمة من غير السؤالين: «لأ» لوحدها
   const O=boot(seed({txns:[{id:'r',book:'me',kind:'expense',amount:90,cat:'grocery',account:'cash',date:'2026-11-10',merchant:'م',note:'م',items:[{name:'أ',amount:90,cat:'grocery'}]}]}),NOW);
   O.run("app.go('log');app.toggleTxn('r');app.startTxnEdit({stopPropagation(){}},'r');");
   t('فاتورة قديمة: السؤالين متجاوبين «لأ»', O.run("tab")!=='scan'||(O.run("scan.hasFee")===false&&O.run("scan.fromFloat")===false));
   // فاتورة المكتب: الرسوم عليك وتتحسب في رسوم المكتب
   const {run:r2}=boot(seed(),NOW);
-  r2("app.setBook('office');app.go('scan');scan={stage:'review',items:[{name:'ورق',amount:50,cat:'other'}],merchant:'مكتبة',date:today(),account:'ocash',err:'',voucherId:'',voucherAmt:'',item:'ورق',ocat:'c1',disc:'',split:false,people:[{name:'',amount:''}]};render();");
+  r2("app.setBook('office');app.go('scan');scan={stage:'review',items:[{name:'ورق',amount:50,cat:'other'}],merchant:'مكتبة',date:today(),account:'cib',err:'',voucherId:'',voucherAmt:'',item:'ورق',ocat:'c1',disc:'',split:false,people:[{name:'',amount:''}]};render();");
   r2("app.scanYn('hasFee',true);app.scanVal('feeAmt','3');app['saveReceipt']();");
   t('فاتورة المكتب: الرسوم في «رسوم المكتب»', r2("D.ofees.some(f=>f.amount===3)")&&r2("D.txns.some(x=>x.cat==='fees'&&x.amount===3&&x.book==='me')"));
 }

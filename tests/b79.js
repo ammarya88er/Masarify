@@ -25,7 +25,7 @@ const J=(run,x)=>JSON.parse(run("JSON.stringify("+x+")"));
 }
 { // ٣ مسح سطر من عملية: الزرار والتراجع باسم العملية
   const {run,V}=boot(seed(),NOW);
-  run("app.go('add');draft.kind='expense';draft.account='cash';draft.cat='eatout';draft.note='غدا';draft.hasFee=true;draft.feeAmt='5';draft.amount='300';app.saveEntry();");
+  run("app.go('add');draft.kind='expense';draft.account='cib';draft.cat='eatout';draft.note='غدا';draft.hasFee=true;draft.feeAmt='5';draft.amount='300';app.saveEntry();");
   const f=run("D.txns.find(x=>x.cat==='fees').id");
   run("app.go('log');openTxn='"+f+"';render();");
   t('زرار المسح بيقول العملية كلها', V().indexOf('امسح العملية كلها')>-1);
