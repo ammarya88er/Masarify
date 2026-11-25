@@ -90,7 +90,7 @@ const E='({stopPropagation(){}})';
   let txt='';run("navigator.share=async o=>{globalThis.__sh=o.text;};");
   run("app.shareVch(D.vouchers[0].id)");txt=run("globalThis.__sh||''");
   t('المشاركة ببياناته مش بياناتك', txt.indexOf('01222222222')>-1&&txt.indexOf('222222')>-1&&txt.indexOf('01000000000')<0);
-  t('بيظهر في اختيار الفاوتشر في الفاتورة باسمه', /أحمد/.test(run("vchPicker('',500,'app.x')")));
+  t('بيظهر في اختيار الفاوتشر في الفاتورة باسمه', /أحمد/.test(run("vchPicker(500)")));
   run("app.go('wallet');wtab='vouchers';render();");
   t('مكتوب في القايمة بتاع مين', V().indexOf('بتاع <bdi>أحمد</bdi>')>-1);
   run("showVch=true;vchDraft={code:'5555',amount:'50',expiry:'2026-12-31'};app.vchWho('me');app.addVch();");

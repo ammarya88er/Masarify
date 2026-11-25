@@ -44,7 +44,7 @@ const cnt=run=>run("D.txns.filter(t=>t.note==='شهادة 4 — عائد').lengt
   t('تاريخ العائد اللي فات: مايتسجلش', cnt(run)===0);
 }
 { // بعيد عن ميعاده: الزرار مش باين
-  const {run,V}=boot(seed({certs:[cert()],_certp1:1}),Date.UTC(2026,9,1,9,0,0));
+  const {run,V}=boot(seed({certs:[cert()],_certp1:1}),Date.UTC(2026,8,30,9,0,0));
   run("app.go('wallet');app.setWtab('certs');");
   t('قبل الميعاد بأكتر من أسبوع: مفيش «نزل؟»', V().indexOf("app.certPayOpen('c4')")<0);
 }

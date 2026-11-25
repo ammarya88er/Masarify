@@ -22,12 +22,12 @@ const mk=()=>{const {run,V,B}=boot(seed({txns:[sal]}),NOW);
   t('مايتحفظش من غير حساب', run("lineOk()")===false);
   run("app.lineAcct('cash');app.lineCharge('"+id+"');");
   t('اتسجل مصروف فواتير من الحساب', B('me','cash')===c0-720&&run("D.txns.some(x=>x.line==='"+id+"'&&x.cat==='bills'&&x.amount===720)"));
-  t('الرصيد بالتقدير لو سيبتها فاضية', Math.abs(run("lineBal(D.lines[0])")-(19.15+720/1.43))<0.01);
+  t('الرصيد بالتقدير لو سيبتها فاضية', Math.abs(run("lineBal(D.lines[0])")-(19.15+720*0.7))<0.01);
   run("app.lineOpen('"+id+"','charge');app.lineSet('paid','50');app.lineAcct('cib');app.lineSet('bal','560');app.lineCharge('"+id+"');");
   t('كتبت رصيدك بقى كام: بياخده هو', run("lineBal(D.lines[0])")===560);
   t('الكارت: الرصيد مكفّي', (run("render()"),V().indexOf('الرصيد مكفّي التجديد')>-1));
   const tx=run("D.txns.find(x=>x.amount===50).id");run("app.delTxn({stopPropagation(){}},'"+tx+"');");
-  t('مسح الشحنة: الرصيد يرجع للي قبلها', Math.abs(run("lineBal(D.lines[0])")-(19.15+720/1.43))<0.01);
+  t('مسح الشحنة: الرصيد يرجع للي قبلها', Math.abs(run("lineBal(D.lines[0])")-(19.15+720*0.7))<0.01);
   run("app.undoLast();");t('والتراجع بيرجّعها', run("lineBal(D.lines[0])")===560);
 }
 { // التجديد وظبط الرصيد
@@ -50,8 +50,8 @@ const mk=()=>{const {run,V,B}=boot(seed({txns:[sal]}),NOW);
   t('بعد المرتب: تنبيه واحد للخطين', (V().match(/>اشحن رصيد</g)||[]).length===1&&V().indexOf('النت تقريبًا <span class="n">720</span>')>-1&&V().indexOf('التليفون تقريبًا <span class="n">150</span>')>-1);
   const c=JSON.parse(run("JSON.stringify(spendCalc())"));
   t('«تقدر تصرف»: الاتنين في الرقم الأولاني', c.X.some(i=>/النت/.test(i.label)&&i.amt===720)&&c.X.some(i=>/التليفون/.test(i.label)&&i.amt===150));
-  run("app.lineSnooze('n,p');render();");t('«فكّرني قبلها»: راح', V().indexOf('>اشحن رصيد<')<0);
-  const r=boot(S,Date.UTC(2026,10,11,9));r.run("app.lineSnooze('n,p');app.go('home');alertsOpen=true;render();");
+  t('مفيش «فكّرني قبلها»', V().indexOf('فكّرني قبلها')<0);
+  const r=boot(S,Date.UTC(2026,10,11,9));r.run("app.go('home');alertsOpen=true;render();");
   t('قبل الميعاد بـ3 أيام: بيرجع لوحده', r.V().indexOf('النت بيتجدد')>-1&&r.V().indexOf('خلصت بدري')>-1);
   const d=boot(S,Date.UTC(2026,10,13,9));d.run("app.go('home');alertsOpen=true;render();");
   t('يوم الميعاد: «اتجددت؟»', d.V().indexOf('باقة النت اتجددت؟')>-1);

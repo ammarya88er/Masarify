@@ -67,7 +67,7 @@ const vS=()=>seed({monthMode:'',txns:[{id:'s',book:'me',kind:'income',amount:500
   const {run,V}=boot(S,day(11,20));run("app.setWtab('subs');app.go('wallet');");const v=V();
   const st=v.indexOf('<span>في الشهر</span>'), ln=v.indexOf('باقات بالرصيد'), add=v.indexOf('ضيف اشتراك');
   t('الكارت فوق خالص: قبل الباقات وقبل «ضيف اشتراك»', st>-1&&st<ln&&st<add, [st,ln,add].join());
-  const yr=Math.round((1200+100*1.43*365/28+500*1.43*365/30)*100)/100;
+  const yr=Math.round((1200+100*100/70*365/28+500*100/70*365/30)*100)/100;
   t('في السنة = الاشتراك + الباقات بتمنها التقريبي', v.indexOf('<b>'+run("fmt("+yr+")")+'</b><span>في السنة</span>')>-1, run("fmt("+yr+")"));
   t('في الشهر = السنة ÷ 12 للباقات', v.indexOf('<b>'+run("fmt(Math.round((100+"+(yr-1200)+"/12)*100)/100)")+'</b><span>في الشهر</span>')>-1);
   t('العدد: اشتراك + باقتين = 3', v.indexOf('<b>3</b><span>اشتراك وباقة</span>')>-1);

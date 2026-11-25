@@ -73,7 +73,7 @@ const ids=s=>JSON.parse(s).txns.map(x=>x.id).sort().join(',');
     t('الاسم اللي اخترته فضل', r.run("D.cats.find(c=>c.id==='transport').label")==='مواصلات وبنزين');
     const old=seed();delete old.cats;
     const r2=boot(old,NOW);
-    t('بيانات من غير تصنيفات: بتتعمل عادي', r2.run("D.cats.some(c=>c.id==='installment')")===true);
+    t('بيانات من غير تصنيفات: بتتعمل عادي (ومن غير «قسط»)', r2.run("D.cats.some(c=>c.id==='devices')")===true&&r2.run("D.cats.some(c=>c.id==='installment')")===false);
   }
   { // ٧ عملية متربطة: جهاز مسحها والتاني عدّل جزء منها — بترجع كاملة
     const {run}=boot(seed(),NOW);

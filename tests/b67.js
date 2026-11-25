@@ -42,7 +42,7 @@ const {boot,seed,t,done}=require('./harness');
   const c={id:'c1',name:'شهادة 1',amount:10000,monthly:162.5,start:'2026-08-10',account:'cib',bank:'cib',end:'2029-08-12',covered:'2026-09',payments:[]};
   const {run,V}=boot(seed({certs:[c]}));
   run("app.go('wallet');app.setWtab('certs');");
-  t('«العائد الجاي» سطر لوحده', V().indexOf('<span style="display:block">العائد الجاي 10 أكتوبر 2026</span>')>-1, (V().match(/.{80}العائد الجاي.{40}/)||[''])[0]);
+  t('«العائد الجاي» سطر لوحده', V().indexOf('<span style="display:block">العائد الجاي 8 أكتوبر 2026</span>')>-1, (V().match(/.{80}العائد الجاي.{40}/)||[''])[0]);
   t('العائد بالكسرين', V().indexOf('162.50')>-1);
   run("app.startCertEdit('c1');");const v=V();
   t('التعديل: الحساب ← المبلغ ← العائد', v.indexOf('تابعة لأنهي حساب؟')<v.indexOf('id="camt"')&&v.indexOf('id="camt"')<v.indexOf('id="cmo"'));
